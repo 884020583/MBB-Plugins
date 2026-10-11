@@ -1665,8 +1665,9 @@ public class RoleplayService {
         String recentReplies = recentRoleReplyText(groupID);
         String otherRoleReplies = recentOtherRoleReplyText(groupID);
         List<String> actionIds = decision == null ? skillRegistry.actionIds(config) : decision.actions;
-        //稳定资料与固定规则全部前置，且逐字节不变，服务端前缀缓存才能命中
+        //缓存前缀块按稳定性从高到低排列：静态资料与固定规则 -> 短期记忆 -> 输出格式总则
         String stable = assembleStableMaterials()+stableRulesText();
+        String cachedTail = shortMemoryPromptText(groupID)+outputFormatLead(batchCount);
         String dynamicMaterials = assembleDynamicMaterials(groupID,userID,messageText,
                 recentReplies,otherRoleReplies,speechPrompt,decision,
                 Math.max(2000,config.promptTotalChars - stable.length()));
@@ -1678,6 +1679,7 @@ public class RoleplayService {
         skillContext.state = state(groupID);
         String skillPrompt = skillRegistry.promptFragments(config,actionIds,skillContext);
         return stable
+                +cachedTail
                 +dynamicInstructionText(otherRoleBot,relationship,messageText,actionIds,batchCount)
                 +(skillPrompt.isEmpty() ? "" : "可用技能：\n"+skillPrompt)
                 +"当前时间："+currentTimeText()+"\n"
@@ -1685,7 +1687,7 @@ public class RoleplayService {
                 +emotionService.promptText(groupID,userID,otherRoleBot)
                 +(actionIds.contains("reminder") ? reminderPromptText(groupID,userID,messageText) : "")
                 +dynamicMaterials
-                +outputFormatText(decision,batchCount);
+                +outputFormatTail(decision,batchCount);
     }
 
     /**
@@ -1838,9 +1840,7 @@ public class RoleplayService {
         materials.add(new RoleplayMaterial("memory.global",true,85,4200,
                 () -> "全局永久记忆：\n"+globalMemoryService.promptText(memoryQuery,userID,
                         config.globalMemoryRelevanceMaxChars)));
-        materials.add(new RoleplayMaterial("memory.short",true,80,1500,
-                () -> "短期记忆（只是背景；除非当前话题明确相关，否则不要主动提角色正在进行的项目）：\n"
-                        +shortSummary(groupID)));
+
         materials.add(new RoleplayMaterial("context.recent",true,75,2500,
                 () -> "你最近说过的话（这些已经说过了，不要重复内容，也不要换个说法再说一遍）：\n"
                         +recentReplies));
@@ -1864,9 +1864,21 @@ public class RoleplayService {
     }
 
     /**
-     * 输出格式与动作约束。随 batchCount 和本轮开放的动作变化，放在提示词最后。
+     * 短期记忆文本。
+     *
+     * 它每 memoryUpdateMessages 条消息才整段重写一次，属于低频变更内容，
+     * 因此放在动态指令之前进入服务端的缓存前缀。
      */
-    private String outputFormatText(RoleplayRouteDecision decision,int batchCount) {
+    private String shortMemoryPromptText(long groupID) {
+        return "短期记忆（只是背景；除非当前话题明确相关，否则不要主动提角色正在进行的项目）：\n"
+                +shortSummary(groupID);
+    }
+
+    /**
+     * 输出格式的前半段：JSON 纪律与本回合的 schema，只随 batchCount 变化，
+     * 放在缓存前缀里。引用要求和可用动作随本轮变化，留给 outputFormatTail。
+     */
+    private String outputFormatLead(int batchCount) {
         return "输出格式：只输出一个 JSON 对象，不要加代码块或额外说明，格式为 "
                 +(batchCount > 1
                 ? "{\"segments\":[{\"text\":\"你要说的话\",\"to\":1,\"quote\":true,\"actions\":[]}]}。"
@@ -1874,10 +1886,17 @@ public class RoleplayService {
                 +"整批都不想回时只输出 <SKIP>。"
                 : "{\"text\":\"你要说的话\",\"actions\":[],\"quote\":false}。"
                 +"例如戳回去时输出：{\"text\":\"戳回去\",\"actions\":[{\"type\":\"poke-back\"}],\"quote\":false}。"
-                +"text 里放聊天正文，如果这条消息不该回复，text 写 <SKIP>。")
-                +(batchCount > 1 ? "" : (decision != null && decision.quoteRequired
+                +"text 里放聊天正文，如果这条消息不该回复，text 写 <SKIP>。");
+    }
+
+    /**
+     * 输出格式的后半段：引用要求与可用动作，随本轮变化，留在提示词末尾。
+     */
+    private String outputFormatTail(RoleplayRouteDecision decision,int batchCount) {
+        if (batchCount > 1) return actionPrompt(decision);
+        return (decision != null && decision.quoteRequired
                 ? "这条消息正在直接回复或艾特你，quote 必须为 true。"
-                : "如果引用当前这条消息会让对话更自然，可以把 quote 设为 true，否则保持 false。"))
+                : "如果引用当前这条消息会让对话更自然，可以把 quote 设为 true，否则保持 false。")
                 +actionPrompt(decision);
     }
 
