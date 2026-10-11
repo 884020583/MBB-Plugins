@@ -20,7 +20,7 @@ public class AntiSpamListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR,ignoreCancelled = false)
     public void onGroupMessage(GroupMessageEvent event) {
         if (!plugin.getAntiSpamConfig().enable) return;
-        //统计与处置都不在事件线程里做，避免阻塞事件分发
-        plugin.getServer().getPluginManager().runTask(plugin,() -> spamService.handle(event));
+        //统计与处置交给插件自己的工作线程，避免进入主程序任务登记表后长期不回收
+        spamService.submit(event);
     }
 }

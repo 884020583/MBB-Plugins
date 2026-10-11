@@ -44,10 +44,7 @@ public final class AntiSpamMessage {
                 //@全体成员 在 OneBot 里是 qq=all，直接取 long 会抛异常，必须先看原始值
                 Object raw = data == null ? null : data.get("qq");
                 String qqText = raw == null ? "" : String.valueOf(raw).trim();
-                long qq = parseLong(qqText);
-                if ("all".equalsIgnoreCase(qqText) || qq == 0L) {
-                    content.mentionAll = true;
-                }
+                if ("all".equalsIgnoreCase(qqText)) content.mentionAll = true;
                 content.mentionCount++;
                 continue;
             }
@@ -112,12 +109,4 @@ public final class AntiSpamMessage {
         return builder.substring(0,limit);
     }
 
-    private static long parseLong(String value) {
-        if (value == null || value.isEmpty()) return 0L;
-        try {
-            return Long.parseLong(value);
-        } catch (Exception e) {
-            return 0L;
-        }
-    }
 }

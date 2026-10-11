@@ -101,7 +101,7 @@ public class AntiSpamCommand extends BotCommand {
             }
             int page = args.length > 2 ? parsePage(args[2]) : 1;
             int limit = 10;
-            JSONArray events = spamService.recentEvents(groupID,limit);
+            JSONArray events = spamService.recentEvents(groupID,page,limit);
             if (events.isEmpty()) {
                 sender.sendMessage("当前群还没有刷屏记录。");
                 return true;

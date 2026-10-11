@@ -29,6 +29,10 @@ public class AntiSpamPlugin extends Plugin {
 
     @Override
     public void onDisable() {
+        if (spamService != null) {
+            spamService.shutdown();
+            spamService = null;
+        }
         getLogger().sendInfo("MBB-AntiSpam 已停用！");
     }
 

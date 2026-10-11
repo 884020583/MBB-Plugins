@@ -12,7 +12,12 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.ThreadPoolExecutor;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -25,6 +30,7 @@ public class AntiSpamService {
     private static final String EVENT_TABLE = "plugin_mbb_antispam_event";
     private static final String GROUP_TABLE = "plugin_mbb_antispam_group";
     private static final long CLEANUP_INTERVAL_MILLIS = 60 * 1000L;
+    private static final int WORK_QUEUE_CAPACITY = 10000;
 
     /** 一个群成员的全部窗口数据 */
     private static class UserWindow {
@@ -43,10 +49,13 @@ public class AntiSpamService {
         private int violationCount = 0;
         /** 本次是否发出了集体刷屏的整群提醒 */
         private boolean warnCollective = false;
+        /** 是否命中 forgiveFirst 的首次豁免，需要发提醒但不进入处置阶梯 */
+        private boolean forgivenFirst = false;
     }
 
     private final Plugin plugin;
     private volatile AntiSpamConfig config;
+    private final ExecutorService worker;
     private final Map<String,UserWindow> windows = new ConcurrentHashMap<>();
     /** 内容指纹 -> 发过这句话的不同用户，用来区分个人复读和多人玩梗 */
     private final Map<String,Set<Long>> fingerprintUsers = new ConcurrentHashMap<>();
@@ -67,6 +76,13 @@ public class AntiSpamService {
     public AntiSpamService(Plugin plugin,AntiSpamConfig config) {
         this.plugin = plugin;
         this.config = config;
+        this.worker = new ThreadPoolExecutor(1,1,0L,TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<Runnable>(WORK_QUEUE_CAPACITY),
+                runnable -> {
+                    Thread thread = new Thread(runnable,"MBB-AntiSpam-Worker");
+                    thread.setDaemon(true);
+                    return thread;
+                },new ThreadPoolExecutor.AbortPolicy());
     }
 
     public void init() {
@@ -100,6 +116,26 @@ public class AntiSpamService {
 
     public AntiSpamConfig config() {
         return config;
+    }
+
+    /**
+     * 提交一条消息到插件自己的工作线程
+     */
+    public void submit(GroupMessageEvent event) {
+        if (event == null) return;
+        try {
+            worker.execute(() -> handle(event));
+        } catch (RejectedExecutionException e) {
+            plugin.getLogger().sendWarn("[刷屏] 处理队列已满，已跳过群"+event.getGroupID()
+                    +" 用户"+event.getUserID()+" 的消息");
+        }
+    }
+
+    /**
+     * 停用插件时释放工作线程
+     */
+    public void shutdown() {
+        worker.shutdownNow();
     }
 
     /**
@@ -162,13 +198,14 @@ public class AntiSpamService {
         //同一条消息可能被重复投递，按消息 ID 去重，避免重复处置
         long messageID = event.getMessageID();
         if (messageID > 0 && handledMessages.putIfAbsent(messageID,now) != null) return;
+        String action = current.defaultAction == null ? "log" : current.defaultAction.trim().toLowerCase();
+        if ("ignore".equals(action)) return;
         //个人刷屏时在说明里写上发言人，便于管理员核对
         if ("personal".equals(result.scope) && result.detail != null && !result.detail.isEmpty()) {
             result.detail = result.detail + "，发言人 "+userID;
         }
 
         List<String> actions = new ArrayList<>();
-        String action = current.defaultAction == null ? "log" : current.defaultAction.trim().toLowerCase();
         //只记录不升级的命中（纯图片表情、参与人数适中的玩梗、首次违规）：不入处置阶梯
         boolean forgiven = result.forgive || handled.violationCount <= 0;
         if (!forgiven && current.deleteAfterViolations > 0
@@ -198,6 +235,7 @@ public class AntiSpamService {
             alert(groupID,userID,result,handled.violationCount);
         }
         if (!forgiven) notice(groupID,userID,result);
+        else if (handled.forgivenFirst) notice(groupID,userID,result);
         purgeOldEvents(now);
     }
 
@@ -351,6 +389,7 @@ public class AntiSpamService {
         window.lastCountedViolation = now;
         if (current.forgiveFirst && !collective && window.violationTimes.isEmpty()) {
             window.violationTimes.add(now);
+            handled.forgivenFirst = true;
             return handled;
         }
         window.violationTimes.add(now);
@@ -403,7 +442,7 @@ public class AntiSpamService {
         if (event.getMessageID() <= 0) return false;
         try {
             JSONObject response = plugin.getServer().getOneBotClient().deleteMessage(event.getMessageID());
-            return response == null || response.getIntValue("retcode") == 0;
+            return response != null && response.getIntValue("retcode") == 0;
         } catch (Exception e) {
             plugin.getLogger().sendException(e);
             return false;
@@ -414,7 +453,7 @@ public class AntiSpamService {
         try {
             JSONObject response = plugin.getServer().getOneBotClient()
                     .setGroupBan(groupID,userID,durationSecond);
-            return response == null || response.getIntValue("retcode") == 0;
+            return response != null && response.getIntValue("retcode") == 0;
         } catch (Exception e) {
             plugin.getLogger().sendException(e);
             return false;
@@ -522,8 +561,13 @@ public class AntiSpamService {
             Map.Entry<String,Set<Long>> entry = userIterator.next();
             List<Long> timeline = groupFingerprints.get(entry.getKey());
             boolean empty = entry.getValue().isEmpty();
-            boolean stale = timeline == null || timeline.isEmpty()
-                    || timeline.get(timeline.size() - 1) < fingerprintFrom;
+            boolean stale = timeline == null;
+            if (timeline != null) {
+                synchronized (timeline) {
+                    stale = timeline.isEmpty()
+                            || timeline.get(timeline.size() - 1) < fingerprintFrom;
+                }
+            }
             if (empty || stale) {
                 userIterator.remove();
                 if (stale) groupFingerprints.remove(entry.getKey());
@@ -594,12 +638,22 @@ public class AntiSpamService {
     }
 
     public JSONArray recentEvents(long groupID,int limit) {
+        return recentEvents(groupID,1,limit);
+    }
+
+    /**
+     * 按页码读取当前群的刷屏记录
+     */
+    public JSONArray recentEvents(long groupID,int page,int limit) {
         JSONArray result = new JSONArray();
         if (groupID <= 0) return result;
         if (limit < 1) limit = 1;
         if (limit > 50) limit = 50;
+        if (page < 1) page = 1;
+        long offset = (long)(page - 1) * limit;
         List<JSONObject> rows = storage().query("SELECT * FROM `"+EVENT_TABLE
-                +"` WHERE `groupID`=? ORDER BY `eventTime` DESC,`ID` DESC LIMIT "+limit,groupID);
+                +"` WHERE `groupID`=? ORDER BY `eventTime` DESC,`ID` DESC LIMIT "
+                +limit+" OFFSET "+offset,groupID);
         if (rows == null) return result;
         for (JSONObject row : rows) {
             JSONObject item = new JSONObject(true);

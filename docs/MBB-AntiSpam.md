@@ -143,6 +143,8 @@ banDurationMinute: 5
 banDurationSecond: 300
 ```
 
+`defaultAction` 默认是 `log`，表示记录事件、输出控制台日志并按撤回和禁言阈值处置。改成 `ignore` 后，命中会参与内存窗口统计，但不写日志、不写事件表、不提醒，也不执行撤回或禁言。
+
 其他键见插件资源内的 `config.yml` 注释。
 
 ## 数据

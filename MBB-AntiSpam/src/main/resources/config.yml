@@ -3,7 +3,7 @@
 enable: true
 #新群的默认开关；每个群的开关也可以由 /antispam on|off 单独保存
 defaultGroupEnable: true
-#命中规则后的动作：log 记录并输出控制台日志；ignore 静默处理（这条命中不写日志也不写事件表）
+#命中规则后的动作：log 记录、输出日志并按阈值处置；ignore 静默忽略，不写日志、不写事件表、不提醒也不处置
 defaultAction: "log"
 #是否把命中的刷屏告警私信发给机器人管理员
 alertAdminPrivate: true

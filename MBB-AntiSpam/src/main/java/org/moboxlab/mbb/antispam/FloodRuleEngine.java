@@ -256,13 +256,15 @@ public final class FloodRuleEngine {
     public static int countIn(int windowSecond,List<Long> times,long now) {
         if (times == null || times.isEmpty() || windowSecond <= 0) return 0;
         long from = now - windowSecond * 1000L;
-        int low = 0;
-        int high = times.size();
-        while (low < high) {
-            int mid = (low + high) >>> 1;
-            if (times.get(mid) < from) low = mid + 1;
-            else high = mid;
+        synchronized (times) {
+            int low = 0;
+            int high = times.size();
+            while (low < high) {
+                int mid = (low + high) >>> 1;
+                if (times.get(mid) < from) low = mid + 1;
+                else high = mid;
+            }
+            return times.size() - low;
         }
-        return times.size() - low;
     }
 }
