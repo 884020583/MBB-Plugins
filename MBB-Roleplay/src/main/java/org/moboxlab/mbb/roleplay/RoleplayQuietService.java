@@ -5,7 +5,11 @@ import com.alibaba.fastjson.JSONObject;
 import org.moboxlab.moboxbot.API.Plugin;
 import org.moboxlab.moboxbot.API.Storage.StorageService;
 
+import java.util.Collections;
 import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 免打扰名单
@@ -19,9 +23,13 @@ public class RoleplayQuietService {
     private static final String ENABLE_KEY = "roleplay-quiet-enable";
 
     private final Plugin plugin;
+    private volatile RoleplayConfig config;
+    private final Map<Long,Boolean> enabledCache = new ConcurrentHashMap<>();
+    private final Map<Long,Set<Long>> userCache = new ConcurrentHashMap<>();
 
-    public RoleplayQuietService(Plugin plugin) {
+    public RoleplayQuietService(Plugin plugin,RoleplayConfig config) {
         this.plugin = plugin;
+        this.config = config;
     }
 
     public void init() {
@@ -35,6 +43,14 @@ public class RoleplayQuietService {
                 + ")");
         storage().update("CREATE UNIQUE INDEX IF NOT EXISTS `idx_plugin_mbb_roleplay_quiet_key` "
                 + "ON `"+TABLE+"` (`groupID`,`userID`)");
+        enabledCache.clear();
+        userCache.clear();
+    }
+
+    public void reload(RoleplayConfig config) {
+        this.config = config;
+        //群默认开关可能变化，清理缓存后会按新配置重新取值
+        enabledCache.clear();
     }
 
     /**
@@ -42,14 +58,19 @@ public class RoleplayQuietService {
      */
     public boolean isEnabled(long groupID) {
         if (groupID <= 0) return false;
+        Boolean cached = enabledCache.get(groupID);
+        if (cached != null) return cached;
         String value = storage().get(plugin,ENABLE_KEY+"."+groupID);
-        if (value == null || value.trim().isEmpty()) return defaultEnabled();
-        return "true".equalsIgnoreCase(value.trim());
+        boolean enabled = value == null || value.trim().isEmpty()
+                ? defaultEnabled() : "true".equalsIgnoreCase(value.trim());
+        enabledCache.put(groupID,enabled);
+        return enabled;
     }
 
     public boolean setEnabled(long groupID,boolean enabled) {
         if (groupID <= 0) return false;
         storage().set(plugin,ENABLE_KEY+"."+groupID,enabled ? "true" : "false");
+        enabledCache.put(groupID,enabled);
         return true;
     }
 
@@ -58,9 +79,7 @@ public class RoleplayQuietService {
      */
     public boolean contains(long groupID,long userID) {
         if (groupID <= 0 || userID <= 0) return false;
-        JSONObject row = storage().queryOne("SELECT `ID` FROM `"+TABLE
-                +"` WHERE `groupID`=? AND `userID`=?",groupID,userID);
-        return row != null && row.getLongValue("ID") > 0;
+        return users(groupID).contains(userID);
     }
 
     /**
@@ -76,10 +95,12 @@ public class RoleplayQuietService {
     public boolean add(long groupID,long userID,long operatorID) {
         if (groupID <= 0 || userID <= 0) return false;
         long now = System.currentTimeMillis();
-        storage().insert("INSERT OR REPLACE INTO `"+TABLE+"` "
+        long id = storage().insert("INSERT OR REPLACE INTO `"+TABLE+"` "
                         + "(`groupID`,`userID`,`operatorID`,`createTime`,`updateTime`) "
                         + "VALUES (?,?,?,?,?)",
                 groupID,userID,operatorID,now,now);
+        if (id <= 0) return false;
+        users(groupID).add(userID);
         plugin.getLogger().sendInfo("[免打扰] 群"+groupID+" 用户"+userID+" 已加入名单"
                 +"（操作者 "+operatorID+"）");
         return true;
@@ -89,12 +110,15 @@ public class RoleplayQuietService {
         if (groupID <= 0 || userID <= 0) return false;
         int changed = storage().update("DELETE FROM `"+TABLE
                 +"` WHERE `groupID`=? AND `userID`=?",groupID,userID);
+        Set<Long> users = userCache.get(groupID);
+        if (users != null) users.remove(userID);
         return changed > 0;
     }
 
     public void clear(long groupID) {
         if (groupID <= 0) return;
         storage().update("DELETE FROM `"+TABLE+"` WHERE `groupID`=?",groupID);
+        userCache.remove(groupID);
     }
 
     public JSONArray list(long groupID) {
@@ -122,7 +146,27 @@ public class RoleplayQuietService {
     }
 
     private boolean defaultEnabled() {
-        return plugin.getConfig().getBoolean("quietReplyEnable",true);
+        RoleplayConfig current = config;
+        return current == null || current.quietReplyEnable;
+    }
+
+    /**
+     * 按群懒加载免打扰用户集合，避免每条消息都查库
+     */
+    private Set<Long> users(long groupID) {
+        Set<Long> cached = userCache.get(groupID);
+        if (cached != null) return cached;
+        Set<Long> loaded = Collections.newSetFromMap(new ConcurrentHashMap<Long,Boolean>());
+        List<JSONObject> rows = storage().query("SELECT `userID` FROM `"+TABLE
+                +"` WHERE `groupID`=?",groupID);
+        if (rows != null) {
+            for (JSONObject row : rows) {
+                long userID = row.getLongValue("userID");
+                if (userID > 0) loaded.add(userID);
+            }
+        }
+        Set<Long> previous = userCache.putIfAbsent(groupID,loaded);
+        return previous == null ? loaded : previous;
     }
 
     private StorageService storage() {

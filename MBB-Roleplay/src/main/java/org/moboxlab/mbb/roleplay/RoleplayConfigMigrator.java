@@ -15,7 +15,7 @@ import java.util.List;
  * Roleplay 配置迁移与缺失项补全
  */
 public class RoleplayConfigMigrator {
-    private static final String CURRENT_VERSION = "30";
+    private static final String CURRENT_VERSION = "31";
 
     private static class ConfigEntry {
         private final String key;
@@ -183,6 +183,7 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("repeatCommonRunMinChars","8","与最近回复的最长公共片段达到多少字时判为复读，抓同一组信息换尾巴的情况"),
             new ConfigEntry("commandPrefixes","/,!,＃,#","忽略以这些前缀开头的指令消息，英文逗号分隔"),
             new ConfigEntry("personaFile","persona-aris.json","角色设定文件；内置示例可用 /role persona 查看"),
+            new ConfigEntry("quietReplyEnable","true","是否启用免打扰名单：名单内群员只在主动叫到角色时才回复"),
             new ConfigEntry("minMessageLength","2","忽略少于多少字的纯文本消息"));
 
     public static int ensure(Plugin plugin) {
@@ -260,7 +261,7 @@ public class RoleplayConfigMigrator {
                 plugin.getLogger().sendWarn("自动补全 Roleplay 配置失败，请检查 config.yml 权限！");
             }
         }
-        if (version < 30) {
+        if (version < 31) {
             config.set("configVersion",CURRENT_VERSION);
             if (!versionMissing) changed++;
         }
@@ -369,7 +370,7 @@ public class RoleplayConfigMigrator {
             config.set("replySegmentMaxChars","30");
             changed++;
         }
-        if (version < 30 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
+        if (version < 31 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
                 || legacyRouterMaxTokens || legacyRouterMaxTokens1200
                 || legacyPromptTotalChars || legacyMemoryRelevanceMaxChars
                 || legacyGlobalMemoryRelevanceMaxChars || legacyRouterReasoningEffort

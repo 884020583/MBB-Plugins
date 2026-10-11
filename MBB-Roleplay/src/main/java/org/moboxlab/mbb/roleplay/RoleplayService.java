@@ -318,7 +318,7 @@ public class RoleplayService {
         this.memberService = new RoleplayMemberService(plugin,config);
         this.emotionService = new RoleplayEmotionService(plugin,config,persona,this,memberService);
         this.blacklistService = new RoleplayBlacklistService(plugin);
-        this.quietService = new RoleplayQuietService(plugin);
+        this.quietService = new RoleplayQuietService(plugin,config);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -398,6 +398,7 @@ public class RoleplayService {
         knowledgeService.reload(config);
         emotionService.reload(config,persona);
         memberService.reload(config);
+        quietService.reload(config);
         ensureTurnExecutor();
         ensureBackgroundExecutor();
     }
@@ -695,7 +696,8 @@ public class RoleplayService {
         boolean multiRoleAddress = isMultiRoleAddress(event,content,selfID);
         boolean direct = isDirect(event,content,selfID) || multiRoleAddress;
         //免打扰名单：名单内的群员只在主动叫到角色时才得到回复，其他消息不进入回复链路
-        if (quietService.shouldStayQuiet(groupID,event.getUserID(),direct)) {
+        boolean quietAddressed = direct || mentionsSelfRole(event,content,selfID);
+        if (quietService.shouldStayQuiet(groupID,event.getUserID(),quietAddressed)) {
             plugin.getLogger().sendInfo("[角色] 群"+groupID+" 用户"+event.getUserID()
                     +" 在免打扰名单中且未叫到角色，本轮保持沉默");
             return null;
