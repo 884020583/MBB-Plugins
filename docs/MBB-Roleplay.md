@@ -21,16 +21,55 @@ MoBoxBot 角色扮演插件。插件读取 persona 文件，让角色以普通�
 
 ```mermaid
 flowchart TD
-    A[群消息或戳一戳] --> B[事件过滤]
-    B --> C[等待窗口与消息合批]
-    C --> D[路由层]
-    D -->|不回复| E[保持沉默]
-    D -->|回复| F[资料装配]
-    F --> G[生成层]
-    G --> H[执行层]
-    H --> I[文本 / 引用 / 戳回去 / 技能]
-    I --> J[发送到群聊]
-    J --> K[情绪分析与记忆整理异步执行]
+    subgraph ENTRY["事件入口 RoleplayListener"]
+        E1["群消息 GroupMessageEvent"]
+        E2["戳一戳 NoticeEvent notice/poke"]
+    end
+
+    E2 --> POKE{"MBB-Poke 已启用？"}
+    POKE -->|是| POKE1["交给 MBB-Poke，本插件跳过"]
+    POKE -->|否| T0["提交插件任务线程"]
+    E1 --> T0
+
+    T0 --> GATE{"插件开关 + 群级开关"}
+    GATE -->|关闭| END0["本轮结束"]
+    GATE -->|开启| BATCH["按群合批窗口（默认 2 秒）"]
+
+    BATCH --> SERIAL["同群串行：同一时刻只有一个回合"]
+    SERIAL --> PREP["准备阶段 prepareMessage()"]
+
+    subgraph PREP_STAGE["准备阶段"]
+        P1["黑名单 / 免打扰名单过滤"]
+        P2["指令、空消息、其他角色机器人的图片与表情过滤"]
+        P3["指向判定：艾特 > 引用 > 称呼 > 续聊"]
+        P4["图片上下文记录（原图留给 MBB-Vision）"]
+        P5["消息流水 + 话题疲劳 + 情绪观察"]
+        P6["提醒识别 RoleplayReminderService"]
+    end
+
+    PREP --> P1 --> P2 --> P3 --> P4 --> P5 --> P6
+    P6 --> RRATE["rateLimited()：回复冷却与每小时频控"]
+    RRATE -->|冷却中| END1["保持沉默"]
+    RRATE --> ROUTE["路由层 RoleplayRouter → MBB-AI"]
+
+    ROUTE --> RR{"需要回复？"}
+    RR -->|否| END2["保持沉默"]
+    RR -->|是| CHANCE["概率判定 + 情绪修正 adjustReplyChance()"]
+    CHANCE --> ASSEMBLE["资料装配：persona / 记忆 / 群员印象 / 语料 / 知识库"]
+    ASSEMBLE --> GEN["生成层 → MBB-AI chat"]
+    GEN --> PARSE["解析结构化结果 RoleplayReplyDraft"]
+    PARSE --> STYLE["重复拦截 + 风格层 MBB-AI"]
+    STYLE --> SEND["发送：文本 / 引用 / 分段"]
+
+    SEND --> SKILL["技能执行 RoleplaySkillRegistry"]
+    SKILL --> SK1["sticker → MBB-Sticker"]
+    SKILL --> SK2["draw → MBB-ComfyUI"]
+    SKILL --> SK3["reminder / memory / global-memory / poke-back"]
+
+    SEND --> ASYNC["异步后处理"]
+    ASYNC --> AS1["情绪分析：心情 / 精力 / 耐心"]
+    ASYNC --> AS2["好感 / 信任 / 厌烦 + 群员个人记忆"]
+    ASYNC --> AS3["记忆整理：短期 / 长期 / 永久"]
 ```
 
 路由层只判断“要不要回复、带哪些技能、带哪些资料”，固定规则保留否决权。被直接艾特、被引用回复、冷却状态等硬规则不会被模型推翻。
@@ -38,19 +77,28 @@ flowchart TD
 ## 记忆结构
 
 ```mermaid
-flowchart LR
-    A[群聊消息] --> B[记忆整理]
-    B --> C[短期记忆]
-    B --> D[长期记忆]
-    B --> E[永久记忆]
-    F[情绪分析] --> G[群员个人记忆]
-    C --> H[本轮提示词]
-    D --> H
-    E --> H
-    G --> H
-    D --> I[合并与备份]
-    E --> I
-    C --> I
+flowchart TD
+    MSG["已过滤的群聊消息"] --> EXTRACT["记忆整理：MBB-AI 分批提取"]
+    EXTRACT --> ST["短期记忆：每群一份，滚动重写"]
+    EXTRACT --> LT["长期记忆：每群按条目，带 subjectID"]
+    EXTRACT --> GM["永久记忆：跨群共享，仅白名单群学习"]
+
+    EMO["情绪分析（异步，MBB-AI）"] --> MM["群员个人记忆：每群每 QQ"]
+    EMO --> REL["关系状态：好感 / 信任 / 厌烦 + 情绪原因"]
+
+    ST --> ASSEMBLE["本轮资料装配"]
+    LT --> ASSEMBLE
+    GM --> ASSEMBLE
+    MM --> ASSEMBLE
+    REL --> ASSEMBLE
+    ASSEMBLE --> PROMPT["角色系统提示词（动态块）"]
+
+    LT -->|超过 maxLongMemories| MERGE["相似排序 + 分批 AI 合并"]
+    GM -->|超过 globalMemoryMaxItems| GMERGE["分批 AI 合并"]
+    ST --> BACKUP["/role memory backup 全量快照"]
+    LT --> BACKUP
+    GM --> BACKUP
+    EMO --> BACKUP
 ```
 
 记忆只作为背景资料注入，不等于每轮都要复述。短期记忆偏近期事件，长期记忆偏群内结论，永久记忆跨群共享，群员个人记忆按 `(群号, QQ)` 维护。
@@ -59,14 +107,17 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    A[当前消息] --> B[路由层]
-    B --> C{需要回复}
-    C -->|否| D[沉默]
-    C -->|是| E[资料装配]
-    E --> F[生成层]
-    F --> G[执行层]
-    G --> H[发送与技能]
-    H --> I[情绪 / 记忆异步更新]
+    A["当前消息或合批文本"] --> B["路由层：MBB-AI 小提示词"]
+    B --> C{"reply = true？"}
+    C -->|否| D["沉默"]
+    C -->|是| E["资料装配：预算 promptTotalChars"]
+    E --> F["生成层：MBB-AI chat"]
+    F --> G["结构化结果 text / actions / quote / segments"]
+    G --> H["执行层：RoleplaySkillRegistry"]
+    H --> I["发送文本 / 引用 / 分段"]
+    H --> J["技能：sticker / draw / reminder / memory / poke-back"]
+    I --> K["情绪与记忆异步更新"]
+    J --> K
 ```
 
 - 路由层：判断指向、兴趣、技能和资料，保持轻量。
@@ -74,6 +125,30 @@ flowchart LR
 - 生成层：生成纯文本回复和表达动作，不输出 Markdown 或思考过程。
 - 执行层：发送文本、引用、戳回去、提醒、表情包或生图等技能。
 - 风格层：按需改写 AI 味明显的回复，默认不改变事实。
+
+## 插件协作
+
+Roleplay 自身不实现模型、识图和生图能力，而是通过插件服务名调用同仓库的其他 `MBB-*` 插件。下图标出当前实际的协作关系，可把它当作插件间集成的参考示例。
+
+```mermaid
+flowchart LR
+    RP["MBB-Roleplay"]
+
+    RP ==>|"chat：路由 / 回复 / 风格 / 记忆 / 情绪 / 提醒"| AI["MBB-AI（必需）"]
+    RP ==>|"describe：图片与表情包识图 + 本地缓存"| VIS["MBB-Vision（可选）"]
+    RP ==>|"search / send：表情包标签检索与发送"| ST["MBB-Sticker（可选）"]
+    RP ==>|"status / generate：生图与群级冷却"| CU["MBB-ComfyUI（可选）"]
+    RP -.->|"isEnabled：避免戳一戳重复响应"| POKE["MBB-Poke（可选）"]
+    RP -.->|"复用同一套 AI profile 与并发限制"| CHAT["MBB-Chat（同生态参考）"]
+    RP -.->|"内容风控交由独立插件，互不依赖"| GUARD["MBB-AIGuard（同生态参考）"]
+```
+
+协作要点：
+
+1. Roleplay 只依赖服务名和 JSON 契约，`MBB-AI`、`MBB-Vision`、`MBB-Sticker`、`MBB-ComfyUI` 都是可插拔的：拿掉可选插件后，文本聊天、记忆、情绪和提醒仍然可用。
+2. `MBB-AIGuard` 与 Roleplay 的分工是内容风险与角色扮演各管各的，二者互不依赖，可以同时启用；需要风控时不必改 Roleplay。
+3. `MBB-Chat` 与 Roleplay 共用 `MBB-AI` 的 profile 与并发上限，多个 AI 插件同开时要注意 `MBB-AI` 的 `maxConcurrent` 需要覆盖它们的总并发。
+4. `MBB-Poke` 与 Roleplay 的戳一戳能力互斥：检测到 `MBB-Poke` 启用时，Roleplay 主动让位，避免同一件事回两次。
 
 ## 快速开始
 

@@ -66,6 +66,28 @@ emotionReasonDecayDays: 30
 
 ## 四份记忆的分工
 
+```mermaid
+flowchart TD
+    MSG["每 memoryUpdateMessages 条群消息触发一次"] --> EXTRACT["记忆整理：MBB-AI 分批提取"]
+    EXTRACT --> ST["短期记忆（每群一份，整段重写）"]
+    EXTRACT --> LT["长期记忆（每群按条目，带 subjectID 与发生时间）"]
+    EXTRACT --> GM["永久记忆（跨群共享，仅白名单群学习）"]
+
+    EMO["情绪分析（回复后异步执行）"] --> MM["群员个人记忆（每群每 QQ）"]
+    EMO --> REL["关系状态（好感 / 信任 / 厌烦）"]
+
+    ST --> INJECT["资料装配：长期 90 > 群员印象 88 > 永久 85 > 短期 80"]
+    LT --> INJECT
+    GM --> INJECT
+    MM --> INJECT
+    INJECT --> PROMPT["角色系统提示词动态块"]
+
+    LT -->|超过 maxLongMemories| MERGE["相似排序 + 分批 AI 合并"]
+    GM -->|超过 globalMemoryMaxItems| GMERGE["分批 AI 合并 + 跨类型去重"]
+    MERGE --> SNAP["合并前自动写 backup 全量快照"]
+    GMERGE --> SNAP
+    ST --> SNAP
+```
 | 记忆 | 粒度 | 记什么 | 更新时机 | 注入 |
 |---|---|---|---|---|
 | 短期记忆 | 每群一份 | 近几天的事件、群友日常、角色正在做的事（临时工作状态只作背景） | 每 `memoryUpdateMessages` 条消息整理一次，整段重写 | 常驻，优先级 80，上限 1500 字 |

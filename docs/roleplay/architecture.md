@@ -35,6 +35,46 @@
 
 ## 分层处理
 
+```mermaid
+flowchart TD
+    subgraph L0["0 事件与合批"]
+        A1["RoleplayListener 收到群消息或戳一戳"]
+        A2["插件任务线程 + 群级合批窗口（默认 2 秒）"]
+        A3["同群串行：上一回合结束才开下一批"]
+    end
+
+    subgraph L1["1 准备阶段 prepareMessage()"]
+        B1["过滤：插件开关 / 群开关 / 黑名单 / 免打扰 / 指令 / 空消息"]
+        B2["指向判定（艾特 > 引用 > 称呼 > 续聊）与话题疲劳"]
+        B3["图片上下文记录与识图派发（MBB-Vision）"]
+        B4["消息流水、情绪观察、提醒识别"]
+    end
+
+    subgraph L2["2 路由层 RoleplayRouter"]
+        C1["调 MBB-AI，输出 reply / skills / materials / addressed"]
+        C2["规则否决：被艾特必回、冷却必沉默、机器人概率不可绕过"]
+    end
+
+    subgraph L3["3 装配与生成"]
+        D1["稳定块：角色核心 / 外貌 / 学生名录 / 固定规则"]
+        D2["动态块：技能 / 当前时间 / 关系 / 情绪 / 记忆 / 最近上下文"]
+        D3["生成层调 MBB-AI chat"]
+    end
+
+    subgraph L4["4 执行与后处理"]
+        E1["解析结构化结果 text / actions / quote / segments"]
+        E2["重复拦截 + 风格层（MBB-AI）"]
+        E3["发送文本 / 引用 / 分段，执行技能"]
+        E4["异步情绪分析与记忆整理"]
+    end
+
+    A1 --> A2 --> A3 --> B1
+    B1 --> B2 --> B3 --> B4 --> C1
+    C1 --> C2 --> D1
+    D1 --> D2 --> D3 --> E1
+    E1 --> E2 --> E3 --> E4
+```
+
 回复流程分成四段，详细设计见 [DESIGN-LAYERED-AI.md](../../MBB-Roleplay/DESIGN-LAYERED-AI.md)。
 
 路由层和生成层都会收到结构化的发言指向信息：发送者、艾特目标、引用目标以及是否指向角色。判断顺序固定为「艾特目标 > 引用目标 > 开头称呼 > 最近对话对象 > 话题延续」，仅在句子里提到某个名字不会被当成直接对该名字说话。这样多人同时发言、引用别人或提到第三个人时，角色不会把这些消息都误判成对自己说。
@@ -81,6 +121,40 @@ styleMaxChars: 60
 styleProactiveEnable: false   #主动发言时是否也触发风格层
 ```
 
+
+```mermaid
+sequenceDiagram
+    autonumber
+    participant U as 群友
+    participant RP as MBB-Roleplay
+    participant AV as MBB-Vision
+    participant AI as MBB-AI
+    participant ST as MBB-Sticker
+    participant CU as MBB-ComfyUI
+
+    U->>RP: 群消息
+    RP->>RP: 合批窗口 + 准备阶段（过滤、指向、情绪观察、提醒识别）
+    opt 消息含图片或表情包
+        RP->>AV: describe(图片)
+        AV-->>RP: 描述 + 标签（本地缓存命中则直接复用）
+    end
+    RP->>AI: chat（路由层：是否需要回复、挂哪些技能与资料）
+    AI-->>RP: reply=true，并返回技能与资料清单
+    opt 需要回复
+        RP->>AI: chat（生成层：正文 + 表达动作）
+        AI-->>RP: text + actions + quote 的结构化结果
+        opt 命中 AI 味检测
+            RP->>AI: chat（风格层改写）
+            AI-->>RP: 改写后的正文
+        end
+        RP->>U: 发送文本 / 引用 / 分段
+        opt actions 需要外部能力
+            RP->>ST: 查标签并发送表情包
+            RP->>CU: 提交生图任务（完成后回调生成提醒）
+        end
+        RP->>AI: chat（异步：情绪分析 + 记忆整理）
+    end
+```
 
 ## 消息合批
 

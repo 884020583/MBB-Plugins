@@ -1,5 +1,43 @@
 # MBB-Roleplay 技能与集成
 
+## 插件协作总览
+
+Roleplay 是「角色层」，模型、识图、表情包、生图分别由同仓库的其他插件提供。下面这张图可以直接当作插件间集成的参考示例：粗实线是运行时真实调用，虚线是状态检测或生态内约定。
+
+```mermaid
+flowchart LR
+    RP["MBB-Roleplay"]
+
+    RP ==>|"chat"| AI["MBB-AI（必需）"]
+    RP ==>|"describe"| VIS["MBB-Vision（可选）"]
+    RP ==>|"搜索标签 / 发送"| ST["MBB-Sticker（可选）"]
+    RP ==>|"status / generate"| CU["MBB-ComfyUI（可选）"]
+    RP -.->|"isEnabled 冲突检测"| POKE["MBB-Poke（可选）"]
+    RP -.->|"共享同一套 AI profile"| CHAT["MBB-Chat（同生态参考）"]
+    RP -.->|"内容风控各管各的"| GUARD["MBB-AIGuard（同生态参考）"]
+
+    AI ==>|"OpenAI 兼容接口"| API["MBB-AI 上游模型"]
+```
+
+| 调用方 | 服务名 | 动作 | 用途 | 缺失时的行为 |
+|---|---|---|---|---|
+| 路由层 | `MBB-AI` | `chat` | 判断是否回复、挂哪些技能与资料 | 回退到规则决策 |
+| 生成层 / 风格层 | `MBB-AI` | `chat` | 生成正文与表达动作、改写 AI 味 | 不回复 / 直接用原文 |
+| 记忆整理 | `MBB-AI` | `chat` | 短期、长期、永久记忆提取与合并 | 整批失败即放弃，保留原数据 |
+| 情绪分析 | `MBB-AI` | `chat` | 心情、好感、信任、厌烦与群员个人记忆 | 跳过本轮情绪更新 |
+| 提醒识别 / 到点提醒 | `MBB-AI` | `chat` | 解析提醒时间、生成提醒正文 | 安静忽略，不创建任务 |
+| 识图 | `MBB-Vision` | `describe` | 图片与表情包描述、标签与本地缓存 | 图片消息不注入描述 |
+| 表情包 | `MBB-Sticker` | 查询标签 / 发送 | 角色按标签选择并发送表情包 | `sticker` 技能不开放 |
+| 生图 | `MBB-ComfyUI` | `status` / `generate` | 生图与群级冷却，完成后回调 | `draw` 技能不开放 |
+| 戳一戳 | `MBB-Poke` | `isEnabled` | 检测冲突，避免同一件事回两次 | Roleplay 自行处理戳一戳 |
+
+集成约定：
+
+1. 只通过 `getService("MBB-xxx")` 拿服务，不直接引用对方的实现类。
+2. 调用参数和返回值都是 fastjson 的 `JSONObject`，用 `status` 字段判断成败。
+3. 可选插件缺失时降级而不是报错：技能不开放、资料不注入，其余功能照常。
+4. 多个 AI 插件同时启用时，共用 `MBB-AI` 的 `maxConcurrent`，需要按总并发量配置。
+
 ## 戳一戳与引用
 
 被人戳一戳时，插件走和群消息同一条处理链路，只是把当前消息换成「有人戳了你」。
