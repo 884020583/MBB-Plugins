@@ -161,6 +161,7 @@ public class RoleplayConfig {
     public int repeatOpeningLimit = 2;
     public String personaFile = "persona-aris.json";
     public int minMessageLength = 2;
+    public boolean quietReplyEnable = true;
     public String commandPrefixes = "/,!,＃,#";
 
     public static RoleplayConfig load(Plugin plugin) {
@@ -414,6 +415,7 @@ public class RoleplayConfig {
                 plugin.getConfig().getInt("repeatCommonRunMinChars",8);
         config.personaFile = plugin.getConfig().getString("personaFile","persona-aris.json");
         config.minMessageLength = plugin.getConfig().getInt("minMessageLength",2);
+        config.quietReplyEnable = plugin.getConfig().getBoolean("quietReplyEnable",true);
         config.commandPrefixes = plugin.getConfig().getString("commandPrefixes","/,!,＃,#");
         if (config.aiProfile == null || config.aiProfile.trim().isEmpty()) config.aiProfile = "default";
         if (config.memoryProfile == null) config.memoryProfile = "";

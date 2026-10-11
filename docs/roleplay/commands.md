@@ -20,6 +20,9 @@
 | `/role quiet add [QQ]` | `EVERYONE` | 把自己加入当前群免打扰名单，填 QQ 添加他人需要 `BOT_ADMIN` |
 | `/role quiet remove [QQ]` | `EVERYONE` | 把自己移出当前群免打扰名单，填 QQ 移除他人需要 `BOT_ADMIN` |
 | `/role quiet clear` | `BOT_ADMIN` | 清空当前群免打扰名单 |
+
+`/role quiet add` 和 `/role quiet remove` 允许普通群员自助使用；`/role` 的其他子命令仍然需要 `BOT_ADMIN`。
+
 | `/role member [QQ]` | `BOT_ADMIN` | 查看角色对某个群员的个人印象，不填 QQ 则看自己 |
 | `/role member clear <QQ>` | `BOT_ADMIN` | 清空对某个群员的个人印象 |
 | `/role mood [页码]` | `BOT_ADMIN` | 以图片查看当前群情绪和情绪事件 |

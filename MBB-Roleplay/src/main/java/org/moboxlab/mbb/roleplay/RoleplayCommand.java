@@ -34,7 +34,8 @@ public class RoleplayCommand extends BotCommand {
 
     @Override
     public CommandPermission permission() {
-        return CommandPermission.BOT_ADMIN;
+        //quiet add/remove 允许群员自助使用，其余子命令在 execute 内按 BOT_ADMIN 拦截
+        return CommandPermission.EVERYONE;
     }
 
     @Override
@@ -92,6 +93,14 @@ public class RoleplayCommand extends BotCommand {
     @Override
     public boolean execute(CommandSender sender,String[] args) {
         String action = args.length > 1 ? args[1].toLowerCase() : "status";
+        if ("quiet".equals(action)) {
+            handleQuiet(sender,args);
+            return true;
+        }
+        if (!sender.hasPermission(CommandPermission.BOT_ADMIN)) {
+            sender.sendMessage("管理角色扮演插件需要机器人管理员权限。");
+            return true;
+        }
         if ("status".equals(action)) {
             JSONObject result = service.status(sender.getGroupID());
             sender.sendMessage("角色："+result.getString("role")
@@ -149,10 +158,6 @@ public class RoleplayCommand extends BotCommand {
         }
         if ("blacklist".equals(action)) {
             handleBlacklist(sender,args);
-            return true;
-        }
-        if ("quiet".equals(action)) {
-            handleQuiet(sender,args);
             return true;
         }
         if ("member".equals(action)) {
@@ -795,6 +800,10 @@ public class RoleplayCommand extends BotCommand {
             return;
         }
         if ("list".equals(action)) {
+            if (!sender.hasPermission(CommandPermission.BOT_ADMIN)) {
+                sender.sendMessage("查看免打扰名单需要机器人管理员权限。");
+                return;
+            }
             JSONArray entries = quiet.list(groupID);
             StringBuilder builder = new StringBuilder("本群免打扰名单"
                     +"（"+(quiet.isEnabled(groupID) ? "已启用" : "已停用")+"）：");
@@ -810,6 +819,10 @@ public class RoleplayCommand extends BotCommand {
             return;
         }
         if ("clear".equals(action)) {
+            if (!sender.hasPermission(CommandPermission.BOT_ADMIN)) {
+                sender.sendMessage("清空免打扰名单需要机器人管理员权限。");
+                return;
+            }
             quiet.clear(groupID);
             sender.sendMessage("本群免打扰名单已清空。");
             return;
