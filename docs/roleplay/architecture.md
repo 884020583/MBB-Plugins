@@ -47,25 +47,28 @@
 ### 预算与拼装顺序
 
 ```mermaid
-flowchart TD
+flowchart LR
     subgraph STATIC["静态块（逐字节稳定，前置）"]
+        direction TB
         S1["persona.core 角色核心 6000"]
         S2["persona.appearance 角色外貌 1200"]
         S3["students.brief 学生一句话印象 4000"]
         S4["固定规则 约 1950 字"]
+        S1 --> S2 --> S3 --> S4
     end
 
     subgraph DYN["动态块（随本轮变化，后置）"]
+        direction TB
         D1["本轮指令 / 可用技能 / 当前时间 / 发言者关系 / 情绪 / 提醒"]
         D2["记忆与上下文：长期 90 > 群员印象 88 > 永久 85 > 短期 80 > 最近发言 75 / 74"]
         D3["台词示例 50 与路由点名的可选资料（学生详情 / 知识库）"]
         D4["输出格式与动作约束"]
+        D1 --> D2 --> D3 --> D4
     end
 
-    S1 --> S2 --> S3 --> S4 --> D1 --> D2 --> D3 --> D4
-
+    S4 --> D1
     S4 -.->|"静态块长度"| BUDGET["动态预算 = max(2000, promptTotalChars - 静态块长度)"]
-    BUDGET --> D2
+    BUDGET -.-> D2
 ```
 
 拼装规则：
@@ -77,6 +80,7 @@ flowchart TD
 5. 第 5~9 项（指令、技能、时间、关系、情绪、提醒）和第 19 项输出格式由固定逻辑拼接，不参与 `promptTotalChars` 竞争；只有第 10~18 项的资料走 `RoleplayMaterialBudget` 分配预算。
 
 服务端缓存匹配的是**最长公共前缀**，所以静态块必须连在一起——尤其是「当前时间」，它每分钟都变，一旦前置会让整段前缀失效。
+
 全插件的 AI 提示词都按这个原则核对过一遍：
 
 | 调用 | 结构 | 说明 |

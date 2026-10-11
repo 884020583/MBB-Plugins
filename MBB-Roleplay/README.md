@@ -131,25 +131,28 @@ flowchart LR
 系统提示词分两段拼装：静态块逐字节稳定、整体前置，动态块随本轮变化、整体后置，这样服务端的前缀缓存才能在静态块上命中。
 
 ```mermaid
-flowchart TD
+flowchart LR
     subgraph STATIC["静态块（逐字节稳定）"]
+        direction TB
         S1["persona.core 角色核心 6000"]
         S2["persona.appearance 角色外貌 1200"]
         S3["students.brief 学生一句话印象 4000"]
         S4["固定规则：关系 / 隐私 / 风格 / 输出纪律"]
+        S1 --> S2 --> S3 --> S4
     end
 
     subgraph DYN["动态块（随本轮变化）"]
+        direction TB
         D1["本轮指令 + 可用技能 + 当前时间 + 发言者关系 + 情绪 + 提醒"]
         D2["记忆与上下文：长期 90 > 群员印象 88 > 永久 85 > 短期 80 > 最近发言 75 / 74"]
         D3["台词示例 50 + 路由点名的可选资料（学生详情 / 知识库）"]
         D4["输出格式与动作约束"]
+        D1 --> D2 --> D3 --> D4
     end
 
-    S1 --> S2 --> S3 --> S4 --> D1 --> D2 --> D3 --> D4
-
+    S4 --> D1
     S4 -.->|"静态块长度"| BUDGET["动态预算 = max(2000, promptTotalChars - 静态块长度)"]
-    BUDGET --> D2
+    BUDGET -.-> D2
 ```
 
 - 静态块：只在 persona、知识库或配置变化时更新，不参与 `promptTotalChars` 竞争，各自只受单项上限约束。
