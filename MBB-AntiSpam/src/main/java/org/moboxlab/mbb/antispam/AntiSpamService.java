@@ -165,6 +165,9 @@ public class AntiSpamService {
         long userID = event.getUserID();
         if (groupID <= 0 || userID <= 0) return;
         if (!isGroupEnabled(groupID)) return;
+        //机器人消息不参与统计：同群多个机器人响应同一条命令会发出内容相同的回复，
+        //当作真人消息统计会误判成集体刷屏，也会把机器人自己计入违规
+        if (current.ignoreBots && isBotMessage(event,userID)) return;
         if (isBypassed(userID)) return;
         long now = System.currentTimeMillis();
         cleanupIfNeeded(now);
@@ -700,6 +703,21 @@ public class AntiSpamService {
 
     public int trackedUsers() {
         return windows.size();
+    }
+
+    /**
+     * 判断这条消息是否由机器人发出
+     *
+     * 协议层面没有可靠的"对方是不是机器人"标记（NapCat 的群消息 sender 只有
+     * user_id/nickname/sex/card/role），所以这里用两条可确定的信息：
+     * 1. self_id：机器人自己上报的消息（含消息回环）；
+     * 2. botUsers 名单：同群的同类机器人，由使用者显式声明，与 MBB-Roleplay 的 otherRoleBotQQs 同一约定。
+     */
+    private boolean isBotMessage(GroupMessageEvent event,long userID) {
+        AntiSpamConfig current = config;
+        if (containsId(current.botUsers,userID)) return true;
+        long selfID = event.getRaw() == null ? 0L : event.getRaw().getLongValue("self_id");
+        return selfID > 0 && selfID == userID;
     }
 
     private boolean isBypassed(long userID) {
