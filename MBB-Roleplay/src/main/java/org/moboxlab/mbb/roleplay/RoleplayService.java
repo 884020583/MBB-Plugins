@@ -85,6 +85,7 @@ public class RoleplayService {
     private final RoleplayGroupStatusService groupStatusService;
     private final RoleplayMessagePreprocessor messagePreprocessor;
     private final RoleplaySchemaService schemaService;
+    private final RoleplayExecutorService executorService;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -106,10 +107,10 @@ public class RoleplayService {
     final Object groupQueueLock = new Object();
     final Map<Long,Boolean> groupBusyMap = new HashMap<>();
     //回合执行线程池：路由与生成都是长耗时 AI 调用，不再占用共享的定时任务线程
-    private volatile ExecutorService turnExecutor;
-    private volatile int turnThreads = 0;
+
+
     //后台任务线程池：记忆整理、情绪分析、识图这类长耗时调用同样不占共享定时线程
-    private volatile ExecutorService backgroundExecutor;
+
     //合批缓冲：同一群在窗口内到达的消息先攒起来，窗口结束后当成一个回合处理
     final Map<Long,List<GroupMessageEvent>> batchBufferMap = new HashMap<>();
     final Map<Long,Integer> batchGenerationMap = new HashMap<>();
@@ -289,6 +290,7 @@ public class RoleplayService {
         this.groupStatusService = new RoleplayGroupStatusService(this);
         this.messagePreprocessor = new RoleplayMessagePreprocessor(this);
         this.schemaService = new RoleplaySchemaService(this);
+        this.executorService = new RoleplayExecutorService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -307,8 +309,8 @@ public class RoleplayService {
         replyFeedbackService.init();
         expressionService.init();
         attentionService.reload(config);
-        ensureTurnExecutor();
-        ensureBackgroundExecutor();
+        executorService.ensureTurnExecutor();
+        executorService.ensureBackgroundExecutor();
         dailyReviewService.ensureTask();
     }
 
@@ -326,8 +328,8 @@ public class RoleplayService {
         expressionService.reload(config);
         attentionService.reload(config);
         dailyReviewService.reload(config);
-        ensureTurnExecutor();
-        ensureBackgroundExecutor();
+        executorService.ensureTurnExecutor();
+        executorService.ensureBackgroundExecutor();
         dailyReviewService.ensureTask();
     }
 
@@ -338,70 +340,16 @@ public class RoleplayService {
         dailyReviewService.trigger(groupID);
     }
 
-    private void ensureTurnExecutor() {
-        int threads = config.turnThreads < 1 ? 1 : Math.min(config.turnThreads,16);
-        if (turnExecutor != null && turnThreads == threads) return;
-        ExecutorService previous = turnExecutor;
-        turnExecutor = Executors.newFixedThreadPool(threads,runnable -> {
-            Thread thread = new Thread(runnable,"MoBoxBot-Roleplay-Turn");
-            thread.setDaemon(true);
-            return thread;
-        });
-        turnThreads = threads;
-        if (previous != null) previous.shutdown();
-    }
 
-    private void ensureBackgroundExecutor() {
-        if (backgroundExecutor != null) return;
-        backgroundExecutor = Executors.newFixedThreadPool(2,runnable -> {
-            Thread thread = new Thread(runnable,"MoBoxBot-Roleplay-Background");
-            thread.setDaemon(true);
-            return thread;
-        });
-    }
 
     /**
      * 把一整个回合丢到独立线程池执行；线程池不可用时退回当前线程，保证功能不丢
      */
-    void submitTurn(Runnable task) {
-        if (task == null) return;
-        ExecutorService executor = turnExecutor;
-        if (executor == null) {
-            task.run();
-            return;
-        }
-        try {
-            executor.submit(task);
-        } catch (RejectedExecutionException e) {
-            task.run();
-        }
-    }
 
     /**
      * 记忆整理、情绪分析、识图等后台 AI 调用统一走这个线程池
      */
-    void submitBackground(Runnable task) {
-        if (task == null) return;
-        ExecutorService executor = backgroundExecutor;
-        if (executor == null) {
-            task.run();
-            return;
-        }
-        try {
-            executor.submit(task);
-        } catch (RejectedExecutionException e) {
-            task.run();
-        }
-    }
 
-    public void shutdown() {
-        ExecutorService executor = turnExecutor;
-        turnExecutor = null;
-        if (executor != null) executor.shutdownNow();
-        ExecutorService background = backgroundExecutor;
-        backgroundExecutor = null;
-        if (background != null) background.shutdownNow();
-    }
 
     /**
      * 群消息入口
@@ -1629,6 +1577,19 @@ public class RoleplayService {
 
     RoleplayService.PreparedMessage prepareMessage(GroupMessageEvent event) {
         return messagePreprocessor.prepareMessage(event);
+    }
+
+
+    void submitTurn(Runnable task) {
+        executorService.submitTurn(task);
+    }
+
+    void submitBackground(Runnable task) {
+        executorService.submitBackground(task);
+    }
+
+    public void shutdown() {
+        executorService.shutdown();
     }
 
     StorageService storage() {
