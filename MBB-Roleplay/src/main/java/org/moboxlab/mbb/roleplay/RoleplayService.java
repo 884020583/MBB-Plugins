@@ -71,6 +71,7 @@ public class RoleplayService {
     private final RoleplayMemoryBackupService memoryBackupService;
     private final RoleplayMemoryUpdateService memoryUpdateService;
     private final RoleplayBatchScheduler batchScheduler;
+    private final RoleplayPokeService pokeService;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -309,6 +310,7 @@ public class RoleplayService {
         this.memoryBackupService = new RoleplayMemoryBackupService(this);
         this.memoryUpdateService = new RoleplayMemoryUpdateService(this);
         this.batchScheduler = new RoleplayBatchScheduler(this);
+        this.pokeService = new RoleplayPokeService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -1018,146 +1020,9 @@ public class RoleplayService {
      * 走和群消息同一条链路，只是把当前消息换成"有人戳了你"，戳回去由执行层决定
      */
     public void handlePoke(NoticeEvent event) {
-        if (event == null || !config.enable || !config.pokeReplyEnable) return;
-        long groupID = event.getGroupID();
-        long userID = event.getUserID();
-        long selfID = event.getRaw().getLongValue("self_id");
-        if (groupID <= 0 || userID <= 0 || selfID <= 0) return;
-        if (event.getTargetID() != selfID || userID == selfID) return;
-        if (!isGroupEnabled(groupID)) return;
-        if (blacklistService.contains(groupID,userID)) {
-            plugin.getLogger().sendInfo("[角色] 群"+groupID+" 忽略黑名单用户 "
-                    +userID+" 的戳一戳");
-            return;
-        }
-        //戳一戳同样走独立线程池，不占用定时任务线程
-        submitTurn(() -> runPokeTurn(groupID,userID,selfID));
+        pokeService.handlePoke(event);
     }
 
-    private void runPokeTurn(long groupID,long userID,long selfID) {
-        if (!canReply(groupID)) return;
-
-        RoleplayRouteDecision decision = new RoleplayRouteDecision();
-        decision.addressed = "direct";
-        decision.reply = true;
-        decision.confidence = 1.0;
-        decision.chance = 1.0;
-
-        JSONObject member = pokeMember(groupID,userID);
-        String userName = pokeMemberName(member,userID);
-        String relationship = pokeRelationship(member,userID);
-        //先结算这一戳的情绪，再按结算结果决定本轮语气提示
-        RoleplayEmotionService.LocalEvent emotionEvent = emotionService.observePoke(
-                groupID,userID,userName);
-        boolean pokeSpam = emotionEvent.isPresent() && "poke-spam".equals(emotionEvent.type);
-        RoleplayConversationState pokeState = state(groupID);
-        int pokeVariant = pokeState.pokeVariant++ % 6;
-        double affinity = emotionService.affinity(groupID,userID);
-        int patience = emotionService.patience(groupID);
-        boolean allowPokeBack = config.pokeBackEnable;
-        String hint;
-        if (pokeSpam) {
-            allowPokeBack = false;
-            hint = "对方在很短时间里连续戳了你很多次，已经有点烦了：可以用一句短促的话让他别戳了，"
-                    +"或者敷衍、装没反应；不要辱骂，也不要用攻击性语气。";
-        } else if (patience < 35) {
-            hint = pokeVariant % 3 == 0
-                    ? "服务端心情不太好，用一句短促的吐槽回敬，不要长篇解释。"
-                    : "服务端耐心偏低，可以简短回敬；不要连续重复同一句话。";
-        } else if (affinity >= config.intimacyVeryCloseAffinity) {
-            allowPokeBack = pokeVariant % 4 == 1;
-            hint = "你和对方已经非常亲近，可以撒娇、害羞、假装嫌弃，或用亲昵的短句回应。";
-        } else if (affinity >= config.intimacyCloseAffinity) {
-            allowPokeBack = pokeVariant % 3 == 1;
-            hint = "你和对方关系亲近，可以自然吐槽、反戳、装作不耐烦或小声抱怨。";
-        } else {
-            allowPokeBack = pokeVariant % 2 == 1;
-            hint = "按当前关系选择回应方式，不要每次都戳回去，可以只吐槽、反问或假装没反应。";
-        }
-        if (!allowPokeBack) {
-            hint += "这一轮不要戳回去，也不要输出 poke-back 动作。";
-        } else {
-            hint += "如果合适可以戳回去，但正文不要只机械重复“戳回去”，换一句角色化表达。";
-        }
-        hint += "本轮只回复一条短消息，最多 "+config.pokeReplyMaxChars
-                +" 字，不要换行，不要分段，不要补充无关内容。";
-        decision.reason = "被戳一戳："+hint;
-        if (config.pokeBackEnable && allowPokeBack) decision.actions.add("poke-back");
-        String content = "[戳一戳] "+userName+" 戳了你一下。本轮建议："+hint;
-        JSONObject result = reply(groupID,userID,userName,content,false,relationship,null,decision);
-        if (result == null || !result.getBooleanValue("status")) {
-            emotionService.afterTurn(groupID,userID,userName,relationship,content,
-                    emotionEvent,true,false);
-            return;
-        }
-        RoleplayReplyDraft draft = RoleplayReplyDraft.parse(result.getString("content"));
-        if (draft.malformed) {
-            plugin.getLogger().sendWarn("[角色] 戳一戳 群"+groupID+" 结构化结果无法解析，本轮跳过");
-            return;
-        }
-        String text = safe(draft.text).trim();
-        boolean sendText = !text.isEmpty() && !"<SKIP>".equalsIgnoreCase(text);
-        if (sendText) {
-            ensurePokeBackAction(draft,decision,text);
-            text = normalizePokeReply(text);
-            sendText = !text.isEmpty();
-        }
-        OneBotClient client = plugin.getServer().getOneBotClient();
-        if (sendText && client != null) {
-            messageSender.sendSingleMessage(client,groupID,selfID,userID,text,false,0L);
-        }
-        plugin.getLogger().sendInfo("[角色] 戳一戳 群"+groupID+" 用户"+userID
-                +" 回复="+(sendText ? shortText(text,60) : "无"));
-        executeSkillCalls(decision,draft,groupID,userID,0L,selfID,userName,relationship,content);
-        emotionService.afterTurn(groupID,userID,userName,relationship,content,
-                emotionEvent,true,false);
-    }
-
-    /**
-     * 戳一戳只允许一条短消息，优先在句末或弱标点处截断，避免再走通用多段发送。
-     */
-    private String normalizePokeReply(String text) {
-        String value = safe(text).replaceAll("\\s+"," ").trim();
-        int maxChars = Math.max(8,config.pokeReplyMaxChars);
-        if (value.length() <= maxChars) return value;
-        int cut = messageSender.findSplitCut(value,maxChars,true);
-        if (cut <= 0) cut = messageSender.findSplitCut(value,maxChars,false);
-        if (cut <= 0) cut = maxChars;
-        String result = value.substring(0,cut).trim();
-        if (cut < value.length() && messageSender.isWeakSplitPunctuation(value.charAt(cut - 1))) {
-            result = messageSender.trimWeakSplitPunctuation(result);
-        }
-        if (result.isEmpty()) result = value.substring(0,maxChars).trim();
-        return result;
-    }
-
-    private JSONObject pokeMember(long groupID,long userID) {
-        OneBotClient client = plugin.getServer().getOneBotClient();
-        if (client == null) return null;
-        try {
-            JSONObject response = client.getGroupMemberInfo(groupID,userID);
-            return response == null ? null : response.getJSONObject("data");
-        } catch (Exception e) {
-            return null;
-        }
-    }
-
-    private String pokeMemberName(JSONObject member,long userID) {
-        if (member != null) {
-            String card = safe(member.getString("card")).trim();
-            if (!card.isEmpty()) return card;
-            String nickname = safe(member.getString("nickname")).trim();
-            if (!nickname.isEmpty()) return nickname;
-        }
-        return String.valueOf(userID);
-    }
-
-    private String pokeRelationship(JSONObject member,long userID) {
-        if (isOwner(userID)) return "妈妈";
-        String role = member == null ? "" : safe(member.getString("role")).trim();
-        if ("owner".equals(role) || "admin".equals(role)) return "老师";
-        return "朋友";
-    }
 
     public JSONObject status(long groupID) {
         JSONObject result = new JSONObject(true);
@@ -1440,6 +1305,10 @@ public class RoleplayService {
         return contextService;
     }
 
+    RoleplayMessageSender messageSender() {
+        return messageSender;
+    }
+
     RoleplaySkillRegistry skillRegistry() {
         return skillRegistry;
     }
@@ -1513,14 +1382,14 @@ public class RoleplayService {
         return memberService;
     }
 
-    private JSONObject reply(long groupID,long userID,String userName,String content,
+    JSONObject reply(long groupID,long userID,String userName,String content,
                              boolean otherRoleBot,String relationship,RecentImage imageContext,
                              RoleplayRouteDecision decision) {
         return reply(groupID,userID,userName,content,otherRoleBot,relationship,imageContext,
                 decision,null,0);
     }
 
-    private JSONObject reply(long groupID,long userID,String userName,String content,
+    JSONObject reply(long groupID,long userID,String userName,String content,
                              boolean otherRoleBot,String relationship,RecentImage imageContext,
                              RoleplayRouteDecision decision,String batchText,int batchCount) {
         PluginService ai = plugin.getServer().getPluginManager().getService("MBB-AI");
@@ -1989,7 +1858,7 @@ public class RoleplayService {
      * 执行技能调用
      * 技能必须已注册且在本轮开放清单内，校验失败只丢弃该动作，不影响正文
      */
-    private void executeSkillCalls(RoleplayRouteDecision decision,RoleplayReplyDraft draft,
+    void executeSkillCalls(RoleplayRouteDecision decision,RoleplayReplyDraft draft,
                                    long groupID,long userID,long messageID,long selfID,
                                    String userName,String relationship,String content) {
         if (draft == null || draft.actions.isEmpty()) return;
@@ -2031,7 +1900,7 @@ public class RoleplayService {
         return false;
     }
 
-    private void ensurePokeBackAction(RoleplayReplyDraft draft,RoleplayRouteDecision decision,
+    void ensurePokeBackAction(RoleplayReplyDraft draft,RoleplayRouteDecision decision,
                                       String text) {
         if (draft == null || text == null || text.trim().isEmpty()) return;
         if (draft.hasAction("poke-back")) return;
@@ -2167,7 +2036,7 @@ public class RoleplayService {
                 || text.contains("记下来");
     }
 
-    private boolean isOwner(long userID) {
+    boolean isOwner(long userID) {
         List<Long> owners = plugin.getServer().getOwnerList();
         return owners != null && owners.contains(userID);
     }
@@ -2288,7 +2157,7 @@ public class RoleplayService {
         }
     }
 
-    private boolean canReply(long groupID) {
+    boolean canReply(long groupID) {
         //冷却判定与时间戳写入必须原子，否则并发回合会同时读到旧值、各回一次
         synchronized (groupQueueLock) {
             long now = System.currentTimeMillis();
