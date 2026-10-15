@@ -46,7 +46,7 @@ public class RoleplayService {
     static final String MSG_TABLE = "plugin_mbb_roleplay_messages";
     static final String MEMORY_TABLE = "plugin_mbb_roleplay_memory";
     static final String STATE_TABLE = "plugin_mbb_roleplay_state";
-    private static final String GROUP_TABLE = "plugin_mbb_roleplay_group";
+    static final String GROUP_TABLE = "plugin_mbb_roleplay_group";
     static final String TOPIC_TABLE = "plugin_mbb_roleplay_topic";    /** 引用回复里被引用内容的截断长度 */
 
     /** 分句时优先保留的句末标点 */
@@ -82,12 +82,13 @@ public class RoleplayService {
     private final RoleplayRateLimitService rateLimitService;
     private final RoleplayMemoryQueryService memoryQueryService;
     private final RoleplayDrawNotifyService drawNotifyService;
+    private final RoleplayGroupStatusService groupStatusService;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
     private volatile RoleplayConfig config;
     private volatile RoleplayPersona persona;
-    private final Map<Long,RoleplayConversationState> conversationStateMap = new ConcurrentHashMap<>();
+    final Map<Long,RoleplayConversationState> conversationStateMap = new ConcurrentHashMap<>();
 
 
     final Map<Long,Boolean> memoryUpdatingMap = new ConcurrentHashMap<>();
@@ -283,6 +284,7 @@ public class RoleplayService {
         this.rateLimitService = new RoleplayRateLimitService(this);
         this.memoryQueryService = new RoleplayMemoryQueryService(this);
         this.drawNotifyService = new RoleplayDrawNotifyService(this);
+        this.groupStatusService = new RoleplayGroupStatusService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -656,17 +658,6 @@ public class RoleplayService {
     void ensurePokeBackAction(RoleplayReplyDraft draft,RoleplayRouteDecision decision,String reply) {
         replyExecutor.ensurePokeBackAction(draft,decision,reply);
     }
-    public JSONObject status(long groupID) {
-        JSONObject result = new JSONObject(true);
-        result.put("status",true);
-        result.put("groupID",groupID);
-        result.put("role",persona.name);
-        result.put("groupEnabled",groupID <= 0 || isGroupEnabled(groupID));
-        result.put("shortSummary",shortSummary(groupID));
-        result.put("memoryCount",memoryCount(groupID));
-        result.put("mood",emotionService.moodStats(groupID,1).getJSONObject("mood"));
-        return result;
-    }
 
 
 
@@ -675,64 +666,11 @@ public class RoleplayService {
 
 
 
-    public boolean isGroupEnabled(long groupID) {
-        JSONObject row = storage().queryOne("SELECT `enabled` FROM `"+GROUP_TABLE+"` WHERE `groupID`=?",groupID);
-        return row != null && row.getIntValue("enabled") == 1;
-    }
 
-    String contextToken(long groupID) {
-        JSONObject row = storage().queryOne(
-                "SELECT `contextToken` FROM `"+GROUP_TABLE+"` WHERE `groupID`=?",groupID);
-        if (row != null && row.getString("contextToken") != null
-                && !row.getString("contextToken").trim().isEmpty()) {
-            return row.getString("contextToken").trim();
-        }
-        String token = newContextToken();
-        if (row == null) {
-            storage().insert("INSERT INTO `"+GROUP_TABLE+"` "
-                            + "(`groupID`,`enabled`,`contextToken`,`updateTime`) VALUES (?,?,?,?)",
-                    groupID,0,token,System.currentTimeMillis());
-        } else {
-            storage().update("UPDATE `"+GROUP_TABLE+"` SET `contextToken`=?,`updateTime`=? WHERE `groupID`=?",
-                    token,System.currentTimeMillis(),groupID);
-        }
-        return token;
-    }
 
-    private void rotateContextToken(long groupID) {
-        String token = newContextToken();
-        int rows = storage().update("UPDATE `"+GROUP_TABLE+"` SET `contextToken`=?,`updateTime`=? WHERE `groupID`=?",
-                token,System.currentTimeMillis(),groupID);
-        if (rows <= 0) {
-            storage().insert("INSERT INTO `"+GROUP_TABLE+"` "
-                            + "(`groupID`,`enabled`,`contextToken`,`updateTime`) VALUES (?,?,?,?)",
-                    groupID,0,token,System.currentTimeMillis());
-        }
-    }
 
-    private String newContextToken() {
-        return UUID.randomUUID().toString().replace("-","");
-    }
 
-    public void setGroupEnabled(long groupID,boolean enabled) {
-        JSONObject row = storage().queryOne("SELECT `ID` FROM `"+GROUP_TABLE+"` WHERE `groupID`=?",groupID);
-        long now = System.currentTimeMillis();
-        if (row == null) {
-            storage().insert("INSERT INTO `"+GROUP_TABLE+"` (`groupID`,`enabled`,`updateTime`) VALUES (?,?,?)",
-                    groupID,enabled ? 1 : 0,now);
-        } else {
-            storage().update("UPDATE `"+GROUP_TABLE+"` SET `enabled`=?,`updateTime`=? WHERE `groupID`=?",
-                    enabled ? 1 : 0,now,groupID);
-        }
-    }
 
-    public JSONArray listGroups() {
-        JSONArray result = new JSONArray();
-        List<JSONObject> rows = storage().query("SELECT `groupID` FROM `"+GROUP_TABLE+"` WHERE `enabled`=1 ORDER BY `groupID` ASC");
-        if (rows == null) return result;
-        for (JSONObject row : rows) result.add(row.getLongValue("groupID"));
-        return result;
-    }
 
     void saveMemoryState(long groupID,String shortTerm,long lastTime,long lastID) {
         memoryUpdateService.saveMemoryState(groupID,shortTerm,lastTime,lastID);
@@ -761,24 +699,7 @@ public class RoleplayService {
     public boolean mergeLongMemoryNow(long groupID,boolean force,Consumer<String> callback) {
         return memoryUpdateService.mergeLongMemoryNow(groupID,force,callback);
     }
-    public JSONObject memoryStats(long groupID) {
-        JSONObject result = status(groupID);
-        result.put("shortSummary",shortSummary(groupID));
-        result.put("memories",longMemories(groupID,false));
-        return result;
-    }
 
-    public void clearMemory(long groupID) {
-        storage().update("DELETE FROM `"+MEMORY_TABLE+"` WHERE `groupID`=?",groupID);
-        storage().update("DELETE FROM `"+STATE_TABLE+"` WHERE `groupID`=?",groupID);
-        storage().update("DELETE FROM `"+MSG_TABLE+"` WHERE `groupID`=?",groupID);
-        rotateContextToken(groupID);
-        memoryUpdatingMap.remove(groupID);
-        pendingMemoryMap.remove(groupID);
-        rateLimitService.resetGroup(groupID);
-        conversationStateMap.remove(groupID);
-
-    }
 
     public String getRoleName() {
         return persona.name;
@@ -838,6 +759,10 @@ public class RoleplayService {
 
     RoleplayReplyExecutor replyExecutor() {
         return replyExecutor;
+    }
+
+    RoleplayRateLimitService rateLimitService() {
+        return rateLimitService;
     }
 
     RoleplayBatchScheduler batchScheduler() {
@@ -1861,6 +1786,35 @@ public class RoleplayService {
 
     public JSONObject notifyDrawFailed(JSONObject params) {
         return drawNotifyService.notifyDrawFailed(params);
+    }
+
+
+    public JSONObject status(long groupID) {
+        return groupStatusService.status(groupID);
+    }
+
+    public boolean isGroupEnabled(long groupID) {
+        return groupStatusService.isGroupEnabled(groupID);
+    }
+
+    String contextToken(long groupID) {
+        return groupStatusService.contextToken(groupID);
+    }
+
+    public void setGroupEnabled(long groupID,boolean enabled) {
+        groupStatusService.setGroupEnabled(groupID,enabled);
+    }
+
+    public JSONArray listGroups() {
+        return groupStatusService.listGroups();
+    }
+
+    public JSONObject memoryStats(long groupID) {
+        return groupStatusService.memoryStats(groupID);
+    }
+
+    public void clearMemory(long groupID) {
+        groupStatusService.clearMemory(groupID);
     }
 
     StorageService storage() {
