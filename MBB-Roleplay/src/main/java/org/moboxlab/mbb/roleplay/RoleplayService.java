@@ -74,6 +74,7 @@ public class RoleplayService {
     private final RoleplayPokeService pokeService;
     private final RoleplayReplyExecutor replyExecutor;
     private final RoleplayTurnProcessor turnProcessor;
+    private final RoleplayTextUtils textUtils;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -271,6 +272,7 @@ public class RoleplayService {
         this.pokeService = new RoleplayPokeService(this);
         this.replyExecutor = new RoleplayReplyExecutor(this);
         this.turnProcessor = new RoleplayTurnProcessor(this);
+        this.textUtils = new RoleplayTextUtils(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -1480,15 +1482,6 @@ public class RoleplayService {
     }
 
 
-    boolean sleepQuietly(long millis) {
-        try {
-            Thread.sleep(millis);
-            return true;
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return false;
-        }
-    }
 
     /**
      * 执行技能调用
@@ -1507,52 +1500,9 @@ public class RoleplayService {
         return false;
     }
 
-    long eventTimeMillis(GroupMessageEvent event) {
-        if (event == null || event.getRaw() == null) return 0L;
-        long seconds = event.getRaw().getLongValue("time");
-        return seconds <= 0 ? 0L : seconds * 1000L;
-    }
 
-    String senderName(GroupMessageEvent event) {
-        JSONObject sender = event.getSender();
-        String name = sender == null ? "" : sender.getString("card");
-        if (name == null || name.trim().isEmpty()) name = sender == null ? "" : sender.getString("nickname");
-        return name == null || name.trim().isEmpty() ? String.valueOf(event.getUserID()) : name;
-    }
 
-    String currentTimeText() {
-        try {
-            String zoneName = config.timeZone == null || config.timeZone.trim().isEmpty()
-                    ? "Asia/Shanghai" : config.timeZone.trim();
-            TimeZone zone = TimeZone.getTimeZone(zoneName);
-            if ("GMT".equals(zone.getID()) && !"GMT".equalsIgnoreCase(zoneName)) {
-                zoneName = "Asia/Shanghai";
-                zone = TimeZone.getTimeZone(zoneName);
-            }
-            SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd HH:mm:ss EEEE",Locale.CHINA);
-            format.setTimeZone(zone);
-            return format.format(new Date())+"（"+zoneName+"）";
-        } catch (Exception e) {
-            return new SimpleDateFormat("yyyy-MM-dd HH:mm:ss EEEE",Locale.CHINA).format(new Date());
-        }
-    }
 
-    String formatMemoryTime(long time) {
-        if (time <= 0) return "未知时间";
-        try {
-            String zoneName = config.timeZone == null || config.timeZone.trim().isEmpty()
-                    ? "Asia/Shanghai" : config.timeZone.trim();
-            TimeZone zone = TimeZone.getTimeZone(zoneName);
-            if ("GMT".equals(zone.getID()) && !"GMT".equalsIgnoreCase(zoneName)) {
-                zone = TimeZone.getTimeZone("Asia/Shanghai");
-            }
-            SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd HH:mm",Locale.CHINA);
-            format.setTimeZone(zone);
-            return format.format(new Date(time));
-        } catch (Exception e) {
-            return new SimpleDateFormat("yyyy-MM-dd HH:mm",Locale.CHINA).format(new Date(time));
-        }
-    }
 
     String relationshipLabel(GroupMessageEvent event,boolean otherRoleBot) {
         if (otherRoleBot) return "其他角色机器人";
@@ -1636,31 +1586,8 @@ public class RoleplayService {
         return false;
     }
 
-    private String normalizeAddressText(String content) {
-        String text = content == null ? "" : content.trim();
-        if (text.startsWith("@")) {
-            text = text.replaceFirst("^@[0-9]+\\s*","").trim();
-        }
-        return text;
-    }
 
-    private boolean containsRoleAlias(String text,String alias) {
-        if (text == null || alias == null || alias.trim().isEmpty()) return false;
-        String value = text.trim();
-        String name = alias.trim();
-        //单字别名容易误伤普通词，只在句首或显式艾特时生效
-        if (name.length() == 1) return value.startsWith(name) || value.contains("@"+name);
-        return value.contains(name) || value.contains("@"+name);
-    }
 
-    private boolean isOwnRoleName(String name) {
-        if (name == null || name.trim().isEmpty()) return false;
-        if (name.equalsIgnoreCase(persona.name)) return true;
-        for (String alias : persona.aliases) {
-            if (name.equalsIgnoreCase(alias)) return true;
-        }
-        return false;
-    }
 
     boolean isReminderNotification(String content) {
         String text = content == null ? "" : content;
@@ -1871,12 +1798,6 @@ public class RoleplayService {
         return false;
     }
 
-    private boolean startsWithAlias(String text,String alias) {
-        if (text == null || alias == null || alias.trim().isEmpty()) return false;
-        String value = text.trim();
-        String name = alias.trim();
-        return value.startsWith(name) || value.startsWith("@"+name);
-    }
 
     boolean isContinuation(long groupID,long userID) {
         RoleplayConversationState state = state(groupID);
@@ -1968,16 +1889,6 @@ public class RoleplayService {
     boolean isRoleParticipantUser(long userID) {        return userID > 0 && containsCSVLong(config.otherRoleBotQQs,userID);
     }
 
-    private boolean containsCSVLong(String csv,long value) {
-        if (csv == null || csv.trim().isEmpty()) return false;
-        for (String item : csv.split(",")) {
-            try {
-                if (Long.parseLong(item.trim()) == value) return true;
-            } catch (Exception ignored) {
-            }
-        }
-        return false;
-    }
 
     boolean shouldSuppressRepeat(long groupID,String reply) {
         if (reply == null || reply.trim().length() < config.repeatCheckMinChars) return false;
@@ -2002,62 +1913,15 @@ public class RoleplayService {
                 || (fillerOpening && fillerCount >= Math.max(1,config.repeatOpeningLimit - 1));
     }
 
-    private String openingOf(String text) {
-        if (text == null) return "";
-        int length = Math.min(2,text.length());
-        return length <= 0 ? "" : text.substring(0,length);
-    }
 
     /**
      * 两条回复的最长公共子串长度。
      * “布丁明早验，咖喱七点，别糊锅”和“布丁明早验，咖喱七点，再不睡就凉了”
      * 的 bigram 相似度只有 0.5 左右，但公共片段有 10 个字，说明信息是重复的。
      */
-    private int longestCommonRun(String left,String right) {
-        if (left == null || right == null || left.isEmpty() || right.isEmpty()) return 0;
-        int best = 0;
-        for (int i = 0; i < left.length(); i++) {
-            for (int j = 0; j < right.length(); j++) {
-                int run = 0;
-                while (i + run < left.length() && j + run < right.length()
-                        && left.charAt(i + run) == right.charAt(j + run)) {
-                    run++;
-                }
-                if (run > best) best = run;
-            }
-        }
-        return best;
-    }
 
-    private double similarity(String left,String right) {
-        if (left == null || right == null) return 0;
-        if (left.equals(right)) return 1.0;
-        Set<String> leftSet = bigrams(left);
-        Set<String> rightSet = bigrams(right);
-        if (leftSet.isEmpty() || rightSet.isEmpty()) return 0;
-        int intersection = 0;
-        for (String item : leftSet) {
-            if (rightSet.contains(item)) intersection++;
-        }
-        int union = leftSet.size() + rightSet.size() - intersection;
-        return union <= 0 ? 0 : intersection / (double)union;
-    }
 
-    private Set<String> bigrams(String text) {
-        Set<String> result = new LinkedHashSet<>();
-        if (text == null || text.length() < 2) return result;
-        for (int i = 0; i < text.length() - 1; i++) {
-            result.add(text.substring(i,i + 2));
-        }
-        return result;
-    }
 
-    private String normalizeForSimilarity(String text) {
-        if (text == null) return "";
-        return text.toLowerCase(Locale.CHINA)
-                .replaceAll("[^\\u4e00-\\u9fa5a-z0-9]","")
-                .trim();
-    }
 
     RememberResult extractRemember(String text) {
         if (text == null || text.trim().isEmpty()) {
@@ -2222,11 +2086,6 @@ public class RoleplayService {
         return result;
     }
 
-    String shortText(String text,int maxChars) {
-        String value = safe(text).replace("\n"," ").trim();
-        if (value.length() <= maxChars) return value;
-        return value.substring(0,maxChars)+"...";
-    }
 
     String extractContent(JSONArray message) {
         if (message == null) return "";
@@ -2517,17 +2376,6 @@ public class RoleplayService {
         return builder.append("]").toString();
     }
 
-    private String joinArray(JSONArray array) {
-        if (array == null || array.isEmpty()) return "";
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < array.size(); i++) {
-            String value = safe(array.getString(i));
-            if (value.isEmpty()) continue;
-            if (builder.length() > 0) builder.append(", ");
-            builder.append(value);
-        }
-        return builder.toString();
-    }
 
     private synchronized boolean reserveImageVision(long groupID) {
         if (config.imageUnderstandingMaxPerHour <= 0) return true;
@@ -2736,11 +2584,81 @@ public class RoleplayService {
         storage().update("ALTER TABLE `"+table+"` ADD COLUMN `"+column+"` "+definition);
     }
 
+
+    String safe(String value) {
+        return textUtils.safe(value);
+    }
+
+    String shortText(String text,int maxChars) {
+        return textUtils.shortText(text,maxChars);
+    }
+
+    String currentTimeText() {
+        return textUtils.currentTimeText();
+    }
+
+    String formatMemoryTime(long time) {
+        return textUtils.formatMemoryTime(time);
+    }
+
+    String normalizeAddressText(String content) {
+        return textUtils.normalizeAddressText(content);
+    }
+
+    boolean containsRoleAlias(String text,String alias) {
+        return textUtils.containsRoleAlias(text,alias);
+    }
+
+    boolean startsWithAlias(String text,String alias) {
+        return textUtils.startsWithAlias(text,alias);
+    }
+
+    boolean isOwnRoleName(String name) {
+        return textUtils.isOwnRoleName(name);
+    }
+
+    String joinArray(JSONArray array) {
+        return textUtils.joinArray(array);
+    }
+
+    boolean containsCSVLong(String csv,long value) {
+        return textUtils.containsCSVLong(csv,value);
+    }
+
+    long eventTimeMillis(GroupMessageEvent event) {
+        return textUtils.eventTimeMillis(event);
+    }
+
+    String senderName(GroupMessageEvent event) {
+        return textUtils.senderName(event);
+    }
+
+    String openingOf(String text) {
+        return textUtils.openingOf(text);
+    }
+
+    int longestCommonRun(String left,String right) {
+        return textUtils.longestCommonRun(left,right);
+    }
+
+    double similarity(String left,String right) {
+        return textUtils.similarity(left,right);
+    }
+
+    Set<String> bigrams(String text) {
+        return textUtils.bigrams(text);
+    }
+
+    String normalizeForSimilarity(String text) {
+        return textUtils.normalizeForSimilarity(text);
+    }
+
+    boolean sleepQuietly(long millis) {
+        return textUtils.sleepQuietly(millis);
+    }
+
     StorageService storage() {
         return plugin.getServer().getStorage();
     }
 
-    String safe(String value) {
-        return value == null ? "" : value;
-    }
 }
