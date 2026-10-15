@@ -76,6 +76,7 @@ public class RoleplayService {
     private final RoleplayTurnProcessor turnProcessor;
     private final RoleplayTextUtils textUtils;
     private final RoleplayJsonUtils jsonUtils;
+    private final RoleplayImageContextService imageContextService;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -88,8 +89,8 @@ public class RoleplayService {
     final Map<Long,String> pendingMemoryMap = new ConcurrentHashMap<>();
     final Map<Long,String> memoryErrorTypeMap = new ConcurrentHashMap<>();
     final Map<Long,Boolean> memoryMergingMap = new ConcurrentHashMap<>();
-    private final Map<Long,long[]> imageVisionRateMap = new ConcurrentHashMap<>();
-    private final Map<String,RecentImage> recentImageMap = new ConcurrentHashMap<>();
+
+
     private final Map<String,RecentSticker> recentStickerMap = new ConcurrentHashMap<>();
     //被并入延后回合的消息 ID，处理下一批时直接跳过，避免同一句话回两次
     final Set<Long> mergedMessageIDs = Collections.newSetFromMap(
@@ -195,30 +196,30 @@ public class RoleplayService {
     }
 
     static class RecentImage {
-        private final JSONObject data;
-        private final long expireAt;
-        private volatile String summary = "";
+        final JSONObject data;
+        final long expireAt;
+        volatile String summary = "";
 
-        private RecentImage(JSONObject data,long expireAt) {
+        RecentImage(JSONObject data,long expireAt) {
             this.data = data;
             this.expireAt = expireAt;
         }
 
-        private boolean expired() {
+        boolean expired() {
             return System.currentTimeMillis() > expireAt;
         }
     }
 
     private static class RecentSticker {
         private final String emotion;
-        private final long expireAt;
+        final long expireAt;
 
         private RecentSticker(String emotion,long expireAt) {
             this.emotion = emotion;
             this.expireAt = expireAt;
         }
 
-        private boolean expired() {
+        boolean expired() {
             return System.currentTimeMillis() > expireAt;
         }
     }
@@ -275,6 +276,7 @@ public class RoleplayService {
         this.turnProcessor = new RoleplayTurnProcessor(this);
         this.textUtils = new RoleplayTextUtils(this);
         this.jsonUtils = new RoleplayJsonUtils();
+        this.imageContextService = new RoleplayImageContextService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -469,7 +471,7 @@ public class RoleplayService {
         turnProcessor.markStickerRecognitionPending(groupID,userID);
     }
 
-    private void finishStickerRecognition(long groupID,long userID,String emotion) {
+    void finishStickerRecognition(long groupID,long userID,String emotion) {
         turnProcessor.finishStickerRecognition(groupID,userID,emotion);
     }
 
@@ -1163,7 +1165,7 @@ public class RoleplayService {
      * 识图用的学生外貌参考。
      * 知识库学生库启用时从条目取外貌并按总预算均分，否则退回插件自带的学生图鉴。
      */
-    private String visionReferenceText() {
+    String visionReferenceText() {
         String text = knowledgeService.visionReferenceText(persona.name,persona.appearance,
                 config.visionReferenceMaxChars);
         return text.isEmpty() ? persona.visionReferenceText() : text;
@@ -1312,7 +1314,7 @@ public class RoleplayService {
         pendingMemoryMap.clear();
         memoryErrorTypeMap.clear();
         memoryMergingMap.clear();
-        recentImageMap.clear();
+        imageContextService.clearRuntimeState();
         recentStickerMap.clear();
         turnProcessor.clearRuntimeState();
         emotionService.clearCache();
@@ -2105,128 +2107,15 @@ public class RoleplayService {
         return builder.toString().trim();
     }
 
-    boolean hasImageContent(JSONArray message) {
-        if (message == null) return false;
-        for (int i = 0; i < message.size(); i++) {
-            JSONObject segment = message.getJSONObject(i);
-            if (segment == null) continue;
-            String type = segment.getString("type");
-            if ("image".equals(type) || "mface".equals(type)) return true;
-        }
-        return false;
-    }
 
-    boolean hasMeaningfulText(JSONArray message) {
-        if (message == null) return false;
-        for (int i = 0; i < message.size(); i++) {
-            JSONObject segment = message.getJSONObject(i);
-            if (segment == null) continue;
-            String type = segment.getString("type");
-            JSONObject data = segment.getJSONObject("data");
-            if ("text".equals(type) && data != null && !safe(data.getString("text")).trim().isEmpty()) {
-                return true;
-            }
-            if ("at".equals(type) && data != null && !safe(data.getString("qq")).trim().isEmpty()) {
-                return true;
-            }
-        }
-        return false;
-    }
 
-    RecentImage rememberImageContext(GroupMessageEvent event,long groupID) {
-        JSONArray message = event.getMessage();
-        if (message == null) return null;
-        JSONObject latest = null;
-        for (int i = 0; i < message.size(); i++) {
-            JSONObject segment = message.getJSONObject(i);
-            if (segment == null) continue;
-            String type = segment.getString("type");
-            JSONObject data = segment.getJSONObject("data");
-            if (!("image".equals(type) || "mface".equals(type))) continue;
-            if (isStickerSegment(type,data)) continue;
-            latest = data;
-        }
-        if (latest == null) return null;
-        JSONObject copy = new JSONObject(true);
-        copy.put("file_unique",safe(latest.getString("file_unique")));
-        copy.put("file_id",safe(latest.getString("file_id")));
-        copy.put("url",safe(latest.getString("url")));
-        copy.put("file",safe(latest.getString("file")));
-        copy.put("sub_type",latest.get("sub_type"));
-        RecentImage recent = new RecentImage(copy,
-                System.currentTimeMillis() + config.imageContextTimeoutSecond * 1000L);
-        recentImageMap.put(recentImageKey(groupID,event.getUserID()),recent);
-        return recent;
-    }
 
-    RecentImage findRecentImageContext(long groupID,long userID,String content) {
-        String key = recentImageKey(groupID,userID);
-        RecentImage recent = recentImageMap.get(key);
-        if (recent == null) return null;
-        if (recent.expired()) {
-            recentImageMap.remove(key);
-            return null;
-        }
-        return referencesImage(content) ? recent : null;
-    }
 
-    private boolean referencesImage(String content) {
-        String value = safe(content);
-        String[] keywords = new String[]{"图","照片","截图","这个","这张","里面","上面","什么",
-                "谁","哪里","颜色","文字","写","看","识别","描述"};
-        for (String keyword : keywords) {
-            if (value.contains(keyword)) return true;
-        }
-        return false;
-    }
 
-    private JSONObject imageParams(RecentImage recent) {
-        JSONObject params = new JSONObject(true);
-        JSONObject data = recent == null ? null : recent.data;
-        params.put("fileUnique",data == null ? "" : safe(data.getString("file_unique")));
-        if (safe(params.getString("fileUnique")).isEmpty() && data != null) {
-            params.put("fileUnique",safe(data.getString("file_id")));
-        }
-        params.put("url",data == null ? "" : safe(data.getString("url")));
-        params.put("file",data == null ? "" : safe(data.getString("file")));
-        return params;
-    }
 
-    private JSONObject imageData(RecentImage recent) {
-        PluginService vision = plugin.getServer().getPluginManager().getService("MBB-Vision");
-        if (vision == null || recent == null) return null;
-        return vision.call("dataUri",imageParams(recent));
-    }
 
-    private String imageSummary(RecentImage recent) {
-        if (recent == null) return "";
-        if (recent.summary != null && !recent.summary.trim().isEmpty()) return recent.summary;
-        PluginService vision = plugin.getServer().getPluginManager().getService("MBB-Vision");
-        if (vision == null) return "";
-        JSONObject result = vision.call("describe",imageParams(recent));
-        if (result == null || !result.getBooleanValue("status")) return "";
-        String summary = safe(result.getString("summary"));
-        if (summary.isEmpty()) summary = safe(result.getString("description"));
-        recent.summary = summary;
-        return summary;
-    }
 
-    private boolean sameImage(JSONObject left,JSONObject right) {
-        if (left == null || right == null) return false;
-        String leftUnique = safe(left.getString("file_unique"));
-        String rightUnique = safe(right.getString("file_unique"));
-        if (!leftUnique.isEmpty() || !rightUnique.isEmpty()) return leftUnique.equals(rightUnique);
-        String leftUrl = safe(left.getString("url"));
-        String rightUrl = safe(right.getString("url"));
-        if (!leftUrl.isEmpty() || !rightUrl.isEmpty()) return leftUrl.equals(rightUrl);
-        String leftFile = safe(left.getString("file"));
-        String rightFile = safe(right.getString("file"));
-        return !leftFile.isEmpty() && leftFile.equals(rightFile);
-    }
 
-    String recentImageKey(long groupID,long userID) {
-        return groupID+"|"+userID;
-    }
 
 
 
@@ -2263,134 +2152,18 @@ public class RoleplayService {
     }
 
 
-    boolean shouldUnderstandImages(GroupMessageEvent event,String content,
-                                           boolean direct,boolean sameUserContinuation) {
-        if (!config.imageUnderstandingEnable || "off".equals(config.imageUnderstandingMode)) return false;
-        if (hasStickerContent(event.getMessage())) return true;
-        if ("all".equals(config.imageUnderstandingMode)) return true;
-        return direct || sameUserContinuation;
-    }
 
-    boolean hasStickerContent(JSONArray message) {
-        if (message == null) return false;
-        for (int i = 0; i < message.size(); i++) {
-            JSONObject segment = message.getJSONObject(i);
-            if (segment == null) continue;
-            if (isStickerSegment(segment.getString("type"),segment.getJSONObject("data"))) return true;
-        }
-        return false;
-    }
 
-    private boolean isStickerSegment(String type,JSONObject data) {
-        if ("mface".equals(type)) return true;
-        if (data == null) return false;
-        String file = safe(data.getString("file"));
-        if (file.contains("marketface")) return true;
-        Object subType = data.get("sub_type");
-        if (subType == null) return false;
-        String value = String.valueOf(subType).trim();
-        return !value.isEmpty() && !"0".equals(value);
-    }
 
     /**
      * 纯图片与表情消息的识图
      * 放到独立异步任务里跑，识图完成后合并表情语气并放行等待中的回合，
      * 这样一张图不会卡住同一群后面的消息。
      */
-    void dispatchImageUnderstanding(GroupMessageEvent event,long groupID,
-                                            RecentImage imageContext,boolean hasSticker,
-                                            boolean direct,boolean sameUserContinuation) {
-        if (!shouldUnderstandImages(event,"",direct,sameUserContinuation)) return;
-        final long userID = event.getUserID();
-        final boolean sticker = hasSticker;
-        submitBackground(() -> {
-            try {
-                String content = enrichImageContent(event,"",groupID,imageContext);
-                if (sticker) {
-                    String emotion = content == null || content.trim().isEmpty()
-                            ? "[表情包]" : content.trim();
-                    finishStickerRecognition(groupID,userID,emotion);
-                }
-            } catch (Exception e) {
-                plugin.getLogger().sendException(e);
-            }
-        });
-    }
-
-    private String enrichImageContent(GroupMessageEvent event,String context,long groupID,
-                                      RecentImage currentImage) {
-        PluginService vision = plugin.getServer().getPluginManager().getService("MBB-Vision");
-        if (vision == null) return context;
-        if (!reserveImageVision(groupID)) {
-            plugin.getLogger().sendWarn("[识图] 群"+groupID+" 已达到每小时识图上限，跳过图片理解。");
-            return context;
-        }
-        StringBuilder builder = new StringBuilder();
-        JSONArray message = event.getMessage();
-        for (int i = 0; i < message.size(); i++) {
-            JSONObject segment = message.getJSONObject(i);
-            if (segment == null) continue;
-            String type = segment.getString("type");
-            JSONObject data = segment.getJSONObject("data");
-            if ("text".equals(type)) {
-                builder.append(data == null ? "" : safe(data.getString("text")));
-            } else if ("at".equals(type)) {
-                builder.append("@").append(data == null ? "" : safe(data.getString("qq")));
-            } else if ("image".equals(type) || "mface".equals(type)) {
-                builder.append(describeImageSegment(vision,type,data,context,currentImage));
-            } else if ("face".equals(type)) {
-                builder.append("[表情]");
-            }
-        }
-        return builder.toString().trim();
-    }
-
-    private String describeImageSegment(PluginService vision,String type,JSONObject data,String context,
-                                        RecentImage currentImage) {
-        boolean sticker = isStickerSegment(type,data);
-        JSONObject params = new JSONObject(true);
-        params.put("kind",sticker ? "sticker" : "image");
-        String fileUnique = data == null ? "" : safe(data.getString("file_unique"));
-        if (fileUnique.isEmpty() && data != null) fileUnique = safe(data.getString("file_id"));
-        params.put("fileUnique",fileUnique);
-        params.put("url",data == null ? "" : safe(data.getString("url")));
-        params.put("file",data == null ? "" : safe(data.getString("file")));
-        params.put("context",context);
-        params.put("reference",visionReferenceText());
-        params.put("profile",config.imageUnderstandingProfile);
-        JSONObject result = vision.call("describe",params);
-        if (result == null || !result.getBooleanValue("status")) {
-            return sticker ? "[表情包]" : "[图片]";
-        }
-        String summary = safe(result.getString("summary"));
-        if (summary.isEmpty()) summary = safe(result.getString("description"));
-        if (currentImage != null && !sticker && sameImage(data,currentImage.data)) {
-            currentImage.summary = summary;
-        }
-        String ocr = safe(result.getString("ocr"));
-        String tags = joinArray(result.getJSONArray("emotionTags"));
-        StringBuilder builder = new StringBuilder(sticker ? "[表情包" : "[图片");
-        if (!summary.isEmpty()) builder.append("：").append(shortText(summary,config.imageUnderstandingMaxChars));
-        if (sticker && !tags.isEmpty()) builder.append("；情绪：").append(tags);
-        if (!sticker && config.imageUnderstandingInjectOcr && !ocr.isEmpty()) {
-            builder.append("；文字：").append(shortText(ocr,120));
-        }
-        return builder.append("]").toString();
-    }
 
 
-    private synchronized boolean reserveImageVision(long groupID) {
-        if (config.imageUnderstandingMaxPerHour <= 0) return true;
-        long now = System.currentTimeMillis();
-        long[] state = imageVisionRateMap.get(groupID);
-        if (state == null || now - state[0] >= 3600000L) {
-            imageVisionRateMap.put(groupID,new long[]{now,1});
-            return true;
-        }
-        if (state[1] >= config.imageUnderstandingMaxPerHour) return false;
-        state[1]++;
-        return true;
-    }
+
+
 
     boolean containsIgnoredContent(JSONArray message) {
         if (message == null) return false;
@@ -2501,6 +2274,60 @@ public class RoleplayService {
 
     JSONObject message(String role,String content) {
         return jsonUtils.message(role,content);
+    }
+
+
+    boolean hasImageContent(JSONArray message) {
+        return imageContextService.hasImageContent(message);
+    }
+
+    boolean hasMeaningfulText(JSONArray message) {
+        return imageContextService.hasMeaningfulText(message);
+    }
+
+    RecentImage rememberImageContext(GroupMessageEvent event,long groupID) {
+        return imageContextService.rememberImageContext(event,groupID);
+    }
+
+    RecentImage findRecentImageContext(long groupID,long userID,String content) {
+        return imageContextService.findRecentImageContext(groupID,userID,content);
+    }
+
+    JSONObject imageParams(RecentImage recent) {
+        return imageContextService.imageParams(recent);
+    }
+
+    JSONObject imageData(RecentImage recent) {
+        return imageContextService.imageData(recent);
+    }
+
+    String imageSummary(RecentImage recent) {
+        return imageContextService.imageSummary(recent);
+    }
+
+    String recentImageKey(long groupID,long userID) {
+        return imageContextService.recentImageKey(groupID,userID);
+    }
+
+    boolean shouldUnderstandImages(GroupMessageEvent event,String content,
+                                   boolean direct,boolean sameUserContinuation) {
+        return imageContextService.shouldUnderstandImages(event,content,direct,sameUserContinuation);
+    }
+
+    boolean hasStickerContent(JSONArray message) {
+        return imageContextService.hasStickerContent(message);
+    }
+
+    void dispatchImageUnderstanding(GroupMessageEvent event,long groupID,
+                                    RecentImage imageContext,boolean hasSticker,
+                                    boolean direct,boolean sameUserContinuation) {
+        imageContextService.dispatchImageUnderstanding(event,groupID,imageContext,hasSticker,
+                direct,sameUserContinuation);
+    }
+
+    String enrichImageContent(GroupMessageEvent event,String context,long groupID,
+                              RecentImage currentImage) {
+        return imageContextService.enrichImageContent(event,context,groupID,currentImage);
     }
 
     StorageService storage() {
