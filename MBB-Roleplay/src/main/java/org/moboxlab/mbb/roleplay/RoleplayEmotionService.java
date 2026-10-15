@@ -35,6 +35,8 @@ public class RoleplayEmotionService {
     private final RoleplayEmotionStateRepository emotionStateRepository;
     private final RoleplayEmotionPromptService emotionPromptService;
     private final RoleplayEmotionAnalyzer emotionAnalyzer;
+    private final RoleplayRelationService relationService;
+    private final RoleplayMoodService moodService;
     private volatile RoleplayConfig config;
     private volatile RoleplayPersona persona;
     final Map<Long,MoodState> moodCache = new ConcurrentHashMap<>();
@@ -123,6 +125,8 @@ public class RoleplayEmotionService {
         this.emotionStateRepository = new RoleplayEmotionStateRepository(this);
         this.emotionPromptService = new RoleplayEmotionPromptService(this);
         this.emotionAnalyzer = new RoleplayEmotionAnalyzer(this);
+        this.relationService = new RoleplayRelationService(this);
+        this.moodService = new RoleplayMoodService(this);
     }
 
 
@@ -231,6 +235,27 @@ public class RoleplayEmotionService {
 
     boolean isRepeatedMessage(long groupID,long userID,String content) {
         return emotionAnalyzer.isRepeatedMessage(groupID,userID,content);
+    }
+
+
+    boolean isBotOwner(long userID) {
+        return relationService.isBotOwner(userID);
+    }
+
+    boolean isOtherRoleBotUser(long userID) {
+        return relationService.isOtherRoleBotUser(userID);
+    }
+
+    boolean isFullRelationUser(long userID) {
+        return relationService.isFullRelationUser(userID);
+    }
+
+    String relationKey(long groupID,long userID) {
+        return relationService.relationKey(groupID,userID);
+    }
+
+    RoleplayEmotionStateRepository emotionStateRepository() {
+        return emotionStateRepository;
     }
 
     public void reload(RoleplayConfig config,RoleplayPersona persona) {
@@ -461,7 +486,7 @@ public class RoleplayEmotionService {
 
     public synchronized void setRelationReason(long groupID,long userID,String reason) {
         RelationState relation = relation(groupID,userID);
-        if (isFullRelationUser(userID)) {
+        if (relationService.isFullRelationUser(userID)) {
             relation.emotionReason = "";
             relation.reasonStrength = 0;
             relation.reasonSource = "";
@@ -488,7 +513,7 @@ public class RoleplayEmotionService {
     public synchronized void setRelationAffinity(long groupID,long userID,double affinity) {
         RelationState relation = relation(groupID,userID);
         double oldAffinity = relation.affinity;
-        relation.affinity = isFullRelationUser(userID) ? 100 : clampDouble(affinity,0,100);
+        relation.affinity = relationService.isFullRelationUser(userID) ? 100 : clampDouble(affinity,0,100);
         relation.emotionLabel = relationLabel(relation);
         relation.updateTime = System.currentTimeMillis();
         relation.dayKey = emotionStateRepository.dayKey(relation.updateTime);
@@ -549,7 +574,7 @@ public class RoleplayEmotionService {
         double annoyance = 0;
         if (relation != null) {
             String relationReason = event.reason == null ? "" : event.reason.trim();
-            if (isFullRelationUser(userID)) {
+            if (relationService.isFullRelationUser(userID)) {
                 relation.affinity = 100;
                 relation.trust = 100;
                 relation.annoyance = 0;
@@ -579,9 +604,9 @@ public class RoleplayEmotionService {
                     rawTrust = 0;
                     rawAnnoyance = 0;
                 }
-                affinity = applyDailyAffinity(relation,rawAffinity,now);
-                trust = applyDailyTrust(relation,rawTrust,now);
-                annoyance = applyDailyAnnoyance(relation,rawAnnoyance,now);
+                affinity = relationService.applyDailyAffinity(relation,rawAffinity,now);
+                trust = relationService.applyDailyTrust(relation,rawTrust,now);
+                annoyance = relationService.applyDailyAnnoyance(relation,rawAnnoyance,now);
                 relation.lastInteraction = now;
                 relation.updateTime = now;
                 if (event.persistReason && !relationReason.isEmpty()) {
@@ -629,50 +654,9 @@ public class RoleplayEmotionService {
         return applied;
     }
 
-    private double applyDailyAffinity(RelationState relation,double delta,long now) {
-        if (delta == 0) return 0;
-        normalizeDay(relation,now);
-        relation.dayDeltaAffinity += delta;
-        double old = relation.affinity;
-        double cap = Math.max(0.1,config.relationDailyMaxDelta);
-        relation.affinity = clampDouble(relation.dayBaseAffinity
-                + clampDouble(relation.dayDeltaAffinity,-cap,cap),0,100);
-        return relation.affinity - old;
-    }
 
-    private double applyDailyTrust(RelationState relation,double delta,long now) {
-        if (delta == 0) return 0;
-        normalizeDay(relation,now);
-        relation.dayDeltaTrust += delta;
-        double old = relation.trust;
-        double cap = Math.max(0.1,config.relationDailyMaxDelta);
-        relation.trust = clampDouble(relation.dayBaseTrust
-                + clampDouble(relation.dayDeltaTrust,-cap,cap),0,100);
-        return relation.trust - old;
-    }
 
-    private double applyDailyAnnoyance(RelationState relation,double delta,long now) {
-        if (delta == 0) return 0;
-        normalizeDay(relation,now);
-        relation.dayDeltaAnnoyance += delta;
-        double old = relation.annoyance;
-        double cap = Math.max(0.1,config.relationDailyMaxDelta);
-        relation.annoyance = clampDouble(relation.dayBaseAnnoyance
-                + clampDouble(relation.dayDeltaAnnoyance,-cap,cap),0,100);
-        return relation.annoyance - old;
-    }
 
-    private void normalizeDay(RelationState relation,long now) {
-        int key = emotionStateRepository.dayKey(now);
-        if (relation.dayKey == key) return;
-        relation.dayKey = key;
-        relation.dayBaseAffinity = relation.affinity;
-        relation.dayBaseTrust = relation.trust;
-        relation.dayBaseAnnoyance = relation.annoyance;
-        relation.dayDeltaAffinity = 0;
-        relation.dayDeltaTrust = 0;
-        relation.dayDeltaAnnoyance = 0;
-    }
 
 
 
@@ -688,11 +672,11 @@ public class RoleplayEmotionService {
         if (state == null) {
             JSONObject row = storage().queryOne("SELECT * FROM `"+MOOD_TABLE+"` WHERE `groupID`=?",
                     groupID);
-            state = row == null ? defaultMood(groupID) : emotionStateRepository.moodFromJson(row);
+            state = row == null ? moodService.defaultMood(groupID) : emotionStateRepository.moodFromJson(row);
             MoodState previous = moodCache.putIfAbsent(groupID,state);
             if (previous != null) state = previous;
         }
-        decayMood(state);
+        moodService.decayMood(state);
         return state;
     }
 
@@ -706,13 +690,13 @@ public class RoleplayEmotionService {
         if (state == null) {
             JSONObject row = storage().queryOne("SELECT * FROM `"+RELATION_TABLE
                     +"` WHERE `groupID`=? AND `userID`=?",groupID,userID);
-            state = row == null ? defaultRelation(groupID,userID,relationship) : emotionStateRepository.relationFromJson(row);
+            state = row == null ? relationService.defaultRelation(groupID,userID,relationship) : emotionStateRepository.relationFromJson(row);
             RelationState previous = relationCache.putIfAbsent(key,state);
             if (previous != null) state = previous;
             if (row == null && !state.provisionalInitial) emotionStateRepository.saveRelation(state);
         }
         if (state.provisionalInitial && !safe(relationship).isEmpty()) {
-            RelationState initialized = defaultRelation(groupID,userID,relationship);
+            RelationState initialized = relationService.defaultRelation(groupID,userID,relationship);
             state.affinity = initialized.affinity;
             state.trust = initialized.trust;
             state.annoyance = initialized.annoyance;
@@ -720,100 +704,13 @@ public class RoleplayEmotionService {
             state.provisionalInitial = false;
             emotionStateRepository.saveRelation(state);
         }
-        decayRelation(state);
+        relationService.decayRelation(state);
         return state;
     }
 
-    private void decayMood(MoodState mood) {
-        long now = System.currentTimeMillis();
-        if (mood.lastDecayTime <= 0) {
-            mood.lastDecayTime = now;
-            return;
-        }
-        long interval = Math.max(1,config.emotionDecayMinute) * 60000L;
-        long steps = (now - mood.lastDecayTime) / interval;
-        if (steps <= 0) return;
-        int count = (int) Math.min(120,steps);
-        mood.valence = moveToward(mood.valence,baselineValence(),count);
-        mood.energy = moveToward(mood.energy,baselineEnergy(),count);
-        mood.patience = moveToward(mood.patience,baselinePatience(),count);
-        mood.label = moodLabel(mood);
-        if (now - mood.lastEventTime > 7200000L) mood.reason = "";
-        mood.lastDecayTime += steps * interval;
-        mood.updateTime = now;
-        emotionStateRepository.saveMood(mood);
-    }
 
-    private void decayRelation(RelationState relation) {
-        long now = System.currentTimeMillis();
-        if (isFullRelationUser(relation.userID)) {
-            relation.affinity = 100;
-            relation.trust = 100;
-            relation.annoyance = 0;
-            relation.emotionLabel = isBotOwner(relation.userID) ? "妈妈" : "同伴";
-            relation.emotionReason = "";
-            relation.reasonStrength = 0;
-            relation.reasonSource = "";
-            relation.reasonSince = 0L;
-            relation.reasonExpire = 0L;
-            relation.provisionalInitial = false;
-            relation.dayKey = emotionStateRepository.dayKey(now);
-            relation.dayBaseAffinity = 100;
-            relation.dayBaseTrust = 100;
-            relation.dayBaseAnnoyance = 0;
-            relation.dayDeltaAffinity = 0;
-            relation.dayDeltaTrust = 0;
-            relation.dayDeltaAnnoyance = 0;
-            relation.updateTime = now;
-            emotionStateRepository.saveRelation(relation);
-            return;
-        }
-        if (relation.updateTime <= 0) {
-            relation.updateTime = now;
-            return;
-        }
-        long days = (now - relation.updateTime) / DAY_MILLIS;
-        if (days <= 0) return;
-        int steps = (int) Math.min(60,days);
-        double oldAffinity = relation.affinity;
-        double oldTrust = relation.trust;
-        double oldAnnoyance = relation.annoyance;
-        relation.affinity = moveToward(relation.affinity,config.initialAffinity,steps);
-        relation.trust = moveToward(relation.trust,config.initialTrust,steps);
-        relation.annoyance = Math.max(0,relation.annoyance - steps);
-        if (relation.reasonStrength > 0) {
-            relation.reasonStrength = Math.max(0,relation.reasonStrength - steps * 2);
-        }
-        if (relation.reasonExpire > 0 && now > relation.reasonExpire) {
-            relation.reasonStrength = 0;
-        }
-        if (relation.reasonStrength <= 0) {
-            relation.emotionReason = "";
-            relation.reasonSource = "";
-            relation.reasonSince = 0L;
-            relation.reasonExpire = 0L;
-        }
-        relation.emotionLabel = relationLabel(relation);
-        relation.dayKey = emotionStateRepository.dayKey(now);
-        relation.dayBaseAffinity = relation.affinity;
-        relation.dayBaseTrust = relation.trust;
-        relation.dayBaseAnnoyance = relation.annoyance;
-        relation.dayDeltaAffinity = 0;
-        relation.dayDeltaTrust = 0;
-        relation.dayDeltaAnnoyance = 0;
-        relation.updateTime = now;
-        emotionStateRepository.saveRelation(relation);
-        if (oldAffinity != relation.affinity || oldTrust != relation.trust
-                || oldAnnoyance != relation.annoyance) {
-            emotionStateRepository.insertEvent(relation.groupID,relation.userID,0L,"decay",
-                    0,0,0,
-                    relation.affinity - oldAffinity,relation.trust - oldTrust,
-                    relation.annoyance - oldAnnoyance,
-                    "长时间未互动，关系缓慢回落","decay",now);
-        }
-    }
 
-    private int moveToward(int value,int target,int steps) {
+    int moveToward(int value,int target,int steps) {
         if (value == target) return value;
         for (int i = 0; i < steps; i++) {
             if (value < target) value++;
@@ -822,74 +719,12 @@ public class RoleplayEmotionService {
         return value;
     }
 
-    private MoodState defaultMood(long groupID) {
-        MoodState mood = new MoodState();
-        mood.groupID = groupID;
-        mood.valence = baselineValence();
-        mood.energy = baselineEnergy();
-        mood.patience = baselinePatience();
-        mood.label = moodLabel(mood);
-        mood.lastDecayTime = System.currentTimeMillis();
-        mood.updateTime = mood.lastDecayTime;
-        return mood;
-    }
 
-    private RelationState defaultRelation(long groupID,long userID,String relationship) {
-        RelationState relation = new RelationState();
-        relation.groupID = groupID;
-        relation.userID = userID;
-        double multiplier = initialMultiplier(userID,relationship);
-        boolean full = isFullRelationUser(userID);
-        relation.affinity = full
-                ? 100 : clamp((int) Math.round(config.initialAffinity * multiplier),0,100);
-        relation.trust = full ? 100 : clamp((int) Math.round(config.initialTrust
-                * Math.min(1.25,multiplier)),0,100);
-        relation.annoyance = 0;
-        relation.emotionLabel = relationLabel(relation);
-        relation.lastInteraction = System.currentTimeMillis();
-        relation.updateTime = relation.lastInteraction;
-        relation.dayKey = emotionStateRepository.dayKey(relation.updateTime);
-        relation.dayBaseAffinity = relation.affinity;
-        relation.dayBaseTrust = relation.trust;
-        relation.dayBaseAnnoyance = relation.annoyance;
-        relation.provisionalInitial = safe(relationship).isEmpty();
-        return relation;
-    }
 
-    private double initialMultiplier(long userID,String relationship) {
-        double multiplier = 1.0;
-        if ("老师".equals(safe(relationship))) {
-            multiplier *= config.initialGroupAdminMultiplier;
-        }
-        if (isBotAdmin(userID)) multiplier *= config.initialBotAdminMultiplier;
-        if (isBotOwner(userID)) multiplier *= config.initialBotOwnerMultiplier;
-        return Math.max(1.0,multiplier);
-    }
 
-    private boolean isBotAdmin(long userID) {
-        List<Long> admins = plugin.getServer().getAdminList();
-        return admins != null && admins.contains(userID);
-    }
 
-    boolean isBotOwner(long userID) {
-        List<Long> owners = plugin.getServer().getOwnerList();
-        return owners != null && owners.contains(userID);
-    }
 
-    private boolean isFullRelationUser(long userID) {
-        return isBotOwner(userID) || isOtherRoleBotUser(userID);
-    }
 
-    boolean isOtherRoleBotUser(long userID) {
-        if (userID <= 0 || config == null || config.otherRoleBotQQs == null) return false;
-        for (String item : config.otherRoleBotQQs.split(",")) {
-            try {
-                if (Long.parseLong(item.trim()) == userID) return true;
-            } catch (Exception ignored) {
-            }
-        }
-        return false;
-    }
 
 
 
@@ -940,9 +775,6 @@ public class RoleplayEmotionService {
 
 
 
-    String relationKey(long groupID,long userID) {
-        return groupID+"-"+userID;
-    }
 
     boolean matchesRoleName(String value) {
         String text = safe(value).trim();
@@ -975,7 +807,7 @@ public class RoleplayEmotionService {
 
 
 
-    private double moveToward(double value,double target,int steps) {
+    double moveToward(double value,double target,int steps) {
         if (value == target) return value;
         double step = Math.copySign(1.0,value < target ? 1.0 : -1.0);
         for (int i = 0; i < steps; i++) {

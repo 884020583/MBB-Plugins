@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.53.0.2301 | 2026-10-16 | `MBB-Roleplay` 继续拆分情绪与命令：新增 `RoleplayRelationService` 负责好感/信任/厌烦的日限幅、自然回落和身份倍率，新增 `RoleplayMoodService` 负责默认心情、自然衰减和标签刷新，`RoleplayEmotionService` 从约 995 行降到约 827 行；`RoleplayCommand` 按命令组拆为 `RoleplayMemoryCommandHandler`、`RoleplayEmotionCommandHandler`、`RoleplayModerationCommandHandler`、`RoleplayContentCommandHandler`、`RoleplayFeedbackCommandHandler`、`RoleplayMemberCommandHandler`、`RoleplayBotCommandHandler`，主命令类从 1282 行降到约 425 行。行为不变，命令分发和权限判断保持原实现 |
 | V0.5.52.0.2301 | 2026-10-16 | `MBB-Roleplay` 情绪服务拆分：新增 `RoleplayEmotionStateRepository` 负责建表、持久化、导入导出、JSON 映射和日期键；新增 `RoleplayEmotionPromptService` 负责情绪/关系摘要、标签和语气约束；新增 `RoleplayEmotionAnalyzer` 负责本地规则、AI 语义分析、事件冷却和重复消息检测。`RoleplayEmotionService` 从 1589 行降到约 995 行，保留状态缓存、事件应用和对外门面。行为不变 |
 | V0.5.51.0.2301 | 2026-10-16 | `MBB-Roleplay` 第二十六轮类拆分：把消息片段提取、忽略内容、消息流水、机器人消息记录、命令判断、提醒判断、owner 判断、诱导记忆判断、半句识别和地址名列表从 `RoleplayService` 迁到独立的 `RoleplayMessageContentService`，主服务保留内容相关包装入口；`RoleplayService` 从约 1445 行降到约 1390 行。行为不变，消息流水、命令前缀和半句识别保持原实现 |
 | V0.5.50.0.2301 | 2026-10-16 | `MBB-Roleplay` 第二十四至二十五轮类拆分：把规则兜底/AI 路由、动作清单、情绪提示、艾特与引用目标说明迁到 `RoleplayRoutingService`；把提醒清单、可选知识库、学生印象、外貌参考、语料情绪、场景提示和语料检索提示迁到 `RoleplayPromptMaterialService`。主服务保留路由与资料包装入口；`RoleplayService` 从约 1543 行降到约 1445 行。行为不变，路由优先级、资料目录和语料检索参数保持原实现 |
