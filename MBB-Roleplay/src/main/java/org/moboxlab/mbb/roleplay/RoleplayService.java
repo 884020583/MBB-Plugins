@@ -73,6 +73,7 @@ public class RoleplayService {
     private final RoleplayBatchScheduler batchScheduler;
     private final RoleplayPokeService pokeService;
     private final RoleplayReplyExecutor replyExecutor;
+    private final RoleplayTurnProcessor turnProcessor;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -87,9 +88,7 @@ public class RoleplayService {
     final Map<Long,Boolean> memoryMergingMap = new ConcurrentHashMap<>();
     private final Map<Long,long[]> imageVisionRateMap = new ConcurrentHashMap<>();
     private final Map<String,RecentImage> recentImageMap = new ConcurrentHashMap<>();
-    private final Map<String,PendingTurn> pendingTurnMap = new ConcurrentHashMap<>();
     private final Map<String,RecentSticker> recentStickerMap = new ConcurrentHashMap<>();
-    private final Map<String,Integer> pendingGenerationMap = new ConcurrentHashMap<>();
     //被并入延后回合的消息 ID，处理下一批时直接跳过，避免同一句话回两次
     final Set<Long> mergedMessageIDs = Collections.newSetFromMap(
             new ConcurrentHashMap<Long,Boolean>());
@@ -193,7 +192,7 @@ public class RoleplayService {
         }
     }
 
-    private static class RecentImage {
+    static class RecentImage {
         private final JSONObject data;
         private final long expireAt;
         private volatile String summary = "";
@@ -222,48 +221,6 @@ public class RoleplayService {
         }
     }
 
-    private static class PendingTurn {
-        private final GroupMessageEvent event;
-        private final long selfID;
-        private final String userName;
-        private final String relationship;
-        private volatile String content;
-        private final RecentImage imageContext;
-        private final int generation;
-        private final boolean otherRoleBot;
-        private final RoleplayRouteDecision decision;
-        private final RoleplayEmotionService.LocalEvent emotionEvent;
-        private volatile boolean incomplete = false;
-        private volatile String stickerEmotion = "";
-        private volatile boolean stickerPending = false;
-        private volatile long hardDeadline = 0L;
-
-        private PendingTurn(GroupMessageEvent event,long selfID,String userName,
-                            String relationship,String content,RecentImage imageContext,
-                            int generation,boolean otherRoleBot,RoleplayRouteDecision decision,
-                            RoleplayEmotionService.LocalEvent emotionEvent) {
-            this.event = event;
-            this.selfID = selfID;
-            this.userName = userName;
-            this.relationship = relationship;
-            this.content = content;
-            this.imageContext = imageContext;
-            this.generation = generation;
-            this.otherRoleBot = otherRoleBot;
-            this.decision = decision;
-            this.emotionEvent = emotionEvent;
-        }
-
-        /**
-         * 同一用户接着说了一句：把内容并进同一个回合，一次回完
-         */
-        private void appendContent(String text) {
-            if (text == null || text.trim().isEmpty()) return;
-            String value = text.trim();
-            this.content = this.content == null || this.content.trim().isEmpty()
-                    ? value : this.content.trim()+" "+value;
-        }
-    }
 
     /**
      * 已通过准备阶段、等待路由和回复的消息
@@ -313,6 +270,7 @@ public class RoleplayService {
         this.batchScheduler = new RoleplayBatchScheduler(this);
         this.pokeService = new RoleplayPokeService(this);
         this.replyExecutor = new RoleplayReplyExecutor(this);
+        this.turnProcessor = new RoleplayTurnProcessor(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -487,22 +445,35 @@ public class RoleplayService {
         batchScheduler.handle(event);
     }
 
+    boolean processGroupMessage(GroupMessageEvent event) {
+        return turnProcessor.processGroupMessage(event);
+    }
 
     /**
-     * 单条消息入口：准备阶段通过后按单回合链路处理
+     * 合批回合：先把批内每条消息各自过一遍准备阶段，再只做一次路由和一次生成
      * 返回 true 表示这一轮交给了延后回合，调用方不能当成已结束
      */
-    boolean processGroupMessage(GroupMessageEvent event) {
-        PreparedMessage prepared = prepareMessage(event);
-        if (prepared == null) return false;
-        return handleSingleTurn(prepared);
+    boolean processMessageBatch(long groupID,List<GroupMessageEvent> batch) {
+        return turnProcessor.processMessageBatch(groupID,batch);
+    }
+
+    void wakePendingTurnForUser(long groupID,GroupMessageEvent event) {
+        turnProcessor.wakePendingTurnForUser(groupID,event);
+    }
+
+    private void markStickerRecognitionPending(long groupID,long userID) {
+        turnProcessor.markStickerRecognitionPending(groupID,userID);
+    }
+
+    private void finishStickerRecognition(long groupID,long userID,String emotion) {
+        turnProcessor.finishStickerRecognition(groupID,userID,emotion);
     }
 
     /**
      * 消息准备：过滤、识图、记流水、规则预判、情绪观察和提醒识别
      * 返回 null 表示这条消息本轮不需要角色出声
      */
-    private PreparedMessage prepareMessage(GroupMessageEvent event) {
+    PreparedMessage prepareMessage(GroupMessageEvent event) {
         if (event == null || !config.enable) return null;
         long groupID = event.getGroupID();
         if (!isGroupEnabled(groupID)) return null;
@@ -638,173 +609,20 @@ public class RoleplayService {
         return prepared;
     }
 
-    private boolean handleSingleTurn(PreparedMessage prepared) {
-        GroupMessageEvent event = prepared.event;
-        long groupID = prepared.groupID;
-        String content = mergeStickerEmotion(prepared.content,prepared.stickerEmotion);
-        // 冷却或超频时直接跳过，不必再花一次路由调用
-        if (rateLimited(groupID)) return false;
-        RoleplayRouteDecision decision = routeDecision(prepared.signals,event,groupID,
-                prepared.selfID,content);
-        if (decision == null || !decision.reply) return false;
-        decision.chance = emotionService.adjustReplyChance(groupID,prepared.userID,
-                decision.chance,prepared.direct,prepared.otherRoleBot);
-        decision.chance = replyFeedbackService.adjustChance(groupID,decision.chance,
-                prepared.direct,prepared.otherRoleBot);
-        decision.chance = attentionService.adjustChance(groupID,prepared.attentionTopic,
-                decision.chance,prepared.direct,prepared.otherRoleBot);
-        if (decision.chance < 1.0 && Math.random() >= decision.chance) {
-            plugin.getLogger().sendInfo("[角色] 群"+groupID+" 概率跳过 概率="
-                    +decision.chance+" 原因="+decision.reason);
-            return false;
-        }
-        boolean defer = shouldDeferTurn(event,prepared.otherRoleBot,prepared.hasImage);
-        //延后回合把限流判定留到真正生成回复时，避免这里刚登记的冷却把同一轮的延后执行挡掉
-        if (defer) {
-            if (rateLimited(groupID)) return false;
-        } else if (!canReply(groupID)) {
-            return false;
-        }
-        plugin.getLogger().sendInfo("[角色] 群"+groupID+" 决策 addressed="+decision.addressed
-                +" 概率="+decision.chance
-                +" 技能="+decision.skills
-                +" 资料="+decision.materials
-                +" 引用="+(decision.quoteRequired ? "是" : "否")
-                +" 原因="+decision.reason);
-        if (defer) {
-            deferTurn(event,groupID,prepared.selfID,prepared.userName,prepared.relationship,
-                    content,prepared.imageContext,prepared.otherRoleBot,decision,
-                    prepared.emotionEvent);
-            return true;
-        }
-        JSONObject result = reply(groupID,prepared.userID,prepared.userName,content,
-                prepared.otherRoleBot,prepared.relationship,prepared.imageContext,decision);
-        if (result == null || !result.getBooleanValue("status")) {
-            plugin.getLogger().sendWarn("[角色] 群"+groupID+" 回复生成失败，本轮不发送");
-            return false;
-        }
-        replyExecutor.processReplyResult(event,groupID,prepared.selfID,prepared.userName,prepared.relationship,
-                content,result,decision,prepared.emotionEvent);
-        return false;
-    }
 
     /**
      * 合批回合：先把批内每条消息各自过一遍准备阶段，再只做一次路由和一次生成
      * 返回 true 表示这一轮交给了延后回合，调用方不能当成已结束
      */
-    boolean processMessageBatch(long groupID,List<GroupMessageEvent> batch) {
-        List<PreparedMessage> messages = new ArrayList<>();
-        for (GroupMessageEvent event : batch) {
-            PreparedMessage prepared = prepareMessage(event);
-            if (prepared != null) messages.add(prepared);
-        }
-        if (messages.isEmpty()) return false;
-        if (messages.size() == 1) {
-            return handleSingleTurn(messages.get(0));
-        }
-        handleBatchTurn(groupID,messages);
-        return false;
-    }
 
-    private void handleBatchTurn(long groupID,List<PreparedMessage> messages) {
-        PreparedMessage primary = primaryMessage(messages);
-        if (rateLimited(groupID)) return;
-        String batchText = batchPromptText(messages);
-        RoleplayContextService.TopicFatigue batchFatigue = contextService.topicFatigue(groupID,batchText);
-        primary.signals.topicFatigued = batchFatigue.fatigued();
-        primary.signals.topicHint = batchFatigue.hint();
-        RoleplayRouteDecision decision = routeDecision(primary.signals,primary.event,groupID,
-                primary.selfID,batchText);
-        if (decision == null || !decision.reply) return;
-        decision.chance = emotionService.adjustReplyChance(groupID,primary.userID,
-                decision.chance,primary.direct,primary.otherRoleBot);
-        decision.chance = replyFeedbackService.adjustChance(groupID,decision.chance,
-                primary.direct,primary.otherRoleBot);
-        decision.chance = attentionService.adjustChance(groupID,primary.attentionTopic,
-                decision.chance,primary.direct,primary.otherRoleBot);
-        if (decision.chance < 1.0 && Math.random() >= decision.chance) {
-            plugin.getLogger().sendInfo("[角色] 群"+groupID+" 合批概率跳过 概率="
-                    +decision.chance+" 原因="+decision.reason);
-            return;
-        }
-        if (!canReply(groupID)) {
-            plugin.getLogger().sendInfo("[角色] 群"+groupID+" 合批回合被回复冷却拦下，本轮不回复");
-            return;
-        }
-        plugin.getLogger().sendInfo("[角色] 群"+groupID+" 合批 "+messages.size()
-                +" 条 最早="+batchOldestAgeSecond(messages)+"秒前 决策 addressed="+decision.addressed
-                +" 概率="+decision.chance
-                +" 技能="+decision.skills
-                +" 资料="+decision.materials
-                +" 原因="+decision.reason);
-        JSONObject result = reply(groupID,primary.userID,primary.userName,batchText,
-                primary.otherRoleBot,primary.relationship,primary.imageContext,decision,
-                batchText,messages.size());
-        if (result == null || !result.getBooleanValue("status")) {
-            plugin.getLogger().sendWarn("[角色] 群"+groupID+" 合批回复生成失败，本轮不发送");
-            return;
-        }
-        replyExecutor.processBatchReplyResult(groupID,primary.selfID,messages,primary,decision,result);
-    }
 
     /**
      * 批内主消息：优先取最后一条直接点名角色的消息，没有就取最后一条
      */
-    private PreparedMessage primaryMessage(List<PreparedMessage> messages) {
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            if (messages.get(i).direct) return messages.get(i);
-        }
-        return messages.get(messages.size() - 1);
-    }
 
-    private String batchPromptText(List<PreparedMessage> messages) {
-        StringBuilder builder = new StringBuilder();
-        builder.append("以下 ").append(messages.size())
-                .append(" 条消息在很短时间内连续到达，按时间顺序排列，可能来自不同的人")
-                .append("（只回应这里列出的消息，最近群聊只是背景，不要接已经翻篇的旧话题）：\n");
-        for (int i = 0; i < messages.size(); i++) {
-            PreparedMessage message = messages.get(i);
-            builder.append("[").append(i + 1).append("] ")
-                    .append(messageTimeText(message.event)).append(" ")
-                    .append(message.userName).append("（QQ：").append(message.userID).append("）");
-            if (message.otherRoleBot) builder.append("（另一个角色机器人）");
-            if (message.direct) builder.append("（直接提到你）");
-            builder.append("（艾特：").append(atTargetInfo(message.event))
-                    .append("；引用：").append(quotedTargetInfo(message.groupID,message.event)).append("）");
-            builder.append("：").append(safe(message.content).trim().replace("\n"," "));
-            if (!message.stickerEmotion.isEmpty()
-                    && i == lastMessageIndexOfUser(messages,message.userID)) {
-                builder.append("（随后补了一个表情包，情绪：").append(message.stickerEmotion).append("）");
-            }
-            builder.append("\n");
-        }
-        return builder.toString();
-    }
 
-    private String messageTimeText(GroupMessageEvent event) {
-        long time = eventTimeMillis(event);
-        if (time <= 0) return "";
-        return new SimpleDateFormat("HH:mm:ss",Locale.CHINA).format(new Date(time));
-    }
 
-    private long batchOldestAgeSecond(List<PreparedMessage> messages) {
-        long now = System.currentTimeMillis();
-        long oldest = 0L;
-        for (PreparedMessage message : messages) {
-            long time = eventTimeMillis(message.event);
-            if (time <= 0) continue;
-            long age = (now - time) / 1000L;
-            if (age > oldest) oldest = age;
-        }
-        return oldest;
-    }
 
-    private int lastMessageIndexOfUser(List<PreparedMessage> messages,long userID) {
-        for (int i = messages.size() - 1; i >= 0; i--) {
-            if (messages.get(i).userID == userID) return i;
-        }
-        return -1;
-    }
 
 
     /**
@@ -1107,6 +925,14 @@ public class RoleplayService {
         return contextService;
     }
 
+    RoleplayReplyExecutor replyExecutor() {
+        return replyExecutor;
+    }
+
+    RoleplayBatchScheduler batchScheduler() {
+        return batchScheduler;
+    }
+
     RoleplayMessageSender messageSender() {
         return messageSender;
     }
@@ -1401,7 +1227,7 @@ public class RoleplayService {
         return String.join("；",parts);
     }
 
-    private String atTargetInfo(GroupMessageEvent event) {
+    String atTargetInfo(GroupMessageEvent event) {
         if (event == null || event.getMessage() == null) return "无";
         List<String> targets = new ArrayList<>();
         JSONArray message = event.getMessage();
@@ -1415,7 +1241,7 @@ public class RoleplayService {
         return targets.isEmpty() ? "无" : String.join("、",targets);
     }
 
-    private String quotedTargetInfo(long groupID,GroupMessageEvent event) {
+    String quotedTargetInfo(long groupID,GroupMessageEvent event) {
         long quotedID = quotedMessageID(event);
         if (quotedID <= 0) return "无";
         JSONObject row = storage().queryOne(
@@ -1431,7 +1257,7 @@ public class RoleplayService {
      * 产出本轮决策
      * 规则先算一遍作为兜底，路由可用时以路由结果为准，但规则保留否决权
      */
-    private RoleplayRouteDecision routeDecision(RoleplayDecisionEngine.Signals signals,
+    RoleplayRouteDecision routeDecision(RoleplayDecisionEngine.Signals signals,
                                                 GroupMessageEvent event,long groupID,long selfID,
                                                 String content) {
         RoleplayRouteDecision ruleDecision = RoleplayDecisionEngine.decide(config,signals);
@@ -1484,7 +1310,7 @@ public class RoleplayService {
         memoryMergingMap.clear();
         recentImageMap.clear();
         recentStickerMap.clear();
-        pendingTurnMap.clear();
+        turnProcessor.clearRuntimeState();
         emotionService.clearCache();
     }
 
@@ -1638,7 +1464,7 @@ public class RoleplayService {
         return rows == null || rows.isEmpty() ? 0 : rows.get(0).getIntValue("count");
     }
 
-    private void recordMessage(GroupMessageEvent event,String content,boolean isBot) {
+    void recordMessage(GroupMessageEvent event,String content,boolean isBot) {
         JSONObject sender = event.getSender();
         String userName = sender == null ? "" : sender.getString("card");
         if (userName == null || userName.isEmpty()) userName = sender == null ? "" : sender.getString("nickname");
@@ -1670,7 +1496,7 @@ public class RoleplayService {
      */
 
 
-    private boolean isCommand(String content) {
+    boolean isCommand(String content) {
         String text = content == null ? "" : content.trim();
         if (text.startsWith("@")) {
             text = text.replaceFirst("^@[0-9]+\\s*","").trim();
@@ -1681,13 +1507,13 @@ public class RoleplayService {
         return false;
     }
 
-    private long eventTimeMillis(GroupMessageEvent event) {
+    long eventTimeMillis(GroupMessageEvent event) {
         if (event == null || event.getRaw() == null) return 0L;
         long seconds = event.getRaw().getLongValue("time");
         return seconds <= 0 ? 0L : seconds * 1000L;
     }
 
-    private String senderName(GroupMessageEvent event) {
+    String senderName(GroupMessageEvent event) {
         JSONObject sender = event.getSender();
         String name = sender == null ? "" : sender.getString("card");
         if (name == null || name.trim().isEmpty()) name = sender == null ? "" : sender.getString("nickname");
@@ -1728,7 +1554,7 @@ public class RoleplayService {
         }
     }
 
-    private String relationshipLabel(GroupMessageEvent event,boolean otherRoleBot) {
+    String relationshipLabel(GroupMessageEvent event,boolean otherRoleBot) {
         if (otherRoleBot) return "其他角色机器人";
         if (event != null && isOwner(event.getUserID())) return "妈妈";
         JSONObject sender = event == null ? null : event.getSender();
@@ -1750,15 +1576,15 @@ public class RoleplayService {
         return owners != null && owners.contains(userID);
     }
 
-    private boolean isAddressedToOtherRole(GroupMessageEvent event,String content,long selfID) {
+    boolean isAddressedToOtherRole(GroupMessageEvent event,String content,long selfID) {
         return mentionsOtherRole(event,content,selfID) && !mentionsSelfRole(event,content,selfID);
     }
 
-    private boolean isMultiRoleAddress(GroupMessageEvent event,String content,long selfID) {
+    boolean isMultiRoleAddress(GroupMessageEvent event,String content,long selfID) {
         return mentionsOtherRole(event,content,selfID) && mentionsSelfRole(event,content,selfID);
     }
 
-    private boolean mentionsSelfRole(GroupMessageEvent event,String content,long selfID) {
+    boolean mentionsSelfRole(GroupMessageEvent event,String content,long selfID) {
         if (isMentioningSelf(event,selfID)) return true;
         String text = normalizeAddressText(content);
         if (containsRoleAlias(text,persona.name)) return true;
@@ -1795,7 +1621,7 @@ public class RoleplayService {
     /**
      * 这条消息是否艾特了普通群成员：既不是角色自己，也不是另一个角色机器人
      */
-    private boolean mentionsOtherMember(GroupMessageEvent event,long selfID) {
+    boolean mentionsOtherMember(GroupMessageEvent event,long selfID) {
         if (event == null || event.getMessage() == null) return false;
         JSONArray message = event.getMessage();
         for (int i = 0; i < message.size(); i++) {
@@ -1836,12 +1662,12 @@ public class RoleplayService {
         return false;
     }
 
-    private boolean isReminderNotification(String content) {
+    boolean isReminderNotification(String content) {
         String text = content == null ? "" : content;
         return text.contains(RoleplayReminderService.REMINDER_MARKER);
     }
 
-    private int countMessage(long groupID) {
+    int countMessage(long groupID) {
         Integer count = messageCountMap.get(groupID);
         count = count == null ? 0 : count;
         count++;
@@ -1852,7 +1678,7 @@ public class RoleplayService {
     /**
      * 只读的限流判断，用于在调用路由之前提前跳过，避免冷却期还去请求模型
      */
-    private boolean rateLimited(long groupID) {
+    boolean rateLimited(long groupID) {
         synchronized (groupQueueLock) {
             long now = System.currentTimeMillis();
             RoleplayConversationState state = state(groupID);
@@ -1898,7 +1724,7 @@ public class RoleplayService {
         return previous == null ? created : previous;
     }
 
-    private boolean isDirect(GroupMessageEvent event,String content,long selfID) {
+    boolean isDirect(GroupMessageEvent event,String content,long selfID) {
         boolean mentionedSelf = false;
         boolean mentionedOther = false;
         JSONArray message = event.getMessage();
@@ -1971,7 +1797,7 @@ public class RoleplayService {
      * 被引用消息的文本，形如「[引用 某人：内容] 」。
      * 先从本地消息流水里找，找不到再退回 OneBot 的 get_msg，两者都拿不到就返回空串。
      */
-    private String quotedText(long groupID,GroupMessageEvent event) {
+    String quotedText(long groupID,GroupMessageEvent event) {
         long quotedID = quotedMessageID(event);
         if (quotedID <= 0) return "";
         String userName = "";
@@ -2052,7 +1878,7 @@ public class RoleplayService {
         return value.startsWith(name) || value.startsWith("@"+name);
     }
 
-    private boolean isContinuation(long groupID,long userID) {
+    boolean isContinuation(long groupID,long userID) {
         RoleplayConversationState state = state(groupID);
         return state.lastReplyTime > 0 && state.lastReplyUser == userID
                 && System.currentTimeMillis() - state.lastReplyTime
@@ -2062,7 +1888,7 @@ public class RoleplayService {
     /**
      * 同一用户刚被回复过：用于抑制"一句话拆成两句"时的第二次回复
      */
-    private boolean justRepliedToSameUser(long groupID,long userID) {
+    boolean justRepliedToSameUser(long groupID,long userID) {
         if (config.splitMessageSuppressSecond <= 0) return false;
         RoleplayConversationState state = state(groupID);
         return state.lastReplyTime > 0 && state.lastReplyUser == userID
@@ -2074,7 +1900,7 @@ public class RoleplayService {
      * 半句识别：结尾正好是角色名字，或者停在连接词上，说明这句话还没说完
      * 命中后延后回合会等同一用户补充，并把补充内容并进同一个回合
      */
-    private boolean looksIncomplete(String content) {
+    boolean looksIncomplete(String content) {
         if (config.splitMessageSuppressSecond <= 0) return false;
         String text = content == null ? "" : content.trim();
         if (text.isEmpty() || text.length() > config.splitMessageSuppressMaxChars) return false;
@@ -2106,7 +1932,7 @@ public class RoleplayService {
      * 上一条用户消息是不是没说完的半句
      * 当前消息已经记过流水，所以取倒数第二条
      */
-    private boolean completesPreviousIncomplete(long groupID,long userID) {
+    boolean completesPreviousIncomplete(long groupID,long userID) {
         if (config.splitMessageSuppressSecond <= 0) return false;
         List<JSONObject> rows = storage().query(
                 "SELECT `content` FROM `"+MSG_TABLE+"` WHERE `groupID`=? AND `userID`=? "
@@ -2116,14 +1942,14 @@ public class RoleplayService {
         return looksIncomplete(safe(rows.get(0).getString("content")));
     }
 
-    private boolean isGroupActive(long groupID) {
+    boolean isGroupActive(long groupID) {
         RoleplayConversationState state = state(groupID);
         return state.lastReplyTime > 0
                 && System.currentTimeMillis() - state.lastReplyTime
                 <= config.conversationWindowSecond * 1000L;
     }
 
-    private int updateOtherRoleMessageStreak(long groupID,boolean otherRoleBot) {
+    int updateOtherRoleMessageStreak(long groupID,boolean otherRoleBot) {
         RoleplayConversationState state = state(groupID);
         if (!otherRoleBot) {
             state.otherRoleStreak = 0;
@@ -2134,7 +1960,7 @@ public class RoleplayService {
         return state.otherRoleStreak;
     }
 
-    private boolean isOtherRoleBot(GroupMessageEvent event,long selfID) {
+    boolean isOtherRoleBot(GroupMessageEvent event,long selfID) {
         if (event == null || event.getUserID() <= 0 || event.getUserID() == selfID) return false;
         return containsCSVLong(config.otherRoleBotQQs,event.getUserID());
     }
@@ -2402,7 +2228,7 @@ public class RoleplayService {
         return value.substring(0,maxChars)+"...";
     }
 
-    private String extractContent(JSONArray message) {
+    String extractContent(JSONArray message) {
         if (message == null) return "";
         StringBuilder builder = new StringBuilder();
         for (int i = 0; i < message.size(); i++) {
@@ -2429,7 +2255,7 @@ public class RoleplayService {
         return false;
     }
 
-    private boolean hasMeaningfulText(JSONArray message) {
+    boolean hasMeaningfulText(JSONArray message) {
         if (message == null) return false;
         for (int i = 0; i < message.size(); i++) {
             JSONObject segment = message.getJSONObject(i);
@@ -2446,7 +2272,7 @@ public class RoleplayService {
         return false;
     }
 
-    private RecentImage rememberImageContext(GroupMessageEvent event,long groupID) {
+    RecentImage rememberImageContext(GroupMessageEvent event,long groupID) {
         JSONArray message = event.getMessage();
         if (message == null) return null;
         JSONObject latest = null;
@@ -2472,7 +2298,7 @@ public class RoleplayService {
         return recent;
     }
 
-    private RecentImage findRecentImageContext(long groupID,long userID,String content) {
+    RecentImage findRecentImageContext(long groupID,long userID,String content) {
         String key = recentImageKey(groupID,userID);
         RecentImage recent = recentImageMap.get(key);
         if (recent == null) return null;
@@ -2537,134 +2363,27 @@ public class RoleplayService {
         return !leftFile.isEmpty() && leftFile.equals(rightFile);
     }
 
-    private String recentImageKey(long groupID,long userID) {
+    String recentImageKey(long groupID,long userID) {
         return groupID+"|"+userID;
     }
 
-    private boolean shouldDeferTurn(GroupMessageEvent event,boolean otherRoleBot,boolean hasImage) {
-        return config.stickerAttachEnable
-                && !otherRoleBot
-                && !hasImage
-                && !hasStickerContent(event.getMessage());
-    }
 
-    private void deferTurn(GroupMessageEvent event,long groupID,long selfID,String userName,
-                           String relationship,String content,RecentImage imageContext,
-                           boolean otherRoleBot,RoleplayRouteDecision decision,
-                           RoleplayEmotionService.LocalEvent emotionEvent) {
-        String key = recentImageKey(groupID,event.getUserID());
-        int generation = nextPendingGeneration(key);
-        PendingTurn pending = new PendingTurn(event,selfID,userName,relationship,
-                content,imageContext,generation,otherRoleBot,decision,emotionEvent);
-        pending.stickerEmotion = recentStickerEmotion(groupID,event.getUserID());
-        //结尾正好是角色名字或悬挂连接词时，判定为还没说完的半句，等同一用户补充
-        pending.incomplete = looksIncomplete(content);
-        pending.hardDeadline = System.currentTimeMillis() + config.stickerAttachMaxWaitSecond * 1000L;
-        pendingTurnMap.put(key,pending);
-        //事件驱动等待：表情包在等待前就已经附带时不再空等窗口
-        int delay = pending.stickerEmotion.isEmpty() ? config.stickerAttachWindowSecond : 0;
-        plugin.getServer().getPluginManager().runTaskLater(plugin,
-                () -> executePendingTurn(key,generation),delay);
-    }
 
     /**
      * 同一用户又发言时立刻结束他的表情包等待，不再让回合干等到窗口结束
      */
-    void wakePendingTurnForUser(long groupID,GroupMessageEvent event) {
-        if (!config.stickerAttachWaitUntilNextMessage) return;
-        long userID = event.getUserID();
-        String key = recentImageKey(groupID,userID);
-        PendingTurn pending = pendingTurnMap.get(key);
-        if (pending == null) return;
-        if (pending.incomplete) {
-            String text = extractContent(event.getMessage());
-            if (text != null && !text.trim().isEmpty()) {
-                pending.appendContent(text);
-                //并入的这句仍然要写进消息流水，否则记忆整理看不到它
-                recordMessage(event,text,false);
-                if (event.getMessageID() > 0) {
-                    if (mergedMessageIDs.size() > 500) mergedMessageIDs.clear();
-                    mergedMessageIDs.add(event.getMessageID());
-                }
-                plugin.getLogger().sendInfo("[角色] 群"+groupID+" 合并同一用户的补充发言："
-                        +shortText(text,40));
-            }
-        }
-        plugin.getServer().getPluginManager().runTaskLater(plugin,
-                () -> executePendingTurn(key,pending.generation),0);
-    }
 
-    private void executePendingTurn(String key,int generation) {
-        PendingTurn pending = pendingTurnMap.get(key);
-        if (pending == null || pending.generation != generation) return;
-        if (pending.stickerPending) {
-            long now = System.currentTimeMillis();
-            if (now < pending.hardDeadline) {
-                plugin.getServer().getPluginManager().runTaskLater(plugin,
-                        () -> executePendingTurn(key,generation),1);
-                return;
-            }
-            plugin.getLogger().sendWarn("[角色] 群"+pending.event.getGroupID()
-                    +" 等待表情包识别超时，按无表情包继续。");
-        }
-        //只有真正摘掉待处理回合的那一次调用继续往下走，避免并发唤醒导致同一回合回两次
-        if (!pendingTurnMap.remove(key,pending)) return;
-        submitTurn(() -> runPendingTurn(pending));
-    }
 
-    private void runPendingTurn(PendingTurn pending) {
-        long groupID = pending.event.getGroupID();
-        try {
-            if (blacklistService.contains(groupID,pending.event.getUserID())) {
-                plugin.getLogger().sendInfo("[角色] 群"+groupID+" 跳过已拉黑用户的待处理回合 "
-                        +pending.event.getUserID());
-                return;
-            }
-            if (!canReply(groupID)) {
-                plugin.getLogger().sendInfo("[角色] 群"+groupID
-                        +" 待处理回合被回复冷却或频率限制拦下，本次不回复");
-                return;
-            }
-            String content = mergeStickerEmotion(pending.content,pending.stickerEmotion);
-            JSONObject result = reply(groupID,pending.event.getUserID(),pending.userName,content,
-                    pending.otherRoleBot,pending.relationship,pending.imageContext,pending.decision);
-            if (result == null || !result.getBooleanValue("status")) {
-                plugin.getLogger().sendWarn("[角色] 群"+groupID+" 待处理回合回复生成失败，本次不发送");
-                return;
-            }
-            replyExecutor.processReplyResult(pending.event,groupID,pending.selfID,pending.userName,
-                    pending.relationship,content,result,pending.decision,pending.emotionEvent);
-        } finally {
-            //延后回合到这里才算结束，释放同群串行位并接着处理缓冲里的下一批
-            batchScheduler.finishTurn(groupID);
-        }
-    }
 
-    private void markStickerRecognitionPending(long groupID,long userID) {
-        PendingTurn pending = pendingTurnMap.get(recentImageKey(groupID,userID));
-        if (pending == null) return;
-        pending.stickerPending = true;
-    }
 
-    private void finishStickerRecognition(long groupID,long userID,String emotion) {
-        String key = recentImageKey(groupID,userID);
-        rememberStickerEmotion(groupID,userID,emotion);
-        PendingTurn pending = pendingTurnMap.get(key);
-        if (pending == null) return;
-        if (emotion != null && !emotion.trim().isEmpty()) {
-            pending.stickerEmotion = emotion.trim();
-        }
-        pending.stickerPending = false;
-        executePendingTurn(key,pending.generation);
-    }
 
-    private void rememberStickerEmotion(long groupID,long userID,String emotion) {
+    void rememberStickerEmotion(long groupID,long userID,String emotion) {
         if (emotion == null || emotion.trim().isEmpty()) return;
         recentStickerMap.put(recentImageKey(groupID,userID),new RecentSticker(
                 emotion.trim(),System.currentTimeMillis() + config.stickerAttachWindowSecond * 1000L));
     }
 
-    private String recentStickerEmotion(long groupID,long userID) {
+    String recentStickerEmotion(long groupID,long userID) {
         String key = recentImageKey(groupID,userID);
         RecentSticker recent = recentStickerMap.get(key);
         if (recent == null) return "";
@@ -2675,21 +2394,15 @@ public class RoleplayService {
         return recent.emotion;
     }
 
-    private String mergeStickerEmotion(String content,String emotion) {
+    String mergeStickerEmotion(String content,String emotion) {
         String text = safe(content);
         String sticker = safe(emotion).trim();
         if (sticker.isEmpty()) return text;
         return text+"\n"+sticker;
     }
 
-    private synchronized int nextPendingGeneration(String key) {
-        Integer current = pendingGenerationMap.get(key);
-        int next = current == null ? 1 : current + 1;
-        pendingGenerationMap.put(key,next);
-        return next;
-    }
 
-    private boolean shouldUnderstandImages(GroupMessageEvent event,String content,
+    boolean shouldUnderstandImages(GroupMessageEvent event,String content,
                                            boolean direct,boolean sameUserContinuation) {
         if (!config.imageUnderstandingEnable || "off".equals(config.imageUnderstandingMode)) return false;
         if (hasStickerContent(event.getMessage())) return true;
@@ -2723,7 +2436,7 @@ public class RoleplayService {
      * 放到独立异步任务里跑，识图完成后合并表情语气并放行等待中的回合，
      * 这样一张图不会卡住同一群后面的消息。
      */
-    private void dispatchImageUnderstanding(GroupMessageEvent event,long groupID,
+    void dispatchImageUnderstanding(GroupMessageEvent event,long groupID,
                                             RecentImage imageContext,boolean hasSticker,
                                             boolean direct,boolean sameUserContinuation) {
         if (!shouldUnderstandImages(event,"",direct,sameUserContinuation)) return;
@@ -2829,7 +2542,7 @@ public class RoleplayService {
         return true;
     }
 
-    private boolean containsIgnoredContent(JSONArray message) {
+    boolean containsIgnoredContent(JSONArray message) {
         if (message == null) return false;
         for (int i = 0; i < message.size(); i++) {
             JSONObject segment = message.getJSONObject(i);

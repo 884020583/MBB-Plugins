@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.36.0.2301 | 2026-10-16 | `MBB-Roleplay` 第十轮类拆分：把单条/合批回合调度、延后回合、表情包等待窗口和待处理回合清理从 `RoleplayService` 迁到独立的 `RoleplayTurnProcessor`，主服务保留 `processGroupMessage`、`processMessageBatch`、`wakePendingTurnForUser` 等入口；`RoleplayService` 从约 3033 行降到约 2730 行。行为不变，合批、概率跳过、延后等待和同群串行收尾保持原链路 |
 | V0.5.35.0.2301 | 2026-10-16 | `MBB-Roleplay` 第九轮类拆分：把回复结果解析、单条/合批发送、旧标签兼容、技能调用、风格化调用和动作校验从 `RoleplayService` 迁到独立的 `RoleplayReplyExecutor`，主服务保留技能包装入口；`RoleplayService` 从约 3324 行降到 3033 行。行为不变，回复分段、引用、旧标签和技能执行保持原链路 |
 | V0.5.34.0.2301 | 2026-10-16 | `MBB-Roleplay` 第八轮类拆分：把戳一戳事件过滤、戳一戳回合、成员信息读取、短回复截断和回戳动作从 `RoleplayService` 迁到独立的 `RoleplayPokeService`，主服务保留 `handlePoke` 入口；`RoleplayService` 从约 3455 行降到 3324 行。行为不变，情绪结算、短回复和回戳逻辑保持原实现 |
 | V0.5.33.0.2301 | 2026-10-16 | `MBB-Roleplay` 第七轮类拆分：把消息入口、合批窗口、批次刷新、同群串行和过期消息过滤从 `RoleplayService` 迁到独立的 `RoleplayBatchScheduler`，主服务保留 `handle` 入口；`RoleplayService` 从约 3612 行降到 3455 行。行为不变，合批、串行、待处理回合唤醒和线程池提交保持原链路 |
