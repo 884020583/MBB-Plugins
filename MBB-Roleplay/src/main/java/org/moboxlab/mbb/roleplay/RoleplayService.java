@@ -81,6 +81,7 @@ public class RoleplayService {
     private final RoleplayAddressService addressService;
     private final RoleplayRateLimitService rateLimitService;
     private final RoleplayMemoryQueryService memoryQueryService;
+    private final RoleplayDrawNotifyService drawNotifyService;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -281,6 +282,7 @@ public class RoleplayService {
         this.addressService = new RoleplayAddressService(this);
         this.rateLimitService = new RoleplayRateLimitService(this);
         this.memoryQueryService = new RoleplayMemoryQueryService(this);
+        this.drawNotifyService = new RoleplayDrawNotifyService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -666,113 +668,12 @@ public class RoleplayService {
         return result;
     }
 
-    public JSONObject notifyDrawComplete(JSONObject params) {
-        JSONObject prepared = prepareDrawComplete(params);
-        if (!prepared.getBooleanValue("status")) return prepared;
-        JSONObject sendParams = new JSONObject(true);
-        if (params != null) sendParams.putAll(params);
-        sendParams.put("text",prepared.getString("text"));
-        sendDrawNotify(sendParams);
-        return prepared;
-    }
 
-    public JSONObject prepareDrawComplete(JSONObject params) {
-        long groupID = params == null ? 0L : params.getLongValue("groupID");
-        long userID = params == null ? 0L : params.getLongValue("userID");
-        String prompt = params == null ? "" : safe(params.getString("prompt"));
-        String text = generateDrawNotifyText(groupID,userID,prompt,true,"");
-        JSONObject result = new JSONObject(true);
-        result.put("status",true);
-        result.put("text",text);
-        result.put("message",text);
-        return result;
-    }
 
-    public JSONObject sendDrawNotify(JSONObject params) {
-        long groupID = params == null ? 0L : params.getLongValue("groupID");
-        long userID = params == null ? 0L : params.getLongValue("userID");
-        String text = params == null ? "" : safe(params.getString("text"));
-        sendAtNotify(groupID,userID,text);
-        JSONObject result = new JSONObject(true);
-        result.put("status",true);
-        result.put("message",text);
-        return result;
-    }
 
-    public JSONObject notifyDrawFailed(JSONObject params) {
-        long groupID = params == null ? 0L : params.getLongValue("groupID");
-        long userID = params == null ? 0L : params.getLongValue("userID");
-        String prompt = params == null ? "" : safe(params.getString("prompt"));
-        String reason = params == null ? "" : safe(params.getString("reason"));
-        String text = generateDrawNotifyText(groupID,userID,prompt,false,reason);
-        sendAtNotify(groupID,userID,text);
-        JSONObject result = new JSONObject(true);
-        result.put("status",true);
-        result.put("message",text);
-        return result;
-    }
 
-    private String generateDrawNotifyText(long groupID,long userID,String prompt,
-                                          boolean success,String reason) {
-        String fallback = success ? "画好啦，快看看。" : "这次没画出来，等下再试试。";
-        PluginService ai = plugin.getServer().getPluginManager().getService("MBB-AI");
-        if (ai == null) return fallback;
-        try {
-            JSONArray messages = new JSONArray();
-            messages.add(message("system","你是角色 "+persona.name+"。"
-                    +(success ? "用户刚才要求生图，图片已经生成。"
-                    : "用户刚才要求生图，但生图失败了。")
-                    +"请用角色语气给发起者一句简短提醒，12 到 20 字以内，"
-                    +"提醒只需要表达任务完成，可以结合请求简短提一句画面主题，但不要长篇介绍，不要重复识图。"
-                    +"不要 Markdown，不要解释，不要用“图片已生成”这种机械说法，不要提及系统。"));
-            String userText = "发起者QQ："+userID
-                    +"\n生图需求："+shortText(prompt,300)
-                    +"\n失败原因："+(reason == null || reason.isEmpty() ? "无" : shortText(reason,160));
-            messages.add(message("user",userText));
-            long startTime = System.currentTimeMillis();
-            JSONObject response = callDrawNotifyAi(ai,groupID,messages);
-            RoleplayAiLog.log(plugin.getLogger(),"生图提醒",groupID,response,
-                    System.currentTimeMillis() - startTime);
-            if (response == null || !response.getBooleanValue("status")) {
-                plugin.getLogger().sendWarn("[角色] 生图提醒生成失败，使用兜底文案："
-                        +safe(response == null ? "" : response.getString("message")));
-                return fallback;
-            }
-            String text = safe(response.getString("content")).trim();
-            if (text.isEmpty()) {
-                plugin.getLogger().sendWarn("[角色] 生图提醒模型正文为空，使用兜底文案，finish="
-                        +safe(response.getString("finishReason")));
-                return fallback;
-            }
-            return shortText(text,40);
-        } catch (Exception e) {
-            return fallback;
-        }
-    }
 
-    private JSONObject callDrawNotifyAi(PluginService ai,long groupID,JSONArray messages) {
-        JSONObject params = new JSONObject(true);
-        params.put("profile",config.aiProfile);
-        params.put("maxTokens",2000);
-        params.put("temperature",0.7);
-        params.put("reasoningEffort",config.replyReasoningEffort);
-        params.put("timeoutSeconds",90);
-        params.put("sessionId","roleplay-draw-notify-"+groupID);
-        params.put("messages",messages);
-        return ai.call("chat",params);
-    }
 
-    private void sendAtNotify(long groupID,long userID,String text) {
-        if (groupID <= 0 || userID <= 0) return;
-        OneBotClient client = plugin.getServer().getOneBotClient();
-        if (client == null) return;
-        JSONArray message = MessageUtil.message(MessageUtil.at(userID),
-                MessageUtil.text(" "+(text == null ? "" : text.trim())));
-        JSONObject response = client.sendGroupMessage(groupID,message);
-        plugin.getLogger().sendInfo("[角色] 生图回调提醒 群"+groupID+" 用户"+userID
-                +" 内容="+shortText(text,80)+" 结果="
-                +(response != null && response.getIntValue("retcode") == 0 ? "成功" : "失败"));
-    }
 
     public boolean isGroupEnabled(long groupID) {
         JSONObject row = storage().queryOne("SELECT `enabled` FROM `"+GROUP_TABLE+"` WHERE `groupID`=?",groupID);
@@ -1943,6 +1844,23 @@ public class RoleplayService {
 
     List<JSONObject> limitMemoryRows(List<JSONObject> rows,int maxChars) {
         return memoryQueryService.limitMemoryRows(rows,maxChars);
+    }
+
+
+    public JSONObject notifyDrawComplete(JSONObject params) {
+        return drawNotifyService.notifyDrawComplete(params);
+    }
+
+    public JSONObject prepareDrawComplete(JSONObject params) {
+        return drawNotifyService.prepareDrawComplete(params);
+    }
+
+    public JSONObject sendDrawNotify(JSONObject params) {
+        return drawNotifyService.sendDrawNotify(params);
+    }
+
+    public JSONObject notifyDrawFailed(JSONObject params) {
+        return drawNotifyService.notifyDrawFailed(params);
     }
 
     StorageService storage() {
