@@ -23,6 +23,7 @@ public class StickerEntry {
     public int visionVersion = 0;
     public long lastSeenAt = 0L;
     public int hitCount = 0;
+    public int useCount = 0;
 
     public static StickerEntry fromJson(JSONObject json) {
         StickerEntry entry = new StickerEntry();
@@ -39,6 +40,7 @@ public class StickerEntry {
         entry.visionVersion = json.getIntValue("visionVersion");
         entry.lastSeenAt = json.getLongValue("lastSeenAt");
         entry.hitCount = json.getIntValue("hitCount");
+        entry.useCount = json.getIntValue("useCount");
         JSONArray tagArray = json.getJSONArray("tags");
         if (tagArray != null) {
             for (Object tag : tagArray) {
@@ -67,6 +69,7 @@ public class StickerEntry {
         json.put("visionVersion",visionVersion);
         json.put("lastSeenAt",lastSeenAt);
         json.put("hitCount",hitCount);
+        json.put("useCount",useCount);
         return json;
     }
 

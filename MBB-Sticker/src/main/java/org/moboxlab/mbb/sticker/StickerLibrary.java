@@ -125,15 +125,35 @@ public class StickerLibrary {
             candidates.add(entry);
         }
         if (candidates.isEmpty()) return null;
+        double penalty = 0.5;
+        try {
+            penalty = Double.parseDouble(plugin.getConfig().getString("usePenalty","0.5"));
+        } catch (Exception ignored) {
+        }
+        if (penalty < 0) penalty = 0;
         double total = 0;
-        for (StickerEntry entry : candidates) total += Math.max(0.1,entry.weight);
+        for (StickerEntry entry : candidates) total += effectiveWeight(entry,penalty);
         double value = ThreadLocalRandom.current().nextDouble(total);
         double current = 0;
         for (StickerEntry entry : candidates) {
-            current += Math.max(0.1,entry.weight);
+            current += effectiveWeight(entry,penalty);
             if (value <= current) return entry;
         }
         return candidates.get(candidates.size() - 1);
+    }
+
+    /**
+     * 发送次数越多权重越低，避免同一张表情包反复出现
+     */
+    private double effectiveWeight(StickerEntry entry,double penalty) {
+        return Math.max(0.1,entry.weight) / (1.0 + Math.max(0,entry.useCount) * penalty);
+    }
+
+    public synchronized void markUsed(String id) {
+        StickerEntry entry = get(id);
+        if (entry == null) return;
+        entry.useCount++;
+        save();
     }
 
     public StickerEntry get(String id) {

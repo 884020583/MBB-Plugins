@@ -146,6 +146,17 @@ public class RoleplayConfig {
     public int topicFatigueMinCount = 6;
     public int topicFatigueSelfCount = 3;
     public int topicFatigueKeepHours = 168;
+    public boolean replyFeedbackEnable = true;
+    public int replyFeedbackWindowSecond = 180;
+    public int replyFeedbackMinSamples = 6;
+    public double replyFeedbackMaxPenalty = 0.25;
+    public double replyFeedbackBonus = 0.10;
+    public int replyFeedbackHistory = 30;
+    public boolean expressionLearnEnable = true;
+    public int expressionMinCount = 3;
+    public int expressionMinUsers = 2;
+    public int expressionMaxCandidates = 200;
+    public int expressionInjectMaxChars = 800;
     public int replyMaxTokens = 1200;
     public int replyImageMaxTokens = 4000;
     public int replySegmentMaxChars = 30;
@@ -163,6 +174,14 @@ public class RoleplayConfig {
     public int minMessageLength = 2;
     public boolean quietReplyEnable = true;
     public String commandPrefixes = "/,!,＃,#";
+
+    private static double parseDouble(String value,double defaultValue) {
+        try {
+            return Double.parseDouble(value == null ? "" : value.trim());
+        } catch (Exception e) {
+            return defaultValue;
+        }
+    }
 
     public static RoleplayConfig load(Plugin plugin) {
         RoleplayConfig config = new RoleplayConfig();
@@ -394,6 +413,17 @@ public class RoleplayConfig {
         config.topicFatigueMinCount = plugin.getConfig().getInt("topicFatigueMinCount",6);
         config.topicFatigueSelfCount = plugin.getConfig().getInt("topicFatigueSelfCount",3);
         config.topicFatigueKeepHours = plugin.getConfig().getInt("topicFatigueKeepHours",168);
+        config.replyFeedbackEnable = plugin.getConfig().getBoolean("replyFeedbackEnable",true);
+        config.replyFeedbackWindowSecond = plugin.getConfig().getInt("replyFeedbackWindowSecond",180);
+        config.replyFeedbackMinSamples = plugin.getConfig().getInt("replyFeedbackMinSamples",6);
+        config.replyFeedbackMaxPenalty = parseDouble(plugin.getConfig().getString("replyFeedbackMaxPenalty","0.25"),0.25);
+        config.replyFeedbackBonus = parseDouble(plugin.getConfig().getString("replyFeedbackBonus","0.10"),0.10);
+        config.replyFeedbackHistory = plugin.getConfig().getInt("replyFeedbackHistory",30);
+        config.expressionLearnEnable = plugin.getConfig().getBoolean("expressionLearnEnable",true);
+        config.expressionMinCount = plugin.getConfig().getInt("expressionMinCount",3);
+        config.expressionMinUsers = plugin.getConfig().getInt("expressionMinUsers",2);
+        config.expressionMaxCandidates = plugin.getConfig().getInt("expressionMaxCandidates",200);
+        config.expressionInjectMaxChars = plugin.getConfig().getInt("expressionInjectMaxChars",800);
         config.replyMaxTokens = plugin.getConfig().getInt("replyMaxTokens",1200);
         config.replyImageMaxTokens = plugin.getConfig().getInt("replyImageMaxTokens",4000);
         config.replySegmentMaxChars = plugin.getConfig().getInt("replySegmentMaxChars",30);
@@ -632,6 +662,24 @@ public class RoleplayConfig {
         if (config.topicFatigueSelfCount > 50) config.topicFatigueSelfCount = 50;
         if (config.topicFatigueKeepHours < 1) config.topicFatigueKeepHours = 1;
         if (config.topicFatigueKeepHours > 720) config.topicFatigueKeepHours = 720;
+        if (config.replyFeedbackWindowSecond < 10) config.replyFeedbackWindowSecond = 10;
+        if (config.replyFeedbackWindowSecond > 3600) config.replyFeedbackWindowSecond = 3600;
+        if (config.replyFeedbackMinSamples < 1) config.replyFeedbackMinSamples = 1;
+        if (config.replyFeedbackMinSamples > 100) config.replyFeedbackMinSamples = 100;
+        if (config.replyFeedbackMaxPenalty < 0) config.replyFeedbackMaxPenalty = 0;
+        if (config.replyFeedbackMaxPenalty > 1) config.replyFeedbackMaxPenalty = 1;
+        if (config.replyFeedbackBonus < 0) config.replyFeedbackBonus = 0;
+        if (config.replyFeedbackBonus > 0.5) config.replyFeedbackBonus = 0.5;
+        if (config.replyFeedbackHistory < 5) config.replyFeedbackHistory = 5;
+        if (config.replyFeedbackHistory > 200) config.replyFeedbackHistory = 200;
+        if (config.expressionMinCount < 2) config.expressionMinCount = 2;
+        if (config.expressionMinCount > 100) config.expressionMinCount = 100;
+        if (config.expressionMinUsers < 1) config.expressionMinUsers = 1;
+        if (config.expressionMinUsers > 50) config.expressionMinUsers = 50;
+        if (config.expressionMaxCandidates < 10) config.expressionMaxCandidates = 10;
+        if (config.expressionMaxCandidates > 1000) config.expressionMaxCandidates = 1000;
+        if (config.expressionInjectMaxChars < 100) config.expressionInjectMaxChars = 100;
+        if (config.expressionInjectMaxChars > 4000) config.expressionInjectMaxChars = 4000;
         if (config.replyMaxTokens < 200) config.replyMaxTokens = 200;
         if (config.replyMaxTokens > 8000) config.replyMaxTokens = 8000;
         if (config.replyImageMaxTokens < 400) config.replyImageMaxTokens = 400;

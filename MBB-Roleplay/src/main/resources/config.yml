@@ -217,6 +217,28 @@ topicFatigueMinCount: 6
 topicFatigueSelfCount: 3
 #话题疲劳记录最多保留多少小时
 topicFatigueKeepHours: 168
+#是否根据主动发言是否被接话修正回复意愿
+replyFeedbackEnable: true
+#主动发言后多少秒内出现真人发言算被接话
+replyFeedbackWindowSecond: 180
+#至少积累多少次主动发言反馈后才修正概率
+replyFeedbackMinSamples: 6
+#主动发言长期没人接时最多降低多少回复概率
+replyFeedbackMaxPenalty: 0.25
+#主动发言经常被接话时最多提高多少回复概率
+replyFeedbackBonus: 0.10
+#内存中保留最近多少次主动发言反馈
+replyFeedbackHistory: 30
+#是否从群聊提取表达候选供管理员复核
+expressionLearnEnable: true
+#表达候选至少出现多少次才进入待审
+expressionMinCount: 3
+#表达候选至少被多少不同群员使用才进入待审
+expressionMinUsers: 2
+#每个群最多注入多少条已通过表达
+expressionMaxCandidates: 200
+#已通过表达注入提示词的最大字符数
+expressionInjectMaxChars: 800
 #长期记忆与永久记忆是否按当前对话相关性排序后注入
 memoryRelevanceSort: true
 #相关性排序前先加载多少条长期记忆作为候选池

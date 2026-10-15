@@ -18,5 +18,7 @@ sendCooldownSecond: 5
 maxSendPerHour: 30
 #随机发送时避免最近多少张重复
 recentAvoidCount: 20
+#已发送次数越多，随机权重越低；0 表示不惩罚
+usePenalty: 0.5
 #标签命名规则，默认小写英文 snake_case
 tagPattern: "^[a-z][a-z0-9_]{1,31}$"

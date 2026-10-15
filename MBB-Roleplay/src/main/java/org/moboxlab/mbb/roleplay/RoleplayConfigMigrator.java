@@ -15,7 +15,7 @@ import java.util.List;
  * Roleplay 配置迁移与缺失项补全
  */
 public class RoleplayConfigMigrator {
-    private static final String CURRENT_VERSION = "31";
+    private static final String CURRENT_VERSION = "32";
 
     private static class ConfigEntry {
         private final String key;
@@ -164,6 +164,17 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("topicFatigueMinCount","6","同一话题在窗口内达到多少次后判定为疲劳"),
             new ConfigEntry("topicFatigueSelfCount","3","角色自己在窗口内参与多少次后判定为疲劳"),
             new ConfigEntry("topicFatigueKeepHours","168","话题疲劳记录最多保留多少小时"),
+            new ConfigEntry("replyFeedbackEnable","true","是否根据主动发言是否被接话修正回复意愿"),
+            new ConfigEntry("replyFeedbackWindowSecond","180","主动发言后多少秒内出现真人发言算被接话"),
+            new ConfigEntry("replyFeedbackMinSamples","6","至少积累多少次主动发言反馈后才修正概率"),
+            new ConfigEntry("replyFeedbackMaxPenalty","0.25","主动发言长期没人接时最多降低多少回复概率"),
+            new ConfigEntry("replyFeedbackBonus","0.10","主动发言经常被接话时最多提高多少回复概率"),
+            new ConfigEntry("replyFeedbackHistory","30","内存中保留最近多少次主动发言反馈"),
+            new ConfigEntry("expressionLearnEnable","true","是否从群聊提取表达候选供管理员复核"),
+            new ConfigEntry("expressionMinCount","3","表达候选至少出现多少次才进入待审"),
+            new ConfigEntry("expressionMinUsers","2","表达候选至少被多少不同群员使用才进入待审"),
+            new ConfigEntry("expressionMaxCandidates","200","每个群最多注入多少条已通过表达"),
+            new ConfigEntry("expressionInjectMaxChars","800","已通过表达注入提示词的最大字符数"),
             new ConfigEntry("memoryRelevanceSort","true","长期记忆与永久记忆是否按当前对话相关性排序后注入"),
             new ConfigEntry("memoryRelevancePoolSize","600","相关性排序前先加载多少条长期记忆作为候选池"),
             new ConfigEntry("memoryRelevanceMaxChars","5000","长期记忆按相关性注入的字符上限"),
@@ -261,7 +272,7 @@ public class RoleplayConfigMigrator {
                 plugin.getLogger().sendWarn("自动补全 Roleplay 配置失败，请检查 config.yml 权限！");
             }
         }
-        if (version < 31) {
+        if (version < 32) {
             config.set("configVersion",CURRENT_VERSION);
             if (!versionMissing) changed++;
         }
@@ -370,7 +381,7 @@ public class RoleplayConfigMigrator {
             config.set("replySegmentMaxChars","30");
             changed++;
         }
-        if (version < 31 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
+        if (version < 32 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
                 || legacyRouterMaxTokens || legacyRouterMaxTokens1200
                 || legacyPromptTotalChars || legacyMemoryRelevanceMaxChars
                 || legacyGlobalMemoryRelevanceMaxChars || legacyRouterReasoningEffort

@@ -66,6 +66,7 @@ public class StickerService implements PluginService {
         }
         StickerEntry entry = library.random(tags,avoid);
         if (entry == null) return error("没有可用的表情包");
+        library.markUsed(entry.id);
         if (!key.equals("|")) {
             Deque<String> queue = recentMap.get(key);
             if (queue == null) {
