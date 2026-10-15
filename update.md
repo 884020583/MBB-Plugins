@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.31.0.2301 | 2026-10-16 | `MBB-Roleplay` 第五轮类拆分：把记忆备份、备份列表、恢复流程和短期/长期记忆导入导出从 `RoleplayService` 迁到独立的 `RoleplayMemoryBackupService`，主服务保留同名公开入口；`RoleplayService` 从约 4351 行降到 4170 行。行为不变，恢复前自动备份、路径校验和恢复结果统计保持原逻辑 |
 | V0.5.30.0.2301 | 2026-10-16 | `MBB-Roleplay` 第四轮类拆分：把系统提示词、静态块/动态块资料、输出格式和资料预算从 `RoleplayService` 迁到独立的 `RoleplayPromptAssembler`，主服务只保留调用入口；`RoleplayService` 从约 4567 行降到 4351 行。行为不变，提示词顺序和缓存前缀结构保持原样 |
 | V0.5.29.0.2301 | 2026-10-16 | `MBB-Roleplay` 第三轮类拆分：把最近发言、最近群聊、话题键和话题疲劳统计从 `RoleplayService` 迁到独立的 `RoleplayContextService`，主服务只保留调用入口；`RoleplayService` 从约 4778 行降到 4567 行。行为不变，话题键评分和疲劳判定保持原逻辑 |
 | V0.5.28.0.2301 | 2026-10-16 | `MBB-Roleplay` 第二轮类拆分：把消息发送、分段、引用、链接过滤和断句工具从 `RoleplayService` 迁到独立的 `RoleplayMessageSender`，主服务只保留协调入口；`RoleplayService` 从约 4898 行降到 4778 行，方法签名从约 259 降到 245。行为不变，发送、反馈登记和发送后状态更新仍走原链路 |
