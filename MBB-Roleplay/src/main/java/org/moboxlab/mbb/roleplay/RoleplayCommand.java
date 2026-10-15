@@ -51,48 +51,18 @@ public class RoleplayCommand extends BotCommand {
     @Override
     public List<String> usage() {
         return Arrays.asList(
+                "/role help [分类]",
                 "/role status",
-                "/role enable [群号]",
-                "/role disable [群号]",
-                "/role groups",
-                "/role reload",
-                "/role config [repair]",
-                "/role blacklist [list|add|remove|clear] [QQ] [原因]",
-                "/role quiet [on|off|list|add <QQ>|remove <QQ>|clear]",
-                "/role member [QQ]",
-                "/role member clear <QQ>",
-                "/role mood",
-                "/role mood reset",
-                "/role emotion [QQ] [页码]",
-                "/role emotion reset [QQ]",
-                "/role emotion log [页码]",
-                "/role emotion affinity set <QQ> <0-100>",
-                "/role emotion reason set <QQ> <原因>",
-                "/role emotion reason clear <QQ>",
-                "/role bot [status]",
-                "/role bot chance <0.3-1>",
-                "/role bot max <1-10>",
-                "/role bot qq [list|add|remove|set|clear] [QQ...]",
-                "/role bot name [list|add|remove|set|clear|reset] [名称...]",
-                "/role memory [页码]",
-                "/role memory merge",
-                "/role memory backup",
-                "/role memory backups",
-                "/role memory restore <文件名>",
-                "/role gmemory [页码]",
-                "/role gmemory backup",
-                "/role gmemory merge",
-                "/role gmemory group [list|add|remove|clear] [群号...]",
-                "/role speech [stats|reload|search <文本>|on|off]",
-                "/role kb [list|reload|search <文本>|on|off]",
-                "/role forget",
-                "/role persona [文件名]",
-                "/role persona reset <文件名>");
+                "/role quiet add|remove");
     }
 
     @Override
     public boolean execute(CommandSender sender,String[] args) {
         String action = args.length > 1 ? args[1].toLowerCase() : "status";
+        if ("help".equals(action)) {
+            handleHelp(sender,args);
+            return true;
+        }
         if ("quiet".equals(action)) {
             handleQuiet(sender,args);
             return true;
@@ -158,6 +128,14 @@ public class RoleplayCommand extends BotCommand {
         }
         if ("blacklist".equals(action)) {
             handleBlacklist(sender,args);
+            return true;
+        }
+        if ("feedback".equals(action)) {
+            handleFeedback(sender,args);
+            return true;
+        }
+        if ("expression".equals(action)) {
+            handleExpression(sender,args);
             return true;
         }
         if ("member".equals(action)) {
@@ -871,6 +849,162 @@ public class RoleplayCommand extends BotCommand {
                 +"\n群员可自助使用 /role quiet add 与 /role quiet remove。");
     }
 
+    /**
+     * /role help：按分类查看完整命令表
+     */
+    private void handleHelp(CommandSender sender,String[] args) {
+        String category = args.length > 2 ? args[2].toLowerCase() : "all";
+        if ("basic".equals(category)) {
+            sender.sendMessage("基础命令："
+                    +"\n/role status"
+                    +"\n/role enable [群号]"
+                    +"\n/role disable [群号]"
+                    +"\n/role groups"
+                    +"\n/role reload"
+                    +"\n/role config [repair]");
+            return;
+        }
+        if ("quiet".equals(category)) {
+            sender.sendMessage("免打扰："
+                    +"\n/role quiet add [QQ]"
+                    +"\n/role quiet remove [QQ]"
+                    +"\n/role quiet list"
+                    +"\n/role quiet on|off"
+                    +"\n/role quiet clear");
+            return;
+        }
+        if ("blacklist".equals(category)) {
+            sender.sendMessage("黑名单："
+                    +"\n/role blacklist list"
+                    +"\n/role blacklist add <QQ> [原因]"
+                    +"\n/role blacklist remove <QQ>"
+                    +"\n/role blacklist clear");
+            return;
+        }
+        if ("emotion".equals(category)) {
+            sender.sendMessage("情绪与关系："
+                    +"\n/role mood [reset]"
+                    +"\n/role emotion [QQ] [页码]"
+                    +"\n/role emotion reset [QQ]"
+                    +"\n/role emotion log [页码]"
+                    +"\n/role emotion affinity set <QQ> <0-100>"
+                    +"\n/role emotion reason set|clear <QQ> [原因]");
+            return;
+        }
+        if ("memory".equals(category)) {
+            sender.sendMessage("记忆："
+                    +"\n/role memory [页码|merge|backup|backups|restore <文件名>]"
+                    +"\n/role gmemory [页码|backup|merge|group ...]"
+                    +"\n/role forget");
+            return;
+        }
+        if ("role".equals(category)) {
+            sender.sendMessage("角色与机器人："
+                    +"\n/role persona [文件名]"
+                    +"\n/role persona reset <文件名>"
+                    +"\n/role bot [status|chance|max|qq|name] ...");
+            return;
+        }
+        if ("content".equals(category)) {
+            sender.sendMessage("语料与知识库："
+                    +"\n/role speech [stats|reload|search <文本>|on|off]"
+                    +"\n/role kb [list|reload|search <文本>|on|off]");
+            return;
+        }
+        if ("feedback".equals(category)) {
+            sender.sendMessage("反馈与表达："
+                    +"\n/role feedback [reset]"
+                    +"\n/role expression list [pending|approved|rejected]"
+                    +"\n/role expression promote <ID>"
+                    +"\n/role expression reject <ID>"
+                    +"\n/role expression clear");
+            return;
+        }
+        sender.sendMessage("MBB-Roleplay 命令分类："
+                +"\n/role help basic        基础与开关"
+                +"\n/role help quiet        免打扰"
+                +"\n/role help blacklist    黑名单"
+                +"\n/role help emotion      情绪与关系"
+                +"\n/role help memory       记忆"
+                +"\n/role help role         角色与机器人"
+                +"\n/role help content      语料与知识库"
+                +"\n/role help feedback     反馈与表达"
+                +"\n/role help all          查看全部命令");
+        if ("all".equals(category)) {
+            sender.sendMessage("完整命令表较长，请按上面的分类逐项查看。");
+        }
+    }
+    /**
+     * /role feedback：查看或重置主动发言反馈统计
+     */
+    private void handleFeedback(CommandSender sender,String[] args) {
+        long groupID = sender.getGroupID();
+        if (groupID <= 0) {
+            sender.sendMessage("请在群聊中使用。");
+            return;
+        }
+        RoleplayReplyFeedbackService feedback = service.getReplyFeedbackService();
+        if (args.length > 2 && "reset".equalsIgnoreCase(args[2])) {
+            feedback.reset(groupID);
+            sender.sendMessage("当前群主动发言反馈统计已重置。");
+            return;
+        }
+        JSONObject stats = feedback.stats(groupID);
+        sender.sendMessage("主动发言反馈："
+                +"\n累计被接话："+stats.getLongValue("successCount")
+                +"\n累计无人接："+stats.getLongValue("ignoreCount")
+                +"\n最近样本："+stats.getIntValue("recentSuccess")+"/"+stats.getIntValue("recentCount")
+                +"\n连续没人接时，非直接消息的回复概率会自动降低。");
+    }
+
+    /**
+     * /role expression：复核群内表达候选
+     */
+    private void handleExpression(CommandSender sender,String[] args) {
+        long groupID = sender.getGroupID();
+        if (groupID <= 0) {
+            sender.sendMessage("请在群聊中使用。");
+            return;
+        }
+        RoleplayExpressionService expressions = service.getExpressionService();
+        String action = args.length > 2 ? args[2].toLowerCase() : "list";
+        if ("list".equals(action)) {
+            String status = args.length > 3 ? args[3].toLowerCase() : "pending";
+            JSONArray entries = expressions.list(groupID,status,30);
+            if (entries.isEmpty()) {
+                sender.sendMessage("当前群没有 "+status+" 表达候选。");
+                return;
+            }
+            StringBuilder builder = new StringBuilder("表达候选（"+status+"）：");
+            for (Object object : entries) {
+                JSONObject item = (JSONObject) object;
+                builder.append("\n#").append(item.getLongValue("id"))
+                        .append(" ").append(item.getString("content"))
+                        .append("（"+item.getIntValue("count")+" 次 / "
+                        +item.getIntValue("userCount")+" 人）");
+            }
+            sender.sendMessage(builder.toString());
+            return;
+        }
+        if ("promote".equals(action) || "reject".equals(action)) {
+            if (args.length <= 3) {
+                sender.sendMessage("用法：/role expression "+action+" <ID>");
+                return;
+            }
+            long id = parseUserID(args[3]);
+            boolean changed = expressions.setStatus(id,
+                    "promote".equals(action) ? "approved" : "rejected");
+            sender.sendMessage(changed ? "表达候选已更新。" : "没有找到该表达候选。");
+            return;
+        }
+        if ("clear".equals(action)) {
+            int count = expressions.clear(groupID);
+            sender.sendMessage("当前群表达候选已清空，共删除 "+count+" 条。");
+            return;
+        }
+        sender.sendMessage("用法：/role expression list [pending|approved|rejected]"
+                +" | promote <ID> | reject <ID> | clear");
+    }
     /**
      * /role member [QQ]：查看角色对某个群员的个人印象
      */

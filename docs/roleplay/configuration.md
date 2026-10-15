@@ -159,6 +159,17 @@ topicFatigueWindowMinute: 30
 topicFatigueMinCount: 6
 topicFatigueSelfCount: 3
 topicFatigueKeepHours: 168
+replyFeedbackEnable: true
+replyFeedbackWindowSecond: 180
+replyFeedbackMinSamples: 6
+replyFeedbackMaxPenalty: 0.25
+replyFeedbackBonus: 0.10
+replyFeedbackHistory: 30
+expressionLearnEnable: true
+expressionMinCount: 3
+expressionMinUsers: 2
+expressionMaxCandidates: 200
+expressionInjectMaxChars: 800
 recentReplyCheckCount: 8
 repeatSuppressEnable: false
 repeatSimilarityThreshold: 0.72
@@ -178,6 +189,8 @@ quietReplyEnable: true
 `cameraEnable` 默认 `true`。设为 `false` 后只关闭 `draw` 技能里的手机自拍和拍照模式，角色会忽略 `camera=selfie/photo`，普通生图仍可继续使用。改完执行 `/role reload` 或重启主程序后生效。
 
 `topicFatigueEnable` 默认 `true`。插件会按群记录话题疲劳：同一话题在 `topicFatigueWindowMinute` 分钟内出现次数达到 `topicFatigueMinCount`，且角色自己参与达到 `topicFatigueSelfCount` 时，路由层会降权或跳过主动回复；直接点名、引用回复或明确提问仍可打破疲劳。记录保留 `topicFatigueKeepHours` 小时。
+
+`replyFeedbackEnable` 默认 `true`，角色主动发言后在 `replyFeedbackWindowSecond` 秒内出现真人发言就算被接话。累计样本达到 `replyFeedbackMinSamples` 后，反馈会修正非直接消息的回复概率；连续没人接时最多降低 `replyFeedbackMaxPenalty`，经常被接话时最多提高 `replyFeedbackBonus`。
 
 `quietReplyEnable` 默认 `true`，只作为新群的默认值：每个群的免打扰名单开关用 `/role quiet on|off` 单独保存，不受该配置影响。名单内的群员只有在主动叫到角色时才得到回复，其他消息不进入上下文、不触发记忆整理和识图，也不会更新情绪；其他群员不受影响。名单按群存在 `plugin_mbb_roleplay_quiet` 表里，插件启动时自动建表，不需要手动迁移；被免打扰的消息不会记入消息流水，因此角色不会记住这些内容。该功能只影响群消息，戳一戳仍按 `pokeReplyEnable` 处理。
 

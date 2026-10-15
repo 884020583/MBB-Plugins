@@ -63,6 +63,8 @@ public class RoleplayService {
     private final RoleplayMemberService memberService;
     private final RoleplayBlacklistService blacklistService;
     private final RoleplayQuietService quietService;
+    private final RoleplayReplyFeedbackService replyFeedbackService;
+    private final RoleplayExpressionService expressionService;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -319,6 +321,8 @@ public class RoleplayService {
         this.emotionService = new RoleplayEmotionService(plugin,config,persona,this,memberService);
         this.blacklistService = new RoleplayBlacklistService(plugin);
         this.quietService = new RoleplayQuietService(plugin,config);
+        this.replyFeedbackService = new RoleplayReplyFeedbackService(plugin,config);
+        this.expressionService = new RoleplayExpressionService(plugin,config);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -385,6 +389,8 @@ public class RoleplayService {
         memberService.init();
         blacklistService.init();
         quietService.init();
+        replyFeedbackService.init();
+        expressionService.init();
         ensureTurnExecutor();
         ensureBackgroundExecutor();
     }
@@ -399,6 +405,8 @@ public class RoleplayService {
         emotionService.reload(config,persona);
         memberService.reload(config);
         quietService.reload(config);
+        replyFeedbackService.reload(config);
+        expressionService.reload(config);
         ensureTurnExecutor();
         ensureBackgroundExecutor();
     }
@@ -702,6 +710,8 @@ public class RoleplayService {
                     +" 在免打扰名单中且未叫到角色，本轮保持沉默");
             return null;
         }
+        replyFeedbackService.observeHumanMessage(groupID,event.getUserID(),content,event.getMessageID());
+        expressionService.observe(groupID,event.getUserID(),content);
         boolean sameUserContinuation = isContinuation(groupID,event.getUserID());
         boolean justRepliedToSameUser = justRepliedToSameUser(groupID,event.getUserID());
         boolean groupActive = isGroupActive(groupID);
@@ -802,6 +812,8 @@ public class RoleplayService {
         if (decision == null || !decision.reply) return false;
         decision.chance = emotionService.adjustReplyChance(groupID,prepared.userID,
                 decision.chance,prepared.direct,prepared.otherRoleBot);
+        decision.chance = replyFeedbackService.adjustChance(groupID,decision.chance,
+                prepared.direct,prepared.otherRoleBot);
         if (decision.chance < 1.0 && Math.random() >= decision.chance) {
             plugin.getLogger().sendInfo("[角色] 群"+groupID+" 概率跳过 概率="
                     +decision.chance+" 原因="+decision.reason);
@@ -867,6 +879,8 @@ public class RoleplayService {
         if (decision == null || !decision.reply) return;
         decision.chance = emotionService.adjustReplyChance(groupID,primary.userID,
                 decision.chance,primary.direct,primary.otherRoleBot);
+        decision.chance = replyFeedbackService.adjustChance(groupID,decision.chance,
+                primary.direct,primary.otherRoleBot);
         if (decision.chance < 1.0 && Math.random() >= decision.chance) {
             plugin.getLogger().sendInfo("[角色] 群"+groupID+" 合批概率跳过 概率="
                     +decision.chance+" 原因="+decision.reason);
@@ -1542,6 +1556,14 @@ public class RoleplayService {
         return quietService;
     }
 
+    public RoleplayReplyFeedbackService getReplyFeedbackService() {
+        return replyFeedbackService;
+    }
+
+    public RoleplayExpressionService getExpressionService() {
+        return expressionService;
+    }
+
     public void blacklistAdd(long groupID,long userID,String reason,long operatorID) {
         blacklistService.add(groupID,userID,reason,operatorID);
     }
@@ -1685,6 +1707,7 @@ public class RoleplayService {
                 +"当前时间："+currentTimeText()+"\n"
                 +"当前发言者关系："+relationship+"\n"
                 +emotionService.promptText(groupID,userID,otherRoleBot)
+                +replyFeedbackService.promptText(groupID)
                 +(actionIds.contains("reminder") ? reminderPromptText(groupID,userID,messageText) : "")
                 +dynamicMaterials
                 +outputFormatTail(decision,batchCount);
@@ -1840,6 +1863,8 @@ public class RoleplayService {
         materials.add(new RoleplayMaterial("memory.global",true,85,4200,
                 () -> "全局永久记忆：\n"+globalMemoryService.promptText(memoryQuery,userID,
                         config.globalMemoryRelevanceMaxChars)));
+        materials.add(new RoleplayMaterial("expression.approved",true,84,config.expressionInjectMaxChars,
+                () -> expressionService.promptText(groupID)));
 
         materials.add(new RoleplayMaterial("context.recent",true,75,2500,
                 () -> "你最近说过的话（这些已经说过了，不要重复内容，也不要换个说法再说一遍）：\n"
@@ -3279,6 +3304,7 @@ public class RoleplayService {
         state.lastReplyUser = userID;
         state.botStreak++;
         recordBotMessage(groupID,selfID,text,messageID);
+        replyFeedbackService.onBotMessage(groupID,messageID,text);
         return true;
     }
 

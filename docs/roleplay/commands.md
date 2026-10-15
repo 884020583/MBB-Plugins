@@ -20,6 +20,12 @@
 | `/role quiet add [QQ]` | `EVERYONE` | 把自己加入当前群免打扰名单，填 QQ 添加他人需要 `BOT_ADMIN` |
 | `/role quiet remove [QQ]` | `EVERYONE` | 把自己移出当前群免打扰名单，填 QQ 移除他人需要 `BOT_ADMIN` |
 | `/role quiet clear` | `BOT_ADMIN` | 清空当前群免打扰名单 |
+| `/role help [分类]` | `EVERYONE` | 按分类查看完整命令，分类：basic / quiet / blacklist / emotion / memory / role / content / feedback |
+| `/role feedback [reset]` | `BOT_ADMIN` | 查看主动发言被接话统计，reset 重置当前群统计 |
+| `/role expression list [状态]` | `BOT_ADMIN` | 查看表达候选，状态：pending / approved / rejected |
+| `/role expression promote <ID>` | `BOT_ADMIN` | 通过表达候选并允许注入提示词 |
+| `/role expression reject <ID>` | `BOT_ADMIN` | 拒绝表达候选 |
+| `/role expression clear` | `BOT_ADMIN` | 清空当前群表达候选 |
 
 `/role quiet add` 和 `/role quiet remove` 允许普通群员自助使用；`/role` 的其他子命令仍然需要 `BOT_ADMIN`。
 
