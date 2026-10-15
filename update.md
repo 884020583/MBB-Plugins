@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.38.0.2301 | 2026-10-16 | `MBB-Roleplay` 第十二轮类拆分：把模型输出清洗、宽松 JSON 提取、损坏修复、注释剥离、控制字符转义和消息对象构造从 `RoleplayService` 迁到独立的 `RoleplayJsonUtils`，主服务保留 `parseJson` 与 `message` 包装入口；`RoleplayService` 从约 2664 行降到约 2510 行。行为不变，JSON 修复顺序和宽松提取保持原实现 |
 | V0.5.37.0.2301 | 2026-10-16 | `MBB-Roleplay` 第十一轮类拆分：把空值处理、短文本截断、时区时间、记忆时间格式化、昵称读取、地址别名判断、CSV 数值判断、重复度计算和线程休眠从 `RoleplayService` 迁到独立的 `RoleplayTextUtils`，主服务保留同名包装入口；`RoleplayService` 从约 2730 行降到约 2664 行。行为不变，时间格式、别名匹配和重复检测保持原实现 |
 | V0.5.36.0.2301 | 2026-10-16 | `MBB-Roleplay` 第十轮类拆分：把单条/合批回合调度、延后回合、表情包等待窗口和待处理回合清理从 `RoleplayService` 迁到独立的 `RoleplayTurnProcessor`，主服务保留 `processGroupMessage`、`processMessageBatch`、`wakePendingTurnForUser` 等入口；`RoleplayService` 从约 3033 行降到约 2730 行。行为不变，合批、概率跳过、延后等待和同群串行收尾保持原链路 |
 | V0.5.35.0.2301 | 2026-10-16 | `MBB-Roleplay` 第九轮类拆分：把回复结果解析、单条/合批发送、旧标签兼容、技能调用、风格化调用和动作校验从 `RoleplayService` 迁到独立的 `RoleplayReplyExecutor`，主服务保留技能包装入口；`RoleplayService` 从约 3324 行降到 3033 行。行为不变，回复分段、引用、旧标签和技能执行保持原链路 |

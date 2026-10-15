@@ -75,6 +75,7 @@ public class RoleplayService {
     private final RoleplayReplyExecutor replyExecutor;
     private final RoleplayTurnProcessor turnProcessor;
     private final RoleplayTextUtils textUtils;
+    private final RoleplayJsonUtils jsonUtils;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -273,6 +274,7 @@ public class RoleplayService {
         this.replyExecutor = new RoleplayReplyExecutor(this);
         this.turnProcessor = new RoleplayTurnProcessor(this);
         this.textUtils = new RoleplayTextUtils(this);
+        this.jsonUtils = new RoleplayJsonUtils();
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -2401,178 +2403,13 @@ public class RoleplayService {
         return false;
     }
 
-    JSONObject parseJson(String content) {
-        if (content == null || content.trim().isEmpty()) return null;
-        String text = content.replace("\uFEFF","").trim();
-        JSONObject direct = tryParseObject(text);
-        if (direct != null) return direct;
-        for (String candidate : extractJsonObjects(text)) {
-            JSONObject parsed = tryParseObject(candidate);
-            if (parsed != null) return parsed;
-        }
-        return null;
-    }
 
-    private JSONObject tryParseObject(String text) {
-        if (text == null || text.trim().isEmpty()) return null;
-        String value = text.trim();
-        JSONObject parsed = parseObjectValue(value);
-        if (parsed != null) return parsed;
-        String repaired = repairJson(value);
-        if (!repaired.equals(value)) return parseObjectValue(repaired);
-        return null;
-    }
 
-    private JSONObject parseObjectValue(String text) {
-        try {
-            Object value = JSON.parse(text);
-            if (value instanceof JSONObject) return (JSONObject)value;
-            if (value instanceof JSONArray) {
-                JSONArray array = (JSONArray)value;
-                for (Object item : array) {
-                    if (item instanceof JSONObject) return (JSONObject)item;
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return null;
-    }
 
-    private List<String> extractJsonObjects(String text) {
-        List<String> result = new ArrayList<>();
-        if (text == null) return result;
-        boolean inString = false;
-        boolean escaped = false;
-        int depth = 0;
-        int start = -1;
-        for (int i = 0; i < text.length(); i++) {
-            char character = text.charAt(i);
-            if (inString) {
-                if (escaped) {
-                    escaped = false;
-                } else if (character == '\\') {
-                    escaped = true;
-                } else if (character == '"') {
-                    inString = false;
-                }
-                continue;
-            }
-            if (character == '"') {
-                inString = true;
-            } else if (character == '{') {
-                if (depth == 0) start = i;
-                depth++;
-            } else if (character == '}' && depth > 0) {
-                depth--;
-                if (depth == 0 && start >= 0) {
-                    result.add(text.substring(start,i + 1));
-                    start = -1;
-                }
-            }
-        }
-        return result;
-    }
 
-    private String repairJson(String text) {
-        String value = text.replace("\uFEFF","").trim();
-        value = value.replaceAll("(?s)```[a-zA-Z0-9_-]*\\s*","");
-        value = value.replace("```","");
-        value = stripJsonComments(value);
-        value = value.replaceAll(",\\s*([}\\]])","$1");
-        value = value.replaceAll(",\\s*([}\\]])","$1");
-        return escapeJsonControls(value);
-    }
 
-    private String stripJsonComments(String text) {
-        StringBuilder builder = new StringBuilder();
-        boolean inString = false;
-        boolean escaped = false;
-        for (int i = 0; i < text.length(); i++) {
-            char character = text.charAt(i);
-            if (inString) {
-                builder.append(character);
-                if (escaped) {
-                    escaped = false;
-                } else if (character == '\\') {
-                    escaped = true;
-                } else if (character == '"') {
-                    inString = false;
-                }
-                continue;
-            }
-            if (character == '"') {
-                inString = true;
-                builder.append(character);
-                continue;
-            }
-            if (character == '/' && i + 1 < text.length()) {
-                char next = text.charAt(i + 1);
-                if (next == '/') {
-                    i += 2;
-                    while (i < text.length() && text.charAt(i) != '\n') i++;
-                    builder.append('\n');
-                    continue;
-                }
-                if (next == '*') {
-                    i += 2;
-                    while (i + 1 < text.length()
-                            && !(text.charAt(i) == '*' && text.charAt(i + 1) == '/')) i++;
-                    i++;
-                    continue;
-                }
-            }
-            builder.append(character);
-        }
-        return builder.toString();
-    }
 
-    private String escapeJsonControls(String text) {
-        StringBuilder builder = new StringBuilder();
-        boolean inString = false;
-        boolean escaped = false;
-        for (int i = 0; i < text.length(); i++) {
-            char character = text.charAt(i);
-            if (!inString) {
-                builder.append(character);
-                if (character == '"') inString = true;
-                continue;
-            }
-            if (escaped) {
-                builder.append(character);
-                escaped = false;
-                continue;
-            }
-            if (character == '\\') {
-                builder.append(character);
-                escaped = true;
-                continue;
-            }
-            if (character == '"') {
-                builder.append(character);
-                inString = false;
-                continue;
-            }
-            if (character == '\n') {
-                builder.append("\\n");
-            } else if (character == '\r') {
-                builder.append("\\r");
-            } else if (character == '\t') {
-                builder.append("\\t");
-            } else if (character < 0x20) {
-                builder.append(String.format("\\u%04x",(int)character));
-            } else {
-                builder.append(character);
-            }
-        }
-        return builder.toString();
-    }
 
-    JSONObject message(String role,String content) {
-        JSONObject message = new JSONObject(true);
-        message.put("role",role);
-        message.put("content",content == null ? "" : content);
-        return message;
-    }
 
     private void ensureColumn(String table,String column,String definition) {
         List<JSONObject> columns = storage().query("PRAGMA table_info(`"+table+"`)");
@@ -2655,6 +2492,15 @@ public class RoleplayService {
 
     boolean sleepQuietly(long millis) {
         return textUtils.sleepQuietly(millis);
+    }
+
+
+    JSONObject parseJson(String content) {
+        return jsonUtils.parseJson(content);
+    }
+
+    JSONObject message(String role,String content) {
+        return jsonUtils.message(role,content);
     }
 
     StorageService storage() {
