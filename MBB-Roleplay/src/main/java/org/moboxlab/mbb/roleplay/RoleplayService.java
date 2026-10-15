@@ -79,14 +79,15 @@ public class RoleplayService {
     private final RoleplayImageContextService imageContextService;
     private final RoleplayStickerService stickerService;
     private final RoleplayAddressService addressService;
+    private final RoleplayRateLimitService rateLimitService;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
     private volatile RoleplayConfig config;
     private volatile RoleplayPersona persona;
     private final Map<Long,RoleplayConversationState> conversationStateMap = new ConcurrentHashMap<>();
-    private final Map<Long,Integer> messageCountMap = new ConcurrentHashMap<>();
-    private final Map<Long,long[]> replyRateMap = new ConcurrentHashMap<>();
+
+
     final Map<Long,Boolean> memoryUpdatingMap = new ConcurrentHashMap<>();
     final Map<Long,String> pendingMemoryMap = new ConcurrentHashMap<>();
     final Map<Long,String> memoryErrorTypeMap = new ConcurrentHashMap<>();
@@ -277,6 +278,7 @@ public class RoleplayService {
         this.imageContextService = new RoleplayImageContextService(this);
         this.stickerService = new RoleplayStickerService(this);
         this.addressService = new RoleplayAddressService(this);
+        this.rateLimitService = new RoleplayRateLimitService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -554,7 +556,7 @@ public class RoleplayService {
         contextService.recordTopic(groupID,content,false);
         int count = countMessage(groupID);
         if (count >= config.memoryUpdateMessages) {
-            messageCountMap.put(groupID,0);
+            rateLimitService.resetGroup(groupID);
             triggerMemory(groupID,"定时整理");
         }
         if (pureImage) {
@@ -870,9 +872,9 @@ public class RoleplayService {
         rotateContextToken(groupID);
         memoryUpdatingMap.remove(groupID);
         pendingMemoryMap.remove(groupID);
-        messageCountMap.put(groupID,0);
+        rateLimitService.resetGroup(groupID);
         conversationStateMap.remove(groupID);
-        replyRateMap.remove(groupID);
+
     }
 
     public String getRoleName() {
@@ -1309,8 +1311,7 @@ public class RoleplayService {
 
 
     void clearRuntimeMemoryState() {        conversationStateMap.clear();
-        messageCountMap.clear();
-        replyRateMap.clear();
+        rateLimitService.clearRuntimeState();
         pendingMemoryMap.clear();
         memoryErrorTypeMap.clear();
         memoryMergingMap.clear();
@@ -1538,53 +1539,11 @@ public class RoleplayService {
         return text.contains(RoleplayReminderService.REMINDER_MARKER);
     }
 
-    int countMessage(long groupID) {
-        Integer count = messageCountMap.get(groupID);
-        count = count == null ? 0 : count;
-        count++;
-        messageCountMap.put(groupID,count);
-        return count;
-    }
 
     /**
      * 只读的限流判断，用于在调用路由之前提前跳过，避免冷却期还去请求模型
      */
-    boolean rateLimited(long groupID) {
-        synchronized (groupQueueLock) {
-            long now = System.currentTimeMillis();
-            RoleplayConversationState state = state(groupID);
-            if (state.lastReplyTime > 0
-                    && now - state.lastReplyTime < config.replyCooldownSecond * 1000L) {
-                return true;
-            }
-            long hour = now / 3600000L;
-            long[] rate = replyRateMap.get(groupID);
-            return rate != null && rate[0] == hour && rate[1] >= config.maxRepliesPerHour;
-        }
-    }
 
-    boolean canReply(long groupID) {
-        //冷却判定与时间戳写入必须原子，否则并发回合会同时读到旧值、各回一次
-        synchronized (groupQueueLock) {
-            long now = System.currentTimeMillis();
-            RoleplayConversationState state = state(groupID);
-            if (state.lastReplyTime > 0
-                    && now - state.lastReplyTime < config.replyCooldownSecond * 1000L) {
-                return false;
-            }
-            long hour = now / 3600000L;
-            long[] rate = replyRateMap.get(groupID);
-            if (rate == null || rate[0] != hour) {
-                rate = new long[]{hour,1};
-                replyRateMap.put(groupID,rate);
-            } else {
-                if (rate[1] >= config.maxRepliesPerHour) return false;
-                rate[1]++;
-            }
-            state.lastReplyTime = now;
-            return true;
-        }
-    }
 
     RoleplayConversationState state(long groupID) {
         RoleplayConversationState existing = conversationStateMap.get(groupID);
@@ -1619,23 +1578,10 @@ public class RoleplayService {
      */
 
 
-    boolean isContinuation(long groupID,long userID) {
-        RoleplayConversationState state = state(groupID);
-        return state.lastReplyTime > 0 && state.lastReplyUser == userID
-                && System.currentTimeMillis() - state.lastReplyTime
-                <= config.conversationWindowSecond * 1000L;
-    }
 
     /**
      * 同一用户刚被回复过：用于抑制"一句话拆成两句"时的第二次回复
      */
-    boolean justRepliedToSameUser(long groupID,long userID) {
-        if (config.splitMessageSuppressSecond <= 0) return false;
-        RoleplayConversationState state = state(groupID);
-        return state.lastReplyTime > 0 && state.lastReplyUser == userID
-                && System.currentTimeMillis() - state.lastReplyTime
-                <= config.splitMessageSuppressSecond * 1000L;
-    }
 
     /**
      * 半句识别：结尾正好是角色名字，或者停在连接词上，说明这句话还没说完
@@ -1683,49 +1629,11 @@ public class RoleplayService {
         return looksIncomplete(safe(rows.get(0).getString("content")));
     }
 
-    boolean isGroupActive(long groupID) {
-        RoleplayConversationState state = state(groupID);
-        return state.lastReplyTime > 0
-                && System.currentTimeMillis() - state.lastReplyTime
-                <= config.conversationWindowSecond * 1000L;
-    }
-
-    int updateOtherRoleMessageStreak(long groupID,boolean otherRoleBot) {
-        RoleplayConversationState state = state(groupID);
-        if (!otherRoleBot) {
-            state.otherRoleStreak = 0;
-            state.botStreak = 0;
-            return 0;
-        }
-        state.otherRoleStreak++;
-        return state.otherRoleStreak;
-    }
 
 
 
 
-    boolean shouldSuppressRepeat(long groupID,String reply) {
-        if (reply == null || reply.trim().length() < config.repeatCheckMinChars) return false;
-        JSONArray recent = contextService.recentRoleReplies(groupID);
-        if (recent.isEmpty()) return false;
-        String candidate = normalizeForSimilarity(reply);
-        if (candidate.length() < config.repeatCheckMinChars) return false;
-        String opening = openingOf(candidate);
-        int openingCount = 0;
-        int fillerCount = 0;
-        boolean fillerOpening = candidate.startsWith("嗯");
-        for (int i = 0; i < recent.size(); i++) {
-            String old = normalizeForSimilarity(recent.getJSONObject(i).getString("content"));
-            if (old.isEmpty()) continue;
-            if (opening.length() >= 2 && old.startsWith(opening)) openingCount++;
-            if (fillerOpening && old.startsWith("嗯")) fillerCount++;
-            if (similarity(candidate,old) >= config.repeatSimilarityThreshold) return true;
-            //字面相似度抓不住“同一组信息换个尾巴”的复读，这种会留下很长的公共片段
-            if (longestCommonRun(candidate,old) >= config.repeatCommonRunMinChars) return true;
-        }
-        return (opening.length() >= 2 && openingCount >= config.repeatOpeningLimit)
-                || (fillerOpening && fillerCount >= Math.max(1,config.repeatOpeningLimit - 1));
-    }
+
 
 
     /**
@@ -2134,6 +2042,39 @@ public class RoleplayService {
 
     boolean isRoleParticipantUser(long userID) {
         return addressService.isRoleParticipantUser(userID);
+    }
+
+
+    int countMessage(long groupID) {
+        return rateLimitService.countMessage(groupID);
+    }
+
+    boolean rateLimited(long groupID) {
+        return rateLimitService.rateLimited(groupID);
+    }
+
+    boolean canReply(long groupID) {
+        return rateLimitService.canReply(groupID);
+    }
+
+    boolean shouldSuppressRepeat(long groupID,String reply) {
+        return rateLimitService.shouldSuppressRepeat(groupID,reply);
+    }
+
+    boolean isGroupActive(long groupID) {
+        return rateLimitService.isGroupActive(groupID);
+    }
+
+    int updateOtherRoleMessageStreak(long groupID,boolean otherRoleBot) {
+        return rateLimitService.updateOtherRoleMessageStreak(groupID,otherRoleBot);
+    }
+
+    boolean justRepliedToSameUser(long groupID,long userID) {
+        return rateLimitService.justRepliedToSameUser(groupID,userID);
+    }
+
+    boolean isContinuation(long groupID,long userID) {
+        return rateLimitService.isContinuation(groupID,userID);
     }
 
     StorageService storage() {
