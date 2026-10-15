@@ -89,6 +89,7 @@ public class RoleplayService {
     private final RoleplayReplyGenerationService replyGenerationService;
     private final RoleplayRoutingService routingService;
     private final RoleplayPromptMaterialService promptMaterialService;
+    private final RoleplayMessageContentService contentService;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -297,6 +298,7 @@ public class RoleplayService {
         this.replyGenerationService = new RoleplayReplyGenerationService(this);
         this.routingService = new RoleplayRoutingService(this);
         this.promptMaterialService = new RoleplayPromptMaterialService(this);
+        this.contentService = new RoleplayMessageContentService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -619,11 +621,11 @@ public class RoleplayService {
     }
 
     boolean isOwnerUser(long userID) {
-        return isOwner(userID);
+        return contentService.isOwner(userID);
     }
 
     boolean isInducedMemory(String content) {
-        return isInducedMemoryRequest(content);
+        return contentService.isInducedMemoryRequest(content);
     }
 
     public int ruleLikeCount() {
@@ -714,20 +716,7 @@ public class RoleplayService {
 
 
 
-    void recordMessage(GroupMessageEvent event,String content,boolean isBot) {
-        JSONObject sender = event.getSender();
-        String userName = sender == null ? "" : sender.getString("card");
-        if (userName == null || userName.isEmpty()) userName = sender == null ? "" : sender.getString("nickname");
-        storage().insert("INSERT INTO `"+MSG_TABLE+"` (`messageID`,`groupID`,`userID`,`userName`,`messageTime`,`content`,`isBot`) VALUES (?,?,?,?,?,?,?)",
-                event.getMessageID(),event.getGroupID(),event.getUserID(),userName == null ? "" : userName,
-                System.currentTimeMillis(),content,isBot ? 1 : 0);
-    }
 
-    void recordBotMessage(long groupID,long botID,String content,long messageID) {
-        storage().insert("INSERT INTO `"+MSG_TABLE+"` (`messageID`,`groupID`,`userID`,`userName`,`messageTime`,`content`,`isBot`) VALUES (?,?,?,?,?,?,?)",
-                messageID,groupID,botID,"角色",System.currentTimeMillis(),content,1);
-        contextService.recordTopic(groupID,content,true);
-    }
 
 
 
@@ -737,34 +726,13 @@ public class RoleplayService {
      */
 
 
-    boolean isCommand(String content) {
-        String text = content == null ? "" : content.trim();
-        if (text.startsWith("@")) {
-            text = text.replaceFirst("^@[0-9]+\\s*","").trim();
-        }
-        for (String prefix : config.commandPrefixes.split(",")) {
-            if (!prefix.trim().isEmpty() && text.startsWith(prefix.trim())) return true;
-        }
-        return false;
-    }
 
 
 
 
 
 
-    private boolean isInducedMemoryRequest(String content) {
-        String text = safe(content);
-        return text.contains("调用全局记忆") || text.contains("全局记忆功能")
-                || text.contains("永久记忆") || text.contains("记一下")
-                || text.contains("记住这个") || text.contains("记忆一下")
-                || text.contains("记下来");
-    }
 
-    boolean isOwner(long userID) {
-        List<Long> owners = plugin.getServer().getOwnerList();
-        return owners != null && owners.contains(userID);
-    }
 
 
 
@@ -777,10 +745,6 @@ public class RoleplayService {
 
 
 
-    boolean isReminderNotification(String content) {
-        String text = content == null ? "" : content;
-        return text.contains(RoleplayReminderService.REMINDER_MARKER);
-    }
 
 
     /**
@@ -830,47 +794,12 @@ public class RoleplayService {
      * 半句识别：结尾正好是角色名字，或者停在连接词上，说明这句话还没说完
      * 命中后延后回合会等同一用户补充，并把补充内容并进同一个回合
      */
-    boolean looksIncomplete(String content) {
-        if (config.splitMessageSuppressSecond <= 0) return false;
-        String text = content == null ? "" : content.trim();
-        if (text.isEmpty() || text.length() > config.splitMessageSuppressMaxChars) return false;
-        for (String name : addressNames()) {
-            if (name.length() >= 2 && text.endsWith(name)) return true;
-        }
-        String[] tails = new String[]{"，","、","和","与","跟","的","是",
-                "然后","但是","因为","所以","而且","还是"};
-        for (String tail : tails) {
-            if (text.endsWith(tail)) return true;
-        }
-        return false;
-    }
 
-    private List<String> addressNames() {
-        List<String> names = new ArrayList<>();
-        if (persona.name != null && !persona.name.trim().isEmpty()) {
-            names.add(persona.name.trim());
-        }
-        for (String alias : persona.aliases) {
-            if (alias != null && !alias.trim().isEmpty()) names.add(alias.trim());
-        }
-        String botName = plugin.getServer().getBotName();
-        if (botName != null && !botName.trim().isEmpty()) names.add(botName.trim());
-        return names;
-    }
 
     /**
      * 上一条用户消息是不是没说完的半句
      * 当前消息已经记过流水，所以取倒数第二条
      */
-    boolean completesPreviousIncomplete(long groupID,long userID) {
-        if (config.splitMessageSuppressSecond <= 0) return false;
-        List<JSONObject> rows = storage().query(
-                "SELECT `content` FROM `"+MSG_TABLE+"` WHERE `groupID`=? AND `userID`=? "
-                        + "AND `isBot`=0 ORDER BY `ID` DESC LIMIT 1 OFFSET 1",
-                groupID,userID);
-        if (rows == null || rows.isEmpty()) return false;
-        return looksIncomplete(safe(rows.get(0).getString("content")));
-    }
 
 
 
@@ -977,21 +906,6 @@ public class RoleplayService {
 
 
 
-    String extractContent(JSONArray message) {
-        if (message == null) return "";
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < message.size(); i++) {
-            JSONObject segment = message.getJSONObject(i);
-            if (segment == null) continue;
-            String type = segment.getString("type");
-            JSONObject data = segment.getJSONObject("data");
-            if ("text".equals(type)) builder.append(data == null ? "" : safe(data.getString("text")));
-            else if ("image".equals(type) || "mface".equals(type)) builder.append("[图片]");
-            else if ("at".equals(type)) builder.append("@").append(data == null ? "" : safe(data.getString("qq")));
-            else if ("face".equals(type)) builder.append("[表情]");
-        }
-        return builder.toString().trim();
-    }
 
 
 
@@ -1030,16 +944,6 @@ public class RoleplayService {
 
 
 
-    boolean containsIgnoredContent(JSONArray message) {
-        if (message == null) return false;
-        for (int i = 0; i < message.size(); i++) {
-            JSONObject segment = message.getJSONObject(i);
-            if (segment == null) continue;
-            String type = segment.getString("type");
-            if ("face".equals(type)) return true;
-        }
-        return false;
-    }
 
 
 
@@ -1436,6 +1340,47 @@ public class RoleplayService {
     String speechPrompt(long groupID,long userID,String content,boolean otherRoleBot,
                         RoleplayRouteDecision decision) {
         return promptMaterialService.speechPrompt(groupID,userID,content,otherRoleBot,decision);
+    }
+
+
+    boolean containsIgnoredContent(JSONArray message) {
+        return contentService.containsIgnoredContent(message);
+    }
+
+    String extractContent(JSONArray message) {
+        return contentService.extractContent(message);
+    }
+
+    void recordMessage(GroupMessageEvent event,String content,boolean isBot) {
+        contentService.recordMessage(event,content,isBot);
+    }
+
+    void recordBotMessage(long groupID,long botID,String content,long messageID) {
+        contentService.recordBotMessage(groupID,botID,content,messageID);
+    }
+
+    boolean isCommand(String content) {
+        return contentService.isCommand(content);
+    }
+
+    boolean isReminderNotification(String content) {
+        return contentService.isReminderNotification(content);
+    }
+
+    boolean isOwner(long userID) {
+        return contentService.isOwner(userID);
+    }
+
+    boolean isInducedMemoryRequest(String content) {
+        return contentService.isInducedMemoryRequest(content);
+    }
+
+    boolean looksIncomplete(String content) {
+        return contentService.looksIncomplete(content);
+    }
+
+    boolean completesPreviousIncomplete(long groupID,long userID) {
+        return contentService.completesPreviousIncomplete(groupID,userID);
     }
 
     StorageService storage() {
