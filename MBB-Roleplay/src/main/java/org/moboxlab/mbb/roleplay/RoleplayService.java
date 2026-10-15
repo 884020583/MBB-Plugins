@@ -69,6 +69,7 @@ public class RoleplayService {
     private final RoleplayContextService contextService;
     private final RoleplayPromptAssembler promptAssembler;
     private final RoleplayMemoryBackupService memoryBackupService;
+    private final RoleplayMemoryUpdateService memoryUpdateService;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -77,10 +78,10 @@ public class RoleplayService {
     private final Map<Long,RoleplayConversationState> conversationStateMap = new ConcurrentHashMap<>();
     private final Map<Long,Integer> messageCountMap = new ConcurrentHashMap<>();
     private final Map<Long,long[]> replyRateMap = new ConcurrentHashMap<>();
-    private final Map<Long,Boolean> memoryUpdatingMap = new ConcurrentHashMap<>();
-    private final Map<Long,String> pendingMemoryMap = new ConcurrentHashMap<>();
-    private final Map<Long,String> memoryErrorTypeMap = new ConcurrentHashMap<>();
-    private final Map<Long,Boolean> memoryMergingMap = new ConcurrentHashMap<>();
+    final Map<Long,Boolean> memoryUpdatingMap = new ConcurrentHashMap<>();
+    final Map<Long,String> pendingMemoryMap = new ConcurrentHashMap<>();
+    final Map<Long,String> memoryErrorTypeMap = new ConcurrentHashMap<>();
+    final Map<Long,Boolean> memoryMergingMap = new ConcurrentHashMap<>();
     private final Map<Long,long[]> imageVisionRateMap = new ConcurrentHashMap<>();
     private final Map<String,RecentImage> recentImageMap = new ConcurrentHashMap<>();
     private final Map<String,PendingTurn> pendingTurnMap = new ConcurrentHashMap<>();
@@ -122,9 +123,9 @@ public class RoleplayService {
     private static final Pattern STICKER_OPEN = Pattern.compile(
             "(?is)<\\s*sticker\\s*/?\\s*>");
 
-    private static class MemoryCursor {
-        private final long time;
-        private final long id;
+    static class MemoryCursor {
+        final long time;
+        final long id;
 
         private MemoryCursor(long time,long id) {
             this.time = time;
@@ -151,7 +152,7 @@ public class RoleplayService {
         private final String task;
         private final String target;
         private final String action;
-        private final long id;
+        final long id;
 
         private ReminderMarkerResult(boolean requested,String reply,String time,String task,
                                      String target,String action,long id) {
@@ -305,6 +306,7 @@ public class RoleplayService {
         this.contextService = new RoleplayContextService(this);
         this.promptAssembler = new RoleplayPromptAssembler(this);
         this.memoryBackupService = new RoleplayMemoryBackupService(this);
+        this.memoryUpdateService = new RoleplayMemoryUpdateService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -1445,7 +1447,7 @@ public class RoleplayService {
         return row != null && row.getIntValue("enabled") == 1;
     }
 
-    private String contextToken(long groupID) {
+    String contextToken(long groupID) {
         JSONObject row = storage().queryOne(
                 "SELECT `contextToken` FROM `"+GROUP_TABLE+"` WHERE `groupID`=?",groupID);
         if (row != null && row.getString("contextToken") != null
@@ -1499,6 +1501,33 @@ public class RoleplayService {
         return result;
     }
 
+    void saveMemoryState(long groupID,String shortTerm,long lastTime,long lastID) {
+        memoryUpdateService.saveMemoryState(groupID,shortTerm,lastTime,lastID);
+    }
+
+    void triggerMemory(long groupID,String reason) {
+        memoryUpdateService.triggerMemory(groupID,reason);
+    }
+
+    void triggerMemory(long groupID,String reason,String directMemory) {
+        memoryUpdateService.triggerMemory(groupID,reason,directMemory);
+    }
+
+    void mergeLongMemoryIfNeeded(long groupID) {
+        memoryUpdateService.mergeLongMemoryIfNeeded(groupID);
+    }
+
+    public boolean mergeLongMemoryNow(long groupID) {
+        return memoryUpdateService.mergeLongMemoryNow(groupID);
+    }
+
+    public boolean mergeLongMemoryNow(long groupID,boolean force) {
+        return memoryUpdateService.mergeLongMemoryNow(groupID,force);
+    }
+
+    public boolean mergeLongMemoryNow(long groupID,boolean force,Consumer<String> callback) {
+        return memoryUpdateService.mergeLongMemoryNow(groupID,force,callback);
+    }
     public JSONObject memoryStats(long groupID) {
         JSONObject result = status(groupID);
         result.put("shortSummary",shortSummary(groupID));
@@ -1917,586 +1946,6 @@ public class RoleplayService {
         return routed;
     }
 
-    private void triggerMemory(long groupID,String reason) {
-        triggerMemory(groupID,reason,"");
-    }
-
-    private void triggerMemory(long groupID,String reason,String directMemory) {
-        String memory = directMemory == null ? "" : directMemory.trim();
-        synchronized (memoryUpdatingMap) {
-            Boolean updating = memoryUpdatingMap.get(groupID);
-            if (updating != null && updating) {
-                pendingMemoryMap.put(groupID,mergeMemory(pendingMemoryMap.get(groupID),memory));
-                return;
-            }
-            memoryUpdatingMap.put(groupID,true);
-        }
-        submitBackground(() -> runMemoryUpdate(groupID,reason,memory));
-    }
-
-    private void runMemoryUpdate(long groupID,String reason,String directMemory) {
-        try {
-            boolean directMemoryUsed = false;
-            for (int batch = 0; batch < config.memoryExtractBatches; batch++) {
-                MemoryCursor cursor = memoryCursor(groupID);
-                List<JSONObject> rows = storage().query(
-                        "SELECT `ID`,`userID`,`userName`,`content`,`messageTime` FROM `"+MSG_TABLE+"` "
-                                + "WHERE `groupID`=? AND `userID` NOT IN "
-                                + "(SELECT `userID` FROM `plugin_mbb_roleplay_blacklist` WHERE `groupID`=?) "
-                                + "AND (`messageTime`>? OR (`messageTime`=? AND `ID`>?)) "
-                                + "ORDER BY `ID` ASC LIMIT ?",
-                        groupID,groupID,cursor.time,cursor.time,cursor.id,
-                        config.memoryExtractMessages);
-                if (rows == null) rows = new ArrayList<>();
-                int queriedRows = rows.size();
-                rows = limitMemoryRows(rows,config.memoryExtractMaxChars);
-                if (rows.size() < queriedRows) {
-                    plugin.getLogger().sendInfo("[记忆] 群"+groupID+" 本批输入按字符限制裁剪为 "
-                            +rows.size()+" 条，原读取 "+queriedRows+" 条");
-                }
-                String batchMemory = batch == 0 ? directMemory : "";
-                if (rows.isEmpty()) {
-                    if (!directMemoryUsed && !batchMemory.isEmpty()) {
-                        updateMemoryBatch(groupID,rows,contextToken(groupID),batchMemory);
-                        directMemoryUsed = true;
-                    }
-                    break;
-                }
-                plugin.getLogger().sendInfo("[记忆] 群"+groupID+" 开始整理"
-                        +(batch > 0 ? "下一批" : "")+"，消息 "+rows.size()+" 条，触发："+safe(reason));
-                if (!updateMemoryBatch(groupID,rows,contextToken(groupID),batchMemory)) break;
-                if (!batchMemory.isEmpty()) directMemoryUsed = true;
-            }
-        } finally {
-            String pending;
-            synchronized (memoryUpdatingMap) {
-                memoryUpdatingMap.remove(groupID);
-                pending = pendingMemoryMap.remove(groupID);
-            }
-            if (pending != null) triggerMemory(groupID,"待处理",pending);
-        }
-    }
-
-    private JSONObject callMemoryAi(PluginService ai,long groupID,String source,String contextToken) {
-        JSONObject parsed = callMemoryAiOnce(ai,groupID,source,contextToken,false);
-        if (parsed != null) return parsed;
-        String errorType = safe(memoryErrorTypeMap.get(groupID));
-        if ("timeout".equals(errorType) || "network".equals(errorType) || "busy".equals(errorType)) {
-            plugin.getLogger().sendWarn("[记忆] 群"+groupID+" 首次调用失败（"+errorType+"），不再重试");
-            return null;
-        }
-        plugin.getLogger().sendWarn("[记忆] 群"+groupID+" 首次输出解析失败，使用严格 JSON 提示重试");
-        return callMemoryAiOnce(ai,groupID,source,contextToken,true);
-    }
-
-    private JSONObject callMemoryAiOnce(PluginService ai,long groupID,String source,
-                                        String contextToken,boolean retry) {
-        JSONArray messages = new JSONArray();
-        messages.add(message("system",memorySystemPrompt(groupID,retry)));
-        messages.add(message("user",source));
-        JSONObject params = new JSONObject(true);
-        String profile = config.memoryProfile == null || config.memoryProfile.trim().isEmpty()
-                ? config.aiProfile : config.memoryProfile.trim();
-        int maxTokens = retry
-                ? Math.min(32000,config.memoryMaxTokens * 2)
-                : config.memoryMaxTokens;
-        params.put("profile",profile);
-        params.put("maxTokens",maxTokens);
-        params.put("temperature",retry ? 0.0 : 0.2);
-        params.put("reasoningEffort",config.memoryReasoningEffort);
-        params.put("timeoutSeconds",config.memoryTimeoutSecond);
-        params.put("retryCount",0);
-        params.put("sessionId","roleplay-memory-"+groupID+"-"+contextToken+(retry ? "-retry" : ""));
-        params.put("messages",messages);
-        long startTime = System.currentTimeMillis();
-        JSONObject result = ai.call("chat",params);
-        RoleplayAiLog.log(plugin.getLogger(),"记忆整理",groupID,result,System.currentTimeMillis() - startTime);
-        if (result == null || !result.getBooleanValue("status")) {
-            memoryErrorTypeMap.put(groupID,safe(result == null ? "empty" : result.getString("errorType")));
-            plugin.getLogger().sendWarn("[记忆] 群"+groupID+" 整理失败："
-                    +safe(result == null ? "" : result.getString("message")));
-            return null;
-        }
-        String content = safe(result.getString("content"));
-        String reasoning = safe(result.getString("reasoningContent"));
-        String finishReason = safe(result.getString("finishReason"));
-        JSONObject parsed = parseJson(content);
-        if (parsed == null && !reasoning.isEmpty()) parsed = parseJson(reasoning);
-        if (parsed == null) {
-            memoryErrorTypeMap.put(groupID,"parse");
-            plugin.getLogger().sendWarn("[记忆] 群"+groupID+" "
-                    +(retry ? "重试" : "模型")+"没有返回合法 JSON，原始输出："
-                    +shortText(content,240)
-                    +(finishReason.isEmpty() ? "" : "，finishReason="+finishReason)
-                    +(reasoning.isEmpty() ? "" : "，reasoning长度="+reasoning.length())
-                    +"，profile="+profile+", maxTokens="+maxTokens);
-        } else {
-            memoryErrorTypeMap.remove(groupID);
-        }
-        return parsed;
-    }
-
-    private String memorySystemPrompt(long groupID,boolean retry) {
-        return "你是角色扮演插件的记忆整理器。"
-                +"当前角色："+persona.name
-                +(persona.identity == null || persona.identity.trim().isEmpty()
-                ? "" : "（"+persona.identity.trim()+"）")+"。"
-                +"必须始终以"+persona.name+"的第一人称角色视角整理记忆，区分“角色自己做过/说过”、"
-                +"“别人对角色做过/说过”和“角色对别人的印象”，不要把群友视角当成角色自己的经历。"
-                +(retry ? "上一次输出无法解析。现在必须只输出一个合法 JSON 对象，"
-                +"不要输出任何解释、标题、Markdown、代码块或思考过程。" : "只输出 JSON，不要 Markdown。")
-                +"格式：{\"shortTerm\":\"近几天事件、群友日常、角色正在做的事\",\"longTerm\":["
-                +"{\"type\":\"user_event|group_atmosphere|meme|self_action|topic\","
-                +"\"subjectID\":0,\"content\":\"记忆内容\",\"importance\":1}]}。"
-                +"群员的称呼、喜好、性格这类人物属性由单独的群员印象维护，不要写进 longTerm；"
-                +"longTerm 里提到某个群员时只写他做过的具体事情（type 用 user_event），并带上发生时间。"
-                +"整理时保留人名、组织名、术语、活动名等专有名词的全称，不要自造缩写；只有原始上下文里已经明确出现过的简称才可以继续使用。"
-                +"当前时间："+currentTimeText()+"。"
-                +"群成员较多时尽量记录更多有长期价值的群内氛围、群梗、角色行为和群员做过的事情，"
-                +"longTerm 最多输出 20 条。只记录有长期价值的信息，忽略普通寒暄、重复聊天和表情。"
-                +"如果一条记忆对应明确发生的事件，content 里必须带上发生时间，例如“2026-10-05 22:28 老师提到...”；"
-                +"shortTerm 也按时间顺序概括近几天发生的事，不要写成没有时间线索的流水账。"
-                +"不要把“角色正在写第几幕、改第几张画稿、赶稿进度”这类临时工作状态写成 longTerm；"
-                +"这类内容最多作为 shortTerm 的临时背景，并说明只在相关话题出现时提及，不要写成角色每轮都处于该状态。"
-                +"如果输入中包含“角色主动标记的记忆内容”，必须优先把其中的长期价值整理进 longTerm。"
-                +"角色没有父亲这个概念：不要把“自称是角色爸爸”“角色有爸爸”这类说法整理成记忆，"
-                +"遇到就直接忽略，也不要写进 globalMemory。"
-                +(globalMemoryService.isLearnGroup(groupID) ? "同时返回 globalMemory 数组："
-                +"[{\"type\":\"speech_style|tone|habit|lesson|meme|note\","
-                +"\"content\":\"所有群通用、不绑定用户的记忆\",\"importance\":1}]。"
-                +"type 必须从这些值里原样选择，speech_style 必须保留下划线，不要写成 speechstyle、speech-style 或 speech style。"
-                +"同一语义的内容只能输出一条，即使你认为它同时像 speech_style、tone、habit 或 note，也要合并成最合适的一条，不要输出同一件事的多个类型版本。"
-                +"只记录角色学到的说话方式、语气、生活习惯、群梗、注意事项和经验教训；"
-                +"游戏设定、专有名词、剧情事实由知识库负责，不要写进 globalMemory；"
-                +"不要记录个人隐私或用户专属信息；没有可学内容时返回空数组。" : "")
-                +"不要重复已有记忆；已有短期记忆如下：\n"+shortSummary(groupID);
-    }
-
-    /**
-     * 本批消息涉及群员的既有个人印象，喂给整理器避免重复记录人物属性
-     */
-    private String memberContextForBatch(long groupID,List<JSONObject> rows) {
-        if (rows == null || rows.isEmpty()) return "";
-        Set<Long> seen = new LinkedHashSet<>();
-        StringBuilder builder = new StringBuilder();
-        for (JSONObject row : rows) {
-            long userID = row.getLongValue("userID");
-            if (userID <= 0 || !seen.add(userID)) continue;
-            String profile = memberService.promptText(groupID,userID);
-            if (profile.isEmpty()) continue;
-            String flat = profile.replace("\n"," ").replace("你对这个群员的印象：","").trim();
-            builder.append("- ").append(safe(row.getString("userName")))
-                    .append("（QQ：").append(userID).append("）：").append(flat).append("\n");
-            if (seen.size() >= 10) break;
-        }
-        return builder.toString();
-    }
-
-    private boolean updateMemoryBatch(long groupID,List<JSONObject> rows,String contextToken,String directMemory) {
-        PluginService ai = plugin.getServer().getPluginManager().getService("MBB-AI");
-        if (ai == null) {
-            plugin.getLogger().sendWarn("[记忆] 群"+groupID+" 整理失败：MBB-AI 未启用");
-            return false;
-        }
-        StringBuilder source = new StringBuilder();
-        if (directMemory != null && !directMemory.trim().isEmpty()) {
-            source.append("角色主动标记的记忆内容：[").append(currentTimeText()).append("] ")
-                    .append(directMemory.trim()).append("\n");
-        }
-        for (JSONObject row : rows) {
-            source.append("[").append(formatMemoryTime(row.getLongValue("messageTime"))).append("] ")
-                    .append(safe(row.getString("userName"))).append("：")
-                    .append(safe(row.getString("content"))).append("\n");
-        }
-        //把本批涉及群员的既有印象一并给整理器，避免和群员个人记忆重复记录人物属性
-        String memberContext = memberContextForBatch(groupID,rows);
-        if (!memberContext.isEmpty()) {
-            source.append("本批涉及群员的既有印象（人物属性已经在别处维护，这里不要重复记录）：\n")
-                    .append(memberContext);
-        }
-        JSONObject parsed = callMemoryAi(ai,groupID,source.toString(),contextToken);
-        if (parsed == null) {
-            return false;
-        }
-        if (!contextToken.equals(contextToken(groupID))) {
-            plugin.getLogger().sendInfo("[记忆] 群"+groupID+" 上下文已重置，放弃旧批次记忆");
-            return false;
-        }
-        String shortTerm = safe(parsed.getString("shortTerm")).trim();
-        int saved = 0;
-        JSONArray longTerm = parsed.getJSONArray("longTerm");
-        if (longTerm != null) {
-            for (Object object : longTerm) {
-                if (!(object instanceof JSONObject)) continue;
-                if (saveLongMemory(groupID,(JSONObject) object)) saved++;
-            }
-        }
-        int globalSaved = 0;
-        JSONArray globalMemory = parsed.getJSONArray("globalMemory");
-        if (globalMemory != null && globalMemoryService.isLearnGroup(groupID)) {
-            for (Object object : globalMemory) {
-                if (!(object instanceof JSONObject)) continue;
-                JSONObject item = (JSONObject)object;
-                if (globalMemoryService.save(safe(item.getString("type")),
-                        safe(item.getString("content")),item.getIntValue("importance"),
-                        groupID,0)) {
-                    globalSaved++;
-                }
-            }
-        }
-        if (!rows.isEmpty()) {
-            JSONObject lastRow = rows.get(rows.size() - 1);
-            saveMemoryState(groupID,shortTerm,lastRow.getLongValue("messageTime"),lastRow.getLongValue("ID"));
-        }
-        plugin.getLogger().sendInfo("[记忆] 群"+groupID+" 整理完成：消息"+rows.size()
-                +"条，长期记忆"+saved+"条，永久记忆"+globalSaved+"条，短期记忆"+shortTerm.length()+"字");
-        return true;
-    }
-
-    void saveMemoryState(long groupID,String shortTerm,long lastTime,long lastID) {
-        JSONObject row = storage().queryOne("SELECT `ID` FROM `"+STATE_TABLE+"` WHERE `groupID`=?",groupID);
-        long now = System.currentTimeMillis();
-        String summary = shortTerm == null ? "" : shortTerm.trim();
-        if (row == null) {
-            storage().insert("INSERT INTO `"+STATE_TABLE+"` "
-                            + "(`groupID`,`shortSummary`,`lastMemoryTime`,`lastMemoryID`,`updateTime`) VALUES (?,?,?,?,?)",
-                    groupID,summary,lastTime,lastID,now);
-        } else if (summary.isEmpty()) {
-            storage().update("UPDATE `"+STATE_TABLE+"` SET `lastMemoryTime`=?,`lastMemoryID`=?,`updateTime`=? WHERE `groupID`=?",
-                    lastTime,lastID,now,groupID);
-        } else {
-            storage().update("UPDATE `"+STATE_TABLE+"` SET `shortSummary`=?,`lastMemoryTime`=?,`lastMemoryID`=?,`updateTime`=? WHERE `groupID`=?",
-                    summary,lastTime,lastID,now,groupID);
-        }
-    }
-
-    private boolean saveLongMemory(long groupID,JSONObject json) {
-        String type = safe(json.getString("type"));
-        String content = safe(json.getString("content")).trim();
-        if (type.isEmpty() || content.isEmpty()) return false;
-        long subjectID = json.getLongValue("subjectID");
-        int importance = json.getIntValue("importance");
-        if (importance < 1) importance = 1;
-        if (importance > 5) importance = 5;
-        JSONObject exists = storage().queryOne(
-                "SELECT `ID` FROM `"+MEMORY_TABLE+"` WHERE `groupID`=? AND `memoryType`=? AND `subjectID`=? AND `content`=?",
-                groupID,type,subjectID,content);
-        if (exists != null) {
-            storage().update("UPDATE `"+MEMORY_TABLE+"` SET `importance`=MAX(`importance`,?),`updateTime`=? WHERE `ID`=?",
-                    importance,System.currentTimeMillis(),exists.getLongValue("ID"));
-            mergeLongMemoryIfNeeded(groupID);
-            return true;
-        }
-        storage().insert("INSERT INTO `"+MEMORY_TABLE+"` (`groupID`,`memoryType`,`subjectID`,`content`,`importance`,`updateTime`) VALUES (?,?,?,?,?,?)",
-                groupID,type,subjectID,content,importance,System.currentTimeMillis());
-        mergeLongMemoryIfNeeded(groupID);
-        return true;
-    }
-
-    private void mergeLongMemoryIfNeeded(long groupID) {
-        if (memoryCount(groupID) <= config.maxLongMemories) return;
-        long cooldownMs = Math.max(0,config.memoryMergeCooldownMinute) * 60000L;
-        long lastMerge = memoryMergeLastTime(groupID);
-        if (cooldownMs > 0 && lastMerge > 0
-                && System.currentTimeMillis() - lastMerge < cooldownMs) {
-            return;
-        }
-        mergeLongMemoryNow(groupID);
-    }
-
-    private long memoryMergeLastTime(long groupID) {
-        JSONObject row = storage().queryOne(
-                "SELECT `lastMergeTime` FROM `"+STATE_TABLE+"` WHERE `groupID`=?",groupID);
-        return row == null ? 0L : row.getLongValue("lastMergeTime");
-    }
-
-    private void markMemoryMergeTriggered(long groupID) {
-        long now = System.currentTimeMillis();
-        JSONObject row = storage().queryOne(
-                "SELECT `ID` FROM `"+STATE_TABLE+"` WHERE `groupID`=?",groupID);
-        if (row == null) {
-            storage().insert("INSERT INTO `"+STATE_TABLE+"` "
-                            + "(`groupID`,`shortSummary`,`lastMemoryTime`,`lastMemoryID`,`lastMergeTime`,`updateTime`) "
-                            + "VALUES (?,?,?,?,?,?)",
-                    groupID,"",0L,0L,now,now);
-        } else {
-            storage().update("UPDATE `"+STATE_TABLE+"` SET `lastMergeTime`=?,`updateTime`=? WHERE `groupID`=?",
-                    now,now,groupID);
-        }
-    }
-
-    public boolean mergeLongMemoryNow(long groupID) {
-        return mergeLongMemoryNow(groupID,false);
-    }
-
-    public boolean mergeLongMemoryNow(long groupID,boolean force) {
-        return mergeLongMemoryNow(groupID,force,null);
-    }
-
-    public boolean mergeLongMemoryNow(long groupID,boolean force,Consumer<String> callback) {
-        synchronized (memoryMergingMap) {
-            Boolean merging = memoryMergingMap.get(groupID);
-            if (merging != null && merging) return false;
-            memoryMergingMap.put(groupID,true);
-        }
-        markMemoryMergeTriggered(groupID);
-        submitBackground(() -> {
-            String result;
-            try {
-                result = mergeLongMemory(groupID,force);
-            } catch (Exception e) {
-                result = "长期记忆合并失败："+safe(e.getMessage());
-                plugin.getLogger().sendWarn("[记忆] 群"+groupID+" 长期记忆合并异常："
-                        +safe(e.getMessage()));
-            } finally {
-                memoryMergingMap.put(groupID,false);
-            }
-            if (callback != null) callback.accept(result);
-        });
-        return true;
-    }
-
-    private String mergeLongMemory(long groupID,boolean force) {
-        PluginService ai = plugin.getServer().getPluginManager().getService("MBB-AI");
-        if (ai == null) {
-            plugin.getLogger().sendWarn("[记忆] 群"+groupID+" 长期记忆合并跳过：MBB-AI 未启用");
-            return "长期记忆合并失败：MBB-AI 未启用。";
-        }
-        long snapshotMaxId = maxLongMemoryId(groupID);
-        if (snapshotMaxId <= 0) return "当前群没有可合并的长期记忆。";
-        List<JSONObject> snapshot = exportLongMemoriesUpTo(groupID,snapshotMaxId);
-        if (snapshot.size() < 2) return "当前群长期记忆不足 2 条，无需合并。";
-        backupAllMemories("long-term-merge");
-        List<JSONObject> current = new ArrayList<>(snapshot);
-        int original = current.size();
-        int target = config.maxLongMemories;
-        int maxRounds = config.memoryMergeMaxRounds;
-        int batchSize = config.memoryMergeBatchSize;
-        boolean needMerge = force;
-        int executedRounds = 0;
-        for (int round = 1; round <= maxRounds; round++) {
-            if (!needMerge && current.size() <= target) break;
-            needMerge = false;
-            executedRounds++;
-            List<JSONObject> sorted = MemoryBatchSorter.sortForMerge(current);
-            List<List<JSONObject>> batches = MemoryBatchSorter.batches(sorted,batchSize);
-            plugin.getLogger().sendInfo("[记忆] 群"+groupID+" 长期记忆合并 第 "+round+"/"+maxRounds
-                    +" 轮开始：输入 "+current.size()+" 条，共 "+batches.size()+" 批");
-            List<JSONObject> mergedAll = new ArrayList<>();
-            int concurrency = Math.max(1,Math.min(4,Math.min(config.memoryMergeConcurrency,
-                    batches.size())));
-            final int currentRound = round;
-            ExecutorService executor = Executors.newFixedThreadPool(concurrency);
-            try {
-                List<Future<List<JSONObject>>> futures = new ArrayList<>();
-                for (int i = 0; i < batches.size(); i++) {
-                    List<JSONObject> batch = batches.get(i);
-                    final int batchNo = i + 1;
-                    plugin.getLogger().sendInfo("[记忆] 群"+groupID+" 长期记忆合并 第 "+round
-                            +" 轮 批次 "+batchNo+"/"+batches.size()+" 提交：输入 "+batch.size()
-                            +" 条，并发 "+concurrency);
-                    futures.add(executor.submit(() -> mergeLongMemoryBatchWithRetry(
-                            ai,groupID,batch,currentRound,batchNo,batches.size())));
-                }
-                for (int i = 0; i < futures.size(); i++) {
-                    List<JSONObject> merged = futureResult(futures.get(i));
-                    if (merged == null) {
-                        plugin.getLogger().sendWarn("[记忆] 群"+groupID+" 长期记忆合并 第 "+round
-                                +" 轮 批次 "+(i+1)+" 失败，放弃本次合并，原记忆保持不变");
-                        return "长期记忆合并失败，原记忆保持不变。";
-                    }
-                    mergedAll.addAll(merged);
-                    plugin.getLogger().sendInfo("[记忆] 群"+groupID+" 长期记忆合并 第 "+round
-                            +" 轮 批次 "+(i+1)+"/"+batches.size()+" 完成："
-                            +batches.get(i).size()+" -> "+merged.size()+" 条");
-                }
-            } finally {
-                executor.shutdownNow();
-            }
-            current = MemoryBatchSorter.sortForMerge(mergedAll);
-            plugin.getLogger().sendInfo("[记忆] 群"+groupID+" 长期记忆合并 第 "+round
-                    +" 轮完成：结果 "+current.size()+" 条");
-        }
-        if (executedRounds == 0) {
-            plugin.getLogger().sendInfo("[记忆] 群"+groupID+" 长期记忆未超过上限，跳过合并");
-            return "长期记忆未超过上限，未执行合并。";
-        }
-        if (!isMergeResultSafe(original,current.size())) {
-            plugin.getLogger().sendWarn("[记忆] 群"+groupID+" 长期记忆合并结果异常：原 "
-                    +original+" 条，合并后仅 "+current.size()+" 条，放弃本次合并");
-            return "长期记忆合并结果异常，已放弃，原记忆保持不变。";
-        }
-        int newRows = Math.max(0,memoryCount(groupID) - original);
-        deleteLongMemoriesUpTo(groupID,snapshotMaxId);
-        int saved = insertLongMemories(groupID,current);
-        plugin.getLogger().sendInfo("[记忆] 群"+groupID+" 长期记忆整理合并完成：原 "+original
-                +" 条，合并后 "+saved+" 条，合并期间新增保留 "+newRows+" 条");
-        return "长期记忆整理合并完成：原 "+original+" 条，合并后 "+saved
-                +" 条，合并期间新增保留 "+newRows+" 条。";
-    }
-
-    private List<JSONObject> futureResult(Future<List<JSONObject>> future) {
-        try {
-            return future.get();
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            return null;
-        } catch (ExecutionException e) {
-            plugin.getLogger().sendWarn("[记忆] 长期记忆合并批次异常："
-                    +safe(e.getCause() == null ? e.getMessage() : e.getCause().getMessage()));
-            return null;
-        }
-    }
-
-    private List<JSONObject> mergeLongMemoryBatchWithRetry(PluginService ai,long groupID,
-                                                           List<JSONObject> batch,int round,
-                                                           int batchNo,int batchCount) {
-        int retries = Math.max(0,Math.min(5,config.memoryMergeRetryCount));
-        for (int attempt = 0; attempt <= retries; attempt++) {
-            List<JSONObject> merged = mergeLongMemoryBatch(ai,groupID,batch,round,batchNo,batchCount);
-            if (merged != null) return merged;
-            if (attempt >= retries) break;
-            plugin.getLogger().sendWarn("[记忆] 群"+groupID+" 长期记忆合并 第 "+round
-                    +" 轮 批次 "+batchNo+"/"+batchCount+" 第 "+(attempt+1)+" 次失败，"
-                    +"准备重试（"+(attempt+2)+"/"+(retries+1)+"）");
-            if (!sleepQuietly(2000L * (attempt + 1))) return null;
-        }
-        return null;
-    }
-
-    private long maxLongMemoryId(long groupID) {
-        JSONObject row = storage().queryOne(
-                "SELECT MAX(`ID`) AS `maxID` FROM `"+MEMORY_TABLE+"` WHERE `groupID`=?",groupID);
-        return row == null ? 0L : row.getLongValue("maxID");
-    }
-
-    private List<JSONObject> exportLongMemoriesUpTo(long groupID,long maxId) {
-        List<JSONObject> result = new ArrayList<>();
-        List<JSONObject> rows = storage().query(
-                "SELECT `ID`,`memoryType`,`subjectID`,`content`,`importance`,`updateTime` "
-                        + "FROM `"+MEMORY_TABLE+"` WHERE `groupID`=? AND `ID`<=? ORDER BY `ID` ASC",
-                groupID,maxId);
-        if (rows == null) return result;
-        for (JSONObject row : rows) {
-            JSONObject item = new JSONObject(true);
-            item.put("id",row.getLongValue("ID"));
-            item.put("type",row.getString("memoryType"));
-            item.put("subjectID",row.getLongValue("subjectID"));
-            item.put("content",row.getString("content"));
-            item.put("importance",row.getIntValue("importance"));
-            item.put("updateTime",row.getLongValue("updateTime"));
-            result.add(item);
-        }
-        return result;
-    }
-
-    private void deleteLongMemoriesUpTo(long groupID,long maxId) {
-        storage().update("DELETE FROM `"+MEMORY_TABLE+"` WHERE `groupID`=? AND `ID`<=?",
-                groupID,maxId);
-    }
-
-    private int insertLongMemories(long groupID,List<JSONObject> memories) {
-        if (memories == null) return 0;
-        int saved = 0;
-        long now = System.currentTimeMillis();
-        for (JSONObject item : memories) {
-            if (item == null) continue;
-            String type = safe(item.getString("type")).trim();
-            String content = safe(item.getString("content")).trim();
-            if (content.isEmpty()) continue;
-            if (type.isEmpty()) type = "topic";
-            int importance = item.getIntValue("importance");
-            if (importance < 1) importance = 1;
-            if (importance > 5) importance = 5;
-            long updateTime = item.getLongValue("updateTime");
-            if (updateTime <= 0) updateTime = now;
-            storage().insert("INSERT INTO `"+MEMORY_TABLE+"` "
-                            + "(`groupID`,`memoryType`,`subjectID`,`content`,`importance`,`updateTime`) "
-                            + "VALUES (?,?,?,?,?,?)",
-                    groupID,type,item.getLongValue("subjectID"),content,importance,updateTime);
-            saved++;
-        }
-        return saved;
-    }
-
-    private List<JSONObject> mergeLongMemoryBatch(PluginService ai,long groupID,
-                                                   List<JSONObject> batch,int round,
-                                                   int batchNo,int batchCount) {
-        JSONArray messages = new JSONArray();
-        messages.add(message("system","你是角色扮演插件的长期记忆整理器。只处理当前这一批记忆，"
-                +"当前角色："+persona.name+"。整理时必须基于"+persona.name+"的角色视角，"
-                +"明确区分角色自己的行为、别人对角色说过的话、以及角色对别人的印象。"
-                +"请合并重复或高度相似的内容，保留群内氛围、群梗、角色行为和重要事件（含群员做过的事情），"
-                +"不要因为压缩而丢失关键内容。角色没有父亲，任何“自称是角色爸爸”的内容都要丢弃。"
-                +"人名、组织名、术语、活动名等专有名词保留全称，不要自造缩写；只有原文中已经出现的简称才可沿用。"
-                +"旧数据里的 user_impression / user_info 是人物属性，已经由群员个人印象维护："
-                +"其中他做过的具体事情改写成 user_event 保留，纯属性描述直接丢弃。"
-                +"只输出 JSON，不要 Markdown：{\"memories\":["
-                +"{\"type\":\"user_event|group_atmosphere|meme|self_action|topic\","
-                +"\"subjectID\":0,\"content\":\"整理后的内容\",\"importance\":1}]}。"));
-        JSONArray source = new JSONArray();
-        source.addAll(batch);
-        messages.add(message("user",source.toJSONString()));
-        JSONObject params = new JSONObject(true);
-        String profile = config.memoryProfile == null || config.memoryProfile.trim().isEmpty()
-                ? config.aiProfile : config.memoryProfile.trim();
-        params.put("profile",profile);
-        params.put("maxTokens",config.memoryMergeMaxTokens);
-        params.put("temperature",0.1);
-        params.put("reasoningEffort",config.memoryReasoningEffort);
-        params.put("timeoutSeconds",config.memoryTimeoutSecond);
-        params.put("retryCount",0);
-        params.put("sessionId","roleplay-memory-merge-"+groupID+"-r"+round+"-b"+batchNo);
-        params.put("messages",messages);
-        long startTime = System.currentTimeMillis();
-        JSONObject result = ai.call("chat",params);
-        RoleplayAiLog.log(plugin.getLogger(),"长期记忆合并 第"+round+"轮 批次"+batchNo+"/"+batchCount,
-                groupID,result,System.currentTimeMillis() - startTime);
-        if (result == null || !result.getBooleanValue("status")) {
-            plugin.getLogger().sendWarn("[记忆] 群"+groupID+" 合并批次失败："
-                    +safe(result == null ? "" : result.getString("message")));
-            return null;
-        }
-        if ("length".equalsIgnoreCase(safe(result.getString("finishReason")))) {
-            plugin.getLogger().sendWarn("[记忆] 群"+groupID+" 合并批次输出被截断");
-            return null;
-        }
-        JSONObject parsed = parseJson(result.getString("content"));
-        if (parsed == null) parsed = parseJson(result.getString("reasoningContent"));
-        JSONArray merged = parsed == null ? null : parsed.getJSONArray("memories");
-        if (merged == null || merged.isEmpty()) {
-            plugin.getLogger().sendWarn("[记忆] 群"+groupID+" 合并批次没有返回有效 memories");
-            return null;
-        }
-        List<JSONObject> resultList = new ArrayList<>();
-        long now = System.currentTimeMillis();
-        for (Object object : merged) {
-            if (!(object instanceof JSONObject)) continue;
-            JSONObject item = (JSONObject) object;
-            String content = safe(item.getString("content")).trim();
-            if (content.isEmpty()) continue;
-            String type = safe(item.getString("type")).trim();
-            if (type.isEmpty()) type = "topic";
-            int importance = item.getIntValue("importance");
-            if (importance < 1) importance = 1;
-            if (importance > 5) importance = 5;
-            JSONObject memory = new JSONObject(true);
-            memory.put("type",type);
-            memory.put("subjectID",item.getLongValue("subjectID"));
-            memory.put("content",content);
-            memory.put("importance",importance);
-            memory.put("updateTime",item.getLongValue("updateTime") <= 0
-                    ? now : item.getLongValue("updateTime"));
-            resultList.add(memory);
-        }
-        return resultList.isEmpty() ? null : resultList;
-    }
-
-    private boolean isMergeResultSafe(int original,int merged) {
-        if (merged <= 0) return false;
-        if (original >= 20 && merged < Math.max(2,original / 10)) return false;
-        return true;
-    }
 
     public synchronized String backupAllMemories(String reason) {
         return memoryBackupService.backupAllMemories(reason);
@@ -2660,7 +2109,7 @@ public class RoleplayService {
                 ? "暂无短期记忆。" : row.getString("shortSummary");
     }
 
-    private MemoryCursor memoryCursor(long groupID) {
+    MemoryCursor memoryCursor(long groupID) {
         JSONObject row = storage().queryOne(
                 "SELECT `lastMemoryTime`,`lastMemoryID` FROM `"+STATE_TABLE+"` WHERE `groupID`=?",groupID);
         return row == null
@@ -2668,7 +2117,7 @@ public class RoleplayService {
                 : new MemoryCursor(row.getLongValue("lastMemoryTime"),row.getLongValue("lastMemoryID"));
     }
 
-    private int memoryCount(long groupID) {
+    int memoryCount(long groupID) {
         List<JSONObject> rows = storage().query("SELECT COUNT(*) AS `count` FROM `"+MEMORY_TABLE+"` WHERE `groupID`=?",groupID);
         return rows == null || rows.isEmpty() ? 0 : rows.get(0).getIntValue("count");
     }
@@ -2841,7 +2290,7 @@ public class RoleplayService {
         }
     }
 
-    private String formatMemoryTime(long time) {
+    String formatMemoryTime(long time) {
         if (time <= 0) return "未知时间";
         try {
             String zoneName = config.timeZone == null || config.timeZone.trim().isEmpty()
@@ -3502,15 +2951,8 @@ public class RoleplayService {
         return REMEMBER_CLOSE.matcher(text).replaceAll("").trim();
     }
 
-    private String mergeMemory(String first,String second) {
-        String left = first == null ? "" : first.trim();
-        String right = second == null ? "" : second.trim();
-        if (left.isEmpty()) return right;
-        if (right.isEmpty()) return left;
-        return left+"\n"+right;
-    }
 
-    private List<JSONObject> limitMemoryRows(List<JSONObject> rows,int maxChars) {
+    List<JSONObject> limitMemoryRows(List<JSONObject> rows,int maxChars) {
         List<JSONObject> result = new ArrayList<>();
         if (rows == null || rows.isEmpty()) return result;
         int total = 0;
