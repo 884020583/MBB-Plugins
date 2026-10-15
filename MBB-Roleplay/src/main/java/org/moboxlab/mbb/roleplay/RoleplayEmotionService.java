@@ -24,24 +24,27 @@ import java.util.concurrent.atomic.AtomicInteger;
  * 群级用户关系保存单个用户的好感、信任、厌烦以及用户级情绪原因。
  */
 public class RoleplayEmotionService {
-    private static final String MOOD_TABLE = "plugin_mbb_roleplay_mood";
-    private static final String RELATION_TABLE = "plugin_mbb_roleplay_relation";
-    private static final String EVENT_TABLE = "plugin_mbb_roleplay_emotion_event";
-    private static final long DAY_MILLIS = 86400000L;
+    static final String MOOD_TABLE = "plugin_mbb_roleplay_mood";
+    static final String RELATION_TABLE = "plugin_mbb_roleplay_relation";
+    static final String EVENT_TABLE = "plugin_mbb_roleplay_emotion_event";
+    static final long DAY_MILLIS = 86400000L;
 
     private final Plugin plugin;
     private final RoleplayService service;
     private final RoleplayMemberService memberService;
+    private final RoleplayEmotionStateRepository emotionStateRepository;
+    private final RoleplayEmotionPromptService emotionPromptService;
+    private final RoleplayEmotionAnalyzer emotionAnalyzer;
     private volatile RoleplayConfig config;
     private volatile RoleplayPersona persona;
-    private final Map<Long,MoodState> moodCache = new ConcurrentHashMap<>();
-    private final Map<String,RelationState> relationCache = new ConcurrentHashMap<>();
-    private final Map<String,Long> eventCooldownMap = new ConcurrentHashMap<>();
+    final Map<Long,MoodState> moodCache = new ConcurrentHashMap<>();
+    final Map<String,RelationState> relationCache = new ConcurrentHashMap<>();
+
     //短时间内的连续戳一戳计数，key 是 群号-用户号
     private final Map<String,long[]> pokeStreakMap = new ConcurrentHashMap<>();
-    private final Map<String,Long> analyzeCooldownMap = new ConcurrentHashMap<>();
-    private final Map<String,RecentMessage> recentMessageMap = new ConcurrentHashMap<>();
-    private final AtomicInteger eventWriteCount = new AtomicInteger();
+
+
+
 
     public static class MoodState {
         public long groupID;
@@ -117,88 +120,131 @@ public class RoleplayEmotionService {
         this.persona = persona;
         this.service = service;
         this.memberService = memberService;
+        this.emotionStateRepository = new RoleplayEmotionStateRepository(this);
+        this.emotionPromptService = new RoleplayEmotionPromptService(this);
+        this.emotionAnalyzer = new RoleplayEmotionAnalyzer(this);
     }
 
+
+
     public void init() {
-        storage().update("CREATE TABLE IF NOT EXISTS `"+MOOD_TABLE+"` ("
-                + "`ID` INTEGER PRIMARY KEY AUTOINCREMENT,"
-                + "`groupID` INTEGER NOT NULL DEFAULT 0 UNIQUE,"
-                + "`valence` INTEGER NOT NULL DEFAULT 0,"
-                + "`energy` INTEGER NOT NULL DEFAULT 0,"
-                + "`patience` INTEGER NOT NULL DEFAULT 0,"
-                + "`label` TEXT NOT NULL DEFAULT '',"
-                + "`reason` TEXT NOT NULL DEFAULT '',"
-                + "`lastEventTime` INTEGER NOT NULL DEFAULT 0,"
-                + "`lastDecayTime` INTEGER NOT NULL DEFAULT 0,"
-                + "`updateTime` INTEGER NOT NULL DEFAULT 0"
-                + ")");
-        storage().update("CREATE TABLE IF NOT EXISTS `"+RELATION_TABLE+"` ("
-                + "`ID` INTEGER PRIMARY KEY AUTOINCREMENT,"
-                + "`groupID` INTEGER NOT NULL DEFAULT 0,"
-                + "`userID` INTEGER NOT NULL DEFAULT 0,"
-                + "`affinity` REAL NOT NULL DEFAULT 0,"
-                + "`trust` REAL NOT NULL DEFAULT 0,"
-                + "`annoyance` REAL NOT NULL DEFAULT 0,"
-                + "`emotionLabel` TEXT NOT NULL DEFAULT '普通',"
-                + "`emotionReason` TEXT NOT NULL DEFAULT '',"
-                + "`reasonStrength` INTEGER NOT NULL DEFAULT 0,"
-                + "`reasonSource` TEXT NOT NULL DEFAULT '',"
-                + "`reasonSince` INTEGER NOT NULL DEFAULT 0,"
-                + "`reasonExpire` INTEGER NOT NULL DEFAULT 0,"
-                + "`lastInteraction` INTEGER NOT NULL DEFAULT 0,"
-                + "`updateTime` INTEGER NOT NULL DEFAULT 0,"
-                + "`dayKey` INTEGER NOT NULL DEFAULT 0,"
-                + "`dayBaseAffinity` REAL NOT NULL DEFAULT 0,"
-                + "`dayBaseTrust` REAL NOT NULL DEFAULT 0,"
-                + "`dayBaseAnnoyance` REAL NOT NULL DEFAULT 0,"
-                + "`dayDeltaAffinity` REAL NOT NULL DEFAULT 0,"
-                + "`dayDeltaTrust` REAL NOT NULL DEFAULT 0,"
-                + "`dayDeltaAnnoyance` REAL NOT NULL DEFAULT 0"
-                + ")");
-        storage().update("CREATE TABLE IF NOT EXISTS `"+EVENT_TABLE+"` ("
-                + "`ID` INTEGER PRIMARY KEY AUTOINCREMENT,"
-                + "`groupID` INTEGER NOT NULL DEFAULT 0,"
-                + "`userID` INTEGER NOT NULL DEFAULT 0,"
-                + "`messageID` INTEGER NOT NULL DEFAULT 0,"
-                + "`eventType` TEXT NOT NULL DEFAULT '',"
-                + "`valenceDelta` INTEGER NOT NULL DEFAULT 0,"
-                + "`energyDelta` INTEGER NOT NULL DEFAULT 0,"
-                + "`patienceDelta` INTEGER NOT NULL DEFAULT 0,"
-                + "`affinityDelta` REAL NOT NULL DEFAULT 0,"
-                + "`trustDelta` REAL NOT NULL DEFAULT 0,"
-                + "`annoyanceDelta` REAL NOT NULL DEFAULT 0,"
-                + "`reason` TEXT NOT NULL DEFAULT '',"
-                + "`source` TEXT NOT NULL DEFAULT '',"
-                + "`createTime` INTEGER NOT NULL DEFAULT 0"
-                + ")");
-        ensureColumn(RELATION_TABLE,"dayKey","INTEGER NOT NULL DEFAULT 0");
-        ensureColumn(RELATION_TABLE,"dayBaseAffinity","REAL NOT NULL DEFAULT 0");
-        ensureColumn(RELATION_TABLE,"dayBaseTrust","REAL NOT NULL DEFAULT 0");
-        ensureColumn(RELATION_TABLE,"dayBaseAnnoyance","REAL NOT NULL DEFAULT 0");
-        ensureColumn(RELATION_TABLE,"dayDeltaAffinity","REAL NOT NULL DEFAULT 0");
-        ensureColumn(RELATION_TABLE,"dayDeltaTrust","REAL NOT NULL DEFAULT 0");
-        ensureColumn(RELATION_TABLE,"dayDeltaAnnoyance","REAL NOT NULL DEFAULT 0");
-        storage().update("CREATE UNIQUE INDEX IF NOT EXISTS `idx_plugin_mbb_roleplay_relation_key` "
-                + "ON `"+RELATION_TABLE+"` (`groupID`,`userID`)");
-        storage().update("CREATE INDEX IF NOT EXISTS `idx_plugin_mbb_roleplay_emotion_event_group` "
-                + "ON `"+EVENT_TABLE+"` (`groupID`,`createTime`)");
-        storage().update("CREATE INDEX IF NOT EXISTS `idx_plugin_mbb_roleplay_emotion_event_user` "
-                + "ON `"+EVENT_TABLE+"` (`groupID`,`userID`,`createTime`)");
-        pruneEvents();
+        emotionStateRepository.init();
+    }
+
+    public synchronized JSONObject exportState() {
+        return emotionStateRepository.exportState();
+    }
+
+    public synchronized void restoreState(JSONObject state) {
+        emotionStateRepository.restoreState(state);
+    }
+
+    RoleplayService roleplayService() {
+        return service;
+    }
+
+    RoleplayMemberService memberService() {
+        return memberService;
+    }
+
+    RoleplayPersona persona() {
+        return persona;
+    }
+
+    org.moboxlab.moboxbot.API.Plugin plugin() {
+        return plugin;
+    }
+
+    RoleplayConfig config() {
+        return config;
+    }
+
+
+    public String promptText(long groupID,long userID,boolean otherRoleBot) {
+        return emotionPromptService.promptText(groupID,userID,otherRoleBot);
+    }
+
+    public String routerText(long groupID,long userID,boolean otherRoleBot) {
+        return emotionPromptService.routerText(groupID,userID,otherRoleBot);
+    }
+
+    int baselineValence() {
+        return emotionPromptService.baselineValence();
+    }
+
+    int baselineEnergy() {
+        return emotionPromptService.baselineEnergy();
+    }
+
+    int baselinePatience() {
+        return emotionPromptService.baselinePatience();
+    }
+
+    String moodLabel(MoodState mood) {
+        return emotionPromptService.moodLabel(mood);
+    }
+
+    String relationLabel(RelationState relation) {
+        return emotionPromptService.relationLabel(relation);
+    }
+
+    String labelForReason(String reason) {
+        return emotionPromptService.labelForReason(reason);
+    }
+
+    String levelText(double value) {
+        return emotionPromptService.levelText(value);
+    }
+
+    String formatDelta(double value) {
+        return emotionPromptService.formatDelta(value);
+    }
+
+
+    public void afterTurn(long groupID,long userID,String userName,String relationship,
+                          String content,LocalEvent localEvent,boolean direct,boolean otherRoleBot) {
+        emotionAnalyzer.afterTurn(groupID,userID,userName,relationship,content,localEvent,direct,otherRoleBot);
+    }
+
+    boolean allowEvent(long groupID,long userID,String type,int seconds) {
+        return emotionAnalyzer.allowEvent(groupID,userID,type,seconds);
+    }
+
+    LocalEvent event(String type,String reason,boolean significant,
+                     int valence,int energy,int patience,
+                     double affinity,double trust,double annoyance) {
+        return emotionAnalyzer.event(type,reason,significant,valence,energy,patience,
+                affinity,trust,annoyance);
+    }
+
+    boolean isImpersonation(String text,String userName) {
+        return emotionAnalyzer.isImpersonation(text,userName);
+    }
+
+    boolean isAttack(String text) {
+        return emotionAnalyzer.isAttack(text);
+    }
+
+    boolean isPraise(String text) {
+        return emotionAnalyzer.isPraise(text);
+    }
+
+    boolean isRepeatedMessage(long groupID,long userID,String content) {
+        return emotionAnalyzer.isRepeatedMessage(groupID,userID,content);
     }
 
     public void reload(RoleplayConfig config,RoleplayPersona persona) {
         this.config = config;
         this.persona = persona;
-        pruneEvents();
+        emotionStateRepository.pruneEvents();
     }
 
     public void clearCache() {
         moodCache.clear();
         relationCache.clear();
-        eventCooldownMap.clear();
-        analyzeCooldownMap.clear();
-        recentMessageMap.clear();
+        emotionAnalyzer.clearCache();
+
+
     }
 
     /**
@@ -302,83 +348,14 @@ public class RoleplayEmotionService {
     /**
      * 回复后异步分析语义情绪原因。回复结构不携带任何情绪字段。
      */
-    public void afterTurn(long groupID,long userID,String userName,String relationship,
-                          String content,LocalEvent localEvent,boolean direct,boolean otherRoleBot) {
-        if (!config.emotionEnable || !config.emotionAnalyzeEnable || otherRoleBot) return;
-        if (groupID <= 0 || userID <= 0 || safe(content).trim().isEmpty()) return;
-        if ("off".equals(config.emotionAnalyzeMode)) return;
-        if (!shouldAnalyze(direct,localEvent)) return;
-        String key = groupID+"-"+userID;
-        long now = System.currentTimeMillis();
-        Long last = analyzeCooldownMap.get(key);
-        if (last != null && now - last < config.emotionAnalyzeCooldownSecond * 1000L) return;
-        analyzeCooldownMap.put(key,now);
-        service.submitBackground(
-                () -> analyzeEmotion(groupID,userID,userName,relationship,content,localEvent));
-    }
 
     /**
      * 提示词里的完整情绪和关系摘要。
      */
-    public String promptText(long groupID,long userID,boolean otherRoleBot) {
-        if (!config.emotionEnable || groupID <= 0) return "";
-        MoodState mood = mood(groupID);
-        StringBuilder builder = new StringBuilder();
-        builder.append("当前群情绪：").append(mood.label)
-                .append("，心情").append(levelText(mood.valence))
-                .append("，精力").append(levelText(mood.energy))
-                .append("，耐心").append(levelText(mood.patience)).append("。\n");
-        if (mood.reason != null && !mood.reason.isEmpty()) {
-            builder.append("最近群情绪原因：").append(mood.reason).append("\n");
-        }
-        if (otherRoleBot) {
-            builder.append("对当前发言者的关系：另一个角色机器人，好感很高，信任很高，厌烦很低。\n");
-            builder.append("亲密程度：按角色设定中的同伴关系处理，关系数值保持满值。\n");
-        } else if (userID > 0) {
-            RelationState relation = relation(groupID,userID);
-            builder.append("对当前发言者的关系：").append(relation.emotionLabel)
-                    .append("，好感").append(levelText(relation.affinity))
-                    .append("，信任").append(levelText(relation.trust))
-                    .append("，厌烦").append(levelText(relation.annoyance)).append("。\n");
-            if (relation.reasonStrength >= config.emotionReasonMinStrength
-                    && relation.emotionReason != null && !relation.emotionReason.isEmpty()) {
-                builder.append("对当前发言者的情绪原因：").append(relation.emotionReason).append("\n");
-            }
-            builder.append(isBotOwner(userID)
-                    ? "亲密程度：这是 botOwner，角色把他当成妈妈，亲近、依赖、听劝，可以用撒娇和撒娇式抱怨，"
-                    +"但不要往恋爱或性意味方向表达。\n"
-                    : intimacyPrompt(relation)).append("\n");
-            builder.append(annoyancePrompt(relation));
-        }
-        builder.append("情绪只影响语气和参与意愿，不能取消被直接提及时的回复，也不能违反权限、安全或事实规则。\n");
-        return builder.toString();
-    }
 
     /**
      * 给路由层看的短摘要。
      */
-    public String routerText(long groupID,long userID,boolean otherRoleBot) {
-        if (!config.emotionEnable || groupID <= 0) return "";
-        MoodState mood = mood(groupID);
-        StringBuilder builder = new StringBuilder();
-        builder.append("群情绪=").append(mood.label)
-                .append("，心情=").append(levelText(mood.valence))
-                .append("，精力=").append(levelText(mood.energy))
-                .append("，耐心=").append(levelText(mood.patience));
-        if (otherRoleBot) {
-            builder.append("；对当前机器人=同伴（关系满值）");
-        } else if (userID > 0) {
-            RelationState relation = relation(groupID,userID);
-            builder.append("；对当前用户=").append(relation.emotionLabel)
-                    .append("，好感=").append(levelText(relation.affinity))
-                    .append("，厌烦=").append(levelText(relation.annoyance));
-            if (relation.reasonStrength >= config.emotionReasonMinStrength
-                    && relation.emotionReason != null && !relation.emotionReason.isEmpty()) {
-                builder.append("；原因=").append(relation.emotionReason);
-            }
-        }
-        return builder.toString();
-    }
 
     /**
      * 非直接消息的情绪概率修正。
@@ -413,9 +390,9 @@ public class RoleplayEmotionService {
         JSONObject result = new JSONObject(true);
         result.put("role",persona.name);
         result.put("groupID",groupID);
-        result.put("mood",moodJson(mood));
-        result.put("relation",relationJson(relation));
-        result.put("events",listEvents(groupID,userID,limit));
+        result.put("mood",emotionStateRepository.moodJson(mood));
+        result.put("relation",emotionStateRepository.relationJson(relation));
+        result.put("events",emotionStateRepository.listEvents(groupID,userID,limit));
         return result;
     }
 
@@ -424,9 +401,9 @@ public class RoleplayEmotionService {
         JSONObject result = new JSONObject(true);
         result.put("role",persona.name);
         result.put("groupID",groupID);
-        result.put("mood",moodJson(mood));
+        result.put("mood",emotionStateRepository.moodJson(mood));
         result.put("relation",new JSONObject(true));
-        result.put("events",listEvents(groupID,0L,limit));
+        result.put("events",emotionStateRepository.listEvents(groupID,0L,limit));
         return result;
     }
 
@@ -440,7 +417,7 @@ public class RoleplayEmotionService {
         mood.lastEventTime = 0L;
         mood.lastDecayTime = System.currentTimeMillis();
         mood.updateTime = System.currentTimeMillis();
-        saveMood(mood);
+        emotionStateRepository.saveMood(mood);
         plugin.getLogger().sendInfo("[情绪] 群"+groupID+" 群情绪已重置");
     }
 
@@ -463,7 +440,7 @@ public class RoleplayEmotionService {
         relation.reasonExpire = 0L;
         relation.lastInteraction = System.currentTimeMillis();
         relation.updateTime = System.currentTimeMillis();
-        relation.dayKey = dayKey(relation.updateTime);
+        relation.dayKey = emotionStateRepository.dayKey(relation.updateTime);
         relation.dayBaseAffinity = relation.affinity;
         relation.dayBaseTrust = relation.trust;
         relation.dayBaseAnnoyance = relation.annoyance;
@@ -471,10 +448,10 @@ public class RoleplayEmotionService {
         relation.dayDeltaTrust = 0;
         relation.dayDeltaAnnoyance = 0;
         relation.provisionalInitial = false;
-        saveRelation(relation);
+        emotionStateRepository.saveRelation(relation);
         if (oldAffinity != relation.affinity || oldTrust != relation.trust
                 || oldAnnoyance != relation.annoyance) {
-            insertEvent(groupID,userID,0L,"command-reset",
+            emotionStateRepository.insertEvent(groupID,userID,0L,"command-reset",
                     0,0,0,relation.affinity - oldAffinity,
                     relation.trust - oldTrust,relation.annoyance - oldAnnoyance,
                     "管理员重置关系","command",relation.updateTime);
@@ -493,7 +470,7 @@ public class RoleplayEmotionService {
             relation.emotionLabel = isBotOwner(userID) ? "妈妈" : "同伴";
             relation.provisionalInitial = false;
             relation.updateTime = System.currentTimeMillis();
-            saveRelation(relation);
+            emotionStateRepository.saveRelation(relation);
             return;
         }
         String value = trimReason(reason);
@@ -505,7 +482,7 @@ public class RoleplayEmotionService {
         relation.emotionLabel = labelForReason(value);
         relation.updateTime = System.currentTimeMillis();
         relation.provisionalInitial = false;
-        saveRelation(relation);
+        emotionStateRepository.saveRelation(relation);
     }
 
     public synchronized void setRelationAffinity(long groupID,long userID,double affinity) {
@@ -514,13 +491,13 @@ public class RoleplayEmotionService {
         relation.affinity = isFullRelationUser(userID) ? 100 : clampDouble(affinity,0,100);
         relation.emotionLabel = relationLabel(relation);
         relation.updateTime = System.currentTimeMillis();
-        relation.dayKey = dayKey(relation.updateTime);
+        relation.dayKey = emotionStateRepository.dayKey(relation.updateTime);
         relation.dayBaseAffinity = relation.affinity;
         relation.dayDeltaAffinity = 0;
         relation.provisionalInitial = false;
-        saveRelation(relation);
+        emotionStateRepository.saveRelation(relation);
         if (oldAffinity != relation.affinity) {
-            insertEvent(groupID,userID,0L,"command-set-affinity",
+            emotionStateRepository.insertEvent(groupID,userID,0L,"command-set-affinity",
                     0,0,0,relation.affinity - oldAffinity,0,0,
                     "管理员手动设置好感度","command",relation.updateTime);
         }
@@ -552,60 +529,12 @@ public class RoleplayEmotionService {
         relation.emotionLabel = relationLabel(relation);
         relation.updateTime = System.currentTimeMillis();
         relation.provisionalInitial = false;
-        saveRelation(relation);
+        emotionStateRepository.saveRelation(relation);
     }
 
-    public synchronized JSONObject exportState() {
-        JSONObject root = new JSONObject(true);
-        root.put("mood",exportMood());
-        root.put("relations",exportRelations());
-        root.put("events",exportEvents());
-        return root;
-    }
 
-    public synchronized void restoreState(JSONObject state) {
-        if (state == null) return;
-        storage().update("DELETE FROM `"+MOOD_TABLE+"`");
-        storage().update("DELETE FROM `"+RELATION_TABLE+"`");
-        storage().update("DELETE FROM `"+EVENT_TABLE+"`");
-        clearCache();
-        JSONArray moods = state.getJSONArray("mood");
-        if (moods != null) {
-            for (Object object : moods) {
-                if (!(object instanceof JSONObject)) continue;
-                JSONObject json = (JSONObject) object;
-                MoodState mood = moodFromJson(json);
-                saveMood(mood);
-                moodCache.put(mood.groupID,mood);
-            }
-        }
-        JSONArray relations = state.getJSONArray("relations");
-        if (relations != null) {
-            for (Object object : relations) {
-                if (!(object instanceof JSONObject)) continue;
-                JSONObject json = (JSONObject) object;
-                RelationState relation = relationFromJson(json);
-                saveRelation(relation);
-                relationCache.put(relationKey(relation.groupID,relation.userID),relation);
-            }
-        }
-        JSONArray events = state.getJSONArray("events");
-        if (events != null) {
-            for (Object object : events) {
-                if (!(object instanceof JSONObject)) continue;
-                JSONObject json = (JSONObject) object;
-                insertEvent(json.getLongValue("groupID"),json.getLongValue("userID"),
-                        json.getLongValue("messageID"),json.getString("eventType"),
-                        json.getIntValue("valenceDelta"),json.getIntValue("energyDelta"),
-                        json.getIntValue("patienceDelta"),json.getDoubleValue("affinityDelta"),
-                        json.getDoubleValue("trustDelta"),json.getDoubleValue("annoyanceDelta"),
-                        json.getString("reason"),json.getString("source"),
-                        json.getLongValue("createTime"));
-            }
-        }
-    }
 
-    private LocalEvent applyEvent(long groupID,long userID,long messageID,
+    LocalEvent applyEvent(long groupID,long userID,long messageID,
                                   MoodState mood,RelationState relation,
                                   LocalEvent event,String source) {
         long now = System.currentTimeMillis();
@@ -631,7 +560,7 @@ public class RoleplayEmotionService {
                 relation.reasonSince = 0L;
                 relation.reasonExpire = 0L;
                 relation.provisionalInitial = false;
-                relation.dayKey = dayKey(now);
+                relation.dayKey = emotionStateRepository.dayKey(now);
                 relation.dayBaseAffinity = 100;
                 relation.dayBaseTrust = 100;
                 relation.dayBaseAnnoyance = 0;
@@ -640,7 +569,7 @@ public class RoleplayEmotionService {
                 relation.dayDeltaAnnoyance = 0;
                 relation.lastInteraction = now;
                 relation.updateTime = now;
-                saveRelation(relation);
+                emotionStateRepository.saveRelation(relation);
             } else {
                 if ((rawAffinity != 0 || rawTrust != 0 || rawAnnoyance != 0)
                         && relationReason.isEmpty()) {
@@ -670,7 +599,7 @@ public class RoleplayEmotionService {
                 } else if (relation.reasonStrength > 0) {
                     relation.emotionLabel = labelForReason(relation.emotionReason);
                 }
-                saveRelation(relation);
+                emotionStateRepository.saveRelation(relation);
             }
         }
 
@@ -682,9 +611,9 @@ public class RoleplayEmotionService {
         mood.lastDecayTime = now;
         mood.updateTime = now;
         mood.label = moodLabel(mood);
-        saveMood(mood);
+        emotionStateRepository.saveMood(mood);
 
-        insertEvent(groupID,userID,messageID,event.type,valence,energy,patience,
+        emotionStateRepository.insertEvent(groupID,userID,messageID,event.type,valence,energy,patience,
                 rawAffinity,rawTrust,rawAnnoyance,event.reason,source,now);
         LocalEvent applied = new LocalEvent();
         applied.type = event.type;
@@ -734,7 +663,7 @@ public class RoleplayEmotionService {
     }
 
     private void normalizeDay(RelationState relation,long now) {
-        int key = dayKey(now);
+        int key = emotionStateRepository.dayKey(now);
         if (relation.dayKey == key) return;
         relation.dayKey = key;
         relation.dayBaseAffinity = relation.affinity;
@@ -745,209 +674,21 @@ public class RoleplayEmotionService {
         relation.dayDeltaAnnoyance = 0;
     }
 
-    private void analyzeEmotion(long groupID,long userID,String userName,String relationship,
-                                String content,LocalEvent localEvent) {
-        PluginService ai = plugin.getServer().getPluginManager().getService("MBB-AI");
-        if (ai == null) return;
-        JSONArray messages = new JSONArray();
-        messages.add(message("system",analyzeSystemPrompt(groupID,userID,userName,relationship,
-                content,localEvent)));
-        messages.add(message("user","请分析这条消息对角色情绪和用户关系的影响。"));
-        JSONObject params = new JSONObject(true);
-        String profile = config.emotionAnalyzeProfile == null
-                || config.emotionAnalyzeProfile.trim().isEmpty()
-                ? config.aiProfile : config.emotionAnalyzeProfile.trim();
-        params.put("profile",profile);
-        params.put("maxTokens",config.emotionAnalyzeMaxTokens);
-        params.put("temperature",0.0);
-        params.put("reasoningEffort",config.emotionAnalyzeReasoningEffort);
-        params.put("sessionId","roleplay-emotion-"+groupID+"-"+userID);
-        params.put("messages",messages);
-        long startTime = System.currentTimeMillis();
-        JSONObject response = ai.call("chat",params);
-        RoleplayAiLog.log(plugin.getLogger(),"情绪分析",groupID,response,
-                System.currentTimeMillis() - startTime);
-        JSONObject parsed = parseJson(response == null ? "" : response.getString("content"));
-        if (parsed == null) parsed = parseJson(response == null ? "" : response.getString("reasoningContent"));
-        if (parsed == null) {
-            plugin.getLogger().sendWarn("[情绪分析] 群"+groupID+" 用户"+userID
-                    +" 没有返回合法 JSON");
-            return;
-        }
-        String eventType = safe(parsed.getString("event")).trim();
-        if (eventType.isEmpty()) eventType = "ai";
-        String reason = safe(parsed.getString("reason")).trim();
-        boolean persistReason = parsed.getBooleanValue("persistReason");
-        JSONObject deltas = parsed.getJSONObject("delta");
-        LocalEvent event = event("ai".equals(eventType) ? "semantic" : eventType,
-                reason, true,
-                intDelta(deltas,"valence"),intDelta(deltas,"energy"),
-                intDelta(deltas,"patience"),delta(deltas,"affinity"),
-                delta(deltas,"trust"),delta(deltas,"annoyance"));
-        event.persistReason = persistReason;
-        synchronized (this) {
-            MoodState mood = mood(groupID);
-            RelationState relation = relation(groupID,userID);
-            LocalEvent applied = applyEvent(groupID,userID,0L,mood,relation,event,"ai");
-            plugin.getLogger().sendInfo("[情绪分析] 群"+groupID+" 用户"+userID
-                    +" 事件="+applied.type
-                    +" 心情"+formatDelta(applied.valenceDelta)
-                    +" 耐心"+formatDelta(applied.patienceDelta)
-                    +" 好感"+formatDelta(applied.affinityDelta)
-                    +" 信任"+formatDelta(applied.trustDelta)
-                    +" 厌烦"+formatDelta(applied.annoyanceDelta)
-                    +(reason.isEmpty() ? "" : " 原因="+reason));
-        }
-        //同一轮调用顺手更新群员个人印象，不额外增加 AI 调用
-        memberService.applyAi(groupID,userID,userName,parsed.getJSONObject("member"));
-    }
 
-    private String analyzeSystemPrompt(long groupID,long userID,String userName,String relationship,
-                                       String content,LocalEvent localEvent) {
-        MoodState mood = mood(groupID);
-        RelationState relation = relation(groupID,userID);
-        StringBuilder builder = new StringBuilder();
-        builder.append("你是角色情绪分析器，只输出 JSON，不要解释。\n");
-        builder.append("角色：").append(persona.name).append("\n");
-        if (persona.personality != null && !persona.personality.isEmpty()) {
-            builder.append("性格：").append(persona.personality).append("\n");
-        }
-        builder.append("当前群情绪：").append(mood.label)
-                .append("，心情").append(levelText(mood.valence))
-                .append("，精力").append(levelText(mood.energy))
-                .append("，耐心").append(levelText(mood.patience)).append("\n");
-        builder.append("当前用户：").append(safe(userName)).append("（QQ：").append(userID)
-                .append("，关系：").append(safe(relationship)).append("）\n");
-        builder.append("当前关系：").append(relation.emotionLabel)
-                .append("，好感").append(levelText(relation.affinity))
-                .append("，信任").append(levelText(relation.trust))
-                .append("，厌烦").append(levelText(relation.annoyance)).append("\n");
-        if (relation.emotionReason != null && !relation.emotionReason.isEmpty()) {
-            builder.append("已有情绪原因：").append(relation.emotionReason)
-                    .append("，强度 ").append(relation.reasonStrength).append("\n");
-        }
-        //把已有印象一起给模型，让它做增量修订而不是每次从零重写
-        String existingProfile = memberService.promptText(groupID,userID);
-        if (!existingProfile.isEmpty()) {
-            builder.append("该群员已有的印象（在此基础上补充或修正，没有新信息就把对应字段留空）：\n")
-                    .append(existingProfile);
-        }
-        if (localEvent != null && localEvent.isPresent()) {
-            builder.append("本地规则初步判断：").append(localEvent.type)
-                    .append("，原因：").append(localEvent.reason).append("\n");
-        }
-        builder.append("当前消息：").append(limitText(safe(content),1200)).append("\n");
-        builder.append("判断原则：\n")
-                .append("- 普通闲聊不要把临时心情写成长期原因\n")
-                .append("- 冒名顶替、欺骗、辱骂、反复挑衅、持续骚扰可以写入用户级原因\n")
-                .append("- 正面互动可以提升好感和信任，但原因要短\n")
-                .append("- 原因只描述当前用户做了什么，不记录隐私信息\n")
-                .append("- 原因最多 ").append(config.emotionReasonMaxChars).append(" 个字符\n")
-                .append("- 单项数值变化必须用小数：提升建议 0.1 到 ")
-                .append(config.emotionAnalyzeMaxDelta).append("，降低不超过 ")
-                .append(config.emotionAnalyzeMaxDecreaseDelta).append("\n")
-                .append("- 关系数值降得比升得慢：除非是明确的欺骗、辱骂或持续骚扰，否则不要给负值\n")
-                .append("- 来源：“他在冒名顶替我”“他刚才夸过我”“他反复戳我”\n");
-        builder.append("同时给这个群员维护一份个人印象，字段含义：\n")
-                .append("- alias：他希望被怎么称呼，或角色应该怎么称呼他\n")
-                .append("- likes / dislikes：他明确说过的喜好与不喜欢\n")
-                .append("- notes：应该怎么和他相处，例如他喜欢被吐槽还是不喜欢被开玩笑\n")
-                .append("- 只写他自己说过或明确表现出来的新信息；上面已有的印象不要原样重复，"
-                        +"没有新信息就把对应字段留空字符串，也不要猜\n")
-                .append("- 发现旧印象不准时可以改写得更准确，但不要因为一次玩笑就推翻长期印象\n")
-                .append("- 单项不超过 ").append(config.memberFieldMaxChars).append(" 个字符\n")
-                .append("- 不记录真实姓名、住址、电话、账号等现实隐私\n");
-        builder.append("输出格式：{\"event\":\"impersonation|attack|praise|friendly|neutral\",")
-                .append("\"reason\":\"\",\"persistReason\":false,")
-                .append("\"delta\":{\"valence\":0,\"energy\":0,\"patience\":0,")
-                .append("\"affinity\":0.0,\"trust\":0.0,\"annoyance\":0.0},")
-                .append("\"member\":{\"alias\":\"\",\"likes\":\"\",\"dislikes\":\"\",\"notes\":\"\"}}");
-        return builder.toString();
-    }
 
-    private boolean shouldAnalyze(boolean direct,LocalEvent localEvent) {
-        if ("direct".equals(config.emotionAnalyzeMode)) return direct;
-        if ("significant".equals(config.emotionAnalyzeMode)) {
-            if (localEvent != null && localEvent.isPresent() && localEvent.significant) return true;
-            return direct;
-        }
-        return false;
-    }
 
-    private boolean isImpersonation(String text,String userName) {
-        String name = safe(userName).trim();
-        if (matchesRoleName(name)) return true;
-        for (String alias : roleAliases()) {
-            if (alias.isEmpty()) continue;
-            if (text.contains("我是"+alias) || text.contains("我才是"+alias)
-                    || text.contains("冒充"+alias) || text.contains("冒名"+alias)
-                    || text.contains("我就是"+alias)) {
-                return true;
-            }
-        }
-        return false;
-    }
 
-    private boolean isAttack(String text) {
-        String[] words = new String[]{"傻子","蠢货","滚开","滚蛋","闭嘴","垃圾","讨厌你",
-                "烦人","恶心","死开","妈的","贱人","去死","废物","臭女人","笨蛋"};
-        for (String word : words) {
-            if (text.contains(word)) return true;
-        }
-        return false;
-    }
 
-    private boolean isPraise(String text) {
-        String[] words = new String[]{"厉害","可爱","漂亮","喜欢你","谢谢","好棒","不错",
-                "辛苦了","真聪明","最强","好厉害","很棒"};
-        for (String word : words) {
-            if (text.contains(word)) return true;
-        }
-        return false;
-    }
 
-    private boolean isRepeatedMessage(long groupID,long userID,String content) {
-        String key = groupID+"-"+userID;
-        long now = System.currentTimeMillis();
-        RecentMessage previous = recentMessageMap.get(key);
-        recentMessageMap.put(key,new RecentMessage(content,now));
-        if (previous == null) return false;
-        return content.equals(previous.content) && now - previous.time <= 60000L
-                && content.length() >= 4;
-    }
 
-    private boolean allowEvent(long groupID,long userID,String type,int seconds) {
-        if (seconds <= 0) return true;
-        String key = groupID+"-"+userID+"-"+type;
-        long now = System.currentTimeMillis();
-        Long last = eventCooldownMap.get(key);
-        if (last != null && now - last < seconds * 1000L) return false;
-        eventCooldownMap.put(key,now);
-        return true;
-    }
 
-    private LocalEvent event(String type,String reason,boolean significant,
-                             int valence,int energy,int patience,
-                             double affinity,double trust,double annoyance) {
-        LocalEvent event = new LocalEvent();
-        event.type = type;
-        event.reason = trimReason(reason);
-        event.significant = significant;
-        event.valenceDelta = valence;
-        event.energyDelta = energy;
-        event.patienceDelta = patience;
-        event.affinityDelta = affinity;
-        event.trustDelta = trust;
-        event.annoyanceDelta = annoyance;
-        return event;
-    }
 
-    private synchronized MoodState mood(long groupID) {
+    synchronized MoodState mood(long groupID) {
         MoodState state = moodCache.get(groupID);
         if (state == null) {
             JSONObject row = storage().queryOne("SELECT * FROM `"+MOOD_TABLE+"` WHERE `groupID`=?",
                     groupID);
-            state = row == null ? defaultMood(groupID) : moodFromJson(row);
+            state = row == null ? defaultMood(groupID) : emotionStateRepository.moodFromJson(row);
             MoodState previous = moodCache.putIfAbsent(groupID,state);
             if (previous != null) state = previous;
         }
@@ -955,20 +696,20 @@ public class RoleplayEmotionService {
         return state;
     }
 
-    private synchronized RelationState relation(long groupID,long userID) {
+    synchronized RelationState relation(long groupID,long userID) {
         return relation(groupID,userID,"");
     }
 
-    private synchronized RelationState relation(long groupID,long userID,String relationship) {
+    synchronized RelationState relation(long groupID,long userID,String relationship) {
         String key = relationKey(groupID,userID);
         RelationState state = relationCache.get(key);
         if (state == null) {
             JSONObject row = storage().queryOne("SELECT * FROM `"+RELATION_TABLE
                     +"` WHERE `groupID`=? AND `userID`=?",groupID,userID);
-            state = row == null ? defaultRelation(groupID,userID,relationship) : relationFromJson(row);
+            state = row == null ? defaultRelation(groupID,userID,relationship) : emotionStateRepository.relationFromJson(row);
             RelationState previous = relationCache.putIfAbsent(key,state);
             if (previous != null) state = previous;
-            if (row == null && !state.provisionalInitial) saveRelation(state);
+            if (row == null && !state.provisionalInitial) emotionStateRepository.saveRelation(state);
         }
         if (state.provisionalInitial && !safe(relationship).isEmpty()) {
             RelationState initialized = defaultRelation(groupID,userID,relationship);
@@ -977,7 +718,7 @@ public class RoleplayEmotionService {
             state.annoyance = initialized.annoyance;
             state.emotionLabel = relationLabel(state);
             state.provisionalInitial = false;
-            saveRelation(state);
+            emotionStateRepository.saveRelation(state);
         }
         decayRelation(state);
         return state;
@@ -1000,7 +741,7 @@ public class RoleplayEmotionService {
         if (now - mood.lastEventTime > 7200000L) mood.reason = "";
         mood.lastDecayTime += steps * interval;
         mood.updateTime = now;
-        saveMood(mood);
+        emotionStateRepository.saveMood(mood);
     }
 
     private void decayRelation(RelationState relation) {
@@ -1016,7 +757,7 @@ public class RoleplayEmotionService {
             relation.reasonSince = 0L;
             relation.reasonExpire = 0L;
             relation.provisionalInitial = false;
-            relation.dayKey = dayKey(now);
+            relation.dayKey = emotionStateRepository.dayKey(now);
             relation.dayBaseAffinity = 100;
             relation.dayBaseTrust = 100;
             relation.dayBaseAnnoyance = 0;
@@ -1024,7 +765,7 @@ public class RoleplayEmotionService {
             relation.dayDeltaTrust = 0;
             relation.dayDeltaAnnoyance = 0;
             relation.updateTime = now;
-            saveRelation(relation);
+            emotionStateRepository.saveRelation(relation);
             return;
         }
         if (relation.updateTime <= 0) {
@@ -1053,7 +794,7 @@ public class RoleplayEmotionService {
             relation.reasonExpire = 0L;
         }
         relation.emotionLabel = relationLabel(relation);
-        relation.dayKey = dayKey(now);
+        relation.dayKey = emotionStateRepository.dayKey(now);
         relation.dayBaseAffinity = relation.affinity;
         relation.dayBaseTrust = relation.trust;
         relation.dayBaseAnnoyance = relation.annoyance;
@@ -1061,10 +802,10 @@ public class RoleplayEmotionService {
         relation.dayDeltaTrust = 0;
         relation.dayDeltaAnnoyance = 0;
         relation.updateTime = now;
-        saveRelation(relation);
+        emotionStateRepository.saveRelation(relation);
         if (oldAffinity != relation.affinity || oldTrust != relation.trust
                 || oldAnnoyance != relation.annoyance) {
-            insertEvent(relation.groupID,relation.userID,0L,"decay",
+            emotionStateRepository.insertEvent(relation.groupID,relation.userID,0L,"decay",
                     0,0,0,
                     relation.affinity - oldAffinity,relation.trust - oldTrust,
                     relation.annoyance - oldAnnoyance,
@@ -1107,7 +848,7 @@ public class RoleplayEmotionService {
         relation.emotionLabel = relationLabel(relation);
         relation.lastInteraction = System.currentTimeMillis();
         relation.updateTime = relation.lastInteraction;
-        relation.dayKey = dayKey(relation.updateTime);
+        relation.dayKey = emotionStateRepository.dayKey(relation.updateTime);
         relation.dayBaseAffinity = relation.affinity;
         relation.dayBaseTrust = relation.trust;
         relation.dayBaseAnnoyance = relation.annoyance;
@@ -1130,7 +871,7 @@ public class RoleplayEmotionService {
         return admins != null && admins.contains(userID);
     }
 
-    private boolean isBotOwner(long userID) {
+    boolean isBotOwner(long userID) {
         List<Long> owners = plugin.getServer().getOwnerList();
         return owners != null && owners.contains(userID);
     }
@@ -1139,7 +880,7 @@ public class RoleplayEmotionService {
         return isBotOwner(userID) || isOtherRoleBotUser(userID);
     }
 
-    private boolean isOtherRoleBotUser(long userID) {
+    boolean isOtherRoleBotUser(long userID) {
         if (userID <= 0 || config == null || config.otherRoleBotQQs == null) return false;
         for (String item : config.otherRoleBotQQs.split(",")) {
             try {
@@ -1150,315 +891,40 @@ public class RoleplayEmotionService {
         return false;
     }
 
-    private MoodState moodFromJson(JSONObject json) {
-        MoodState mood = new MoodState();
-        mood.groupID = json.getLongValue("groupID");
-        mood.valence = clamp(json.getIntValue("valence"),0,100);
-        mood.energy = clamp(json.getIntValue("energy"),0,100);
-        mood.patience = clamp(json.getIntValue("patience"),0,100);
-        mood.label = safe(json.getString("label"));
-        mood.reason = safe(json.getString("reason"));
-        mood.lastEventTime = json.getLongValue("lastEventTime");
-        mood.lastDecayTime = json.getLongValue("lastDecayTime");
-        mood.updateTime = json.getLongValue("updateTime");
-        if (mood.label.isEmpty()) mood.label = moodLabel(mood);
-        return mood;
-    }
 
-    private RelationState relationFromJson(JSONObject json) {
-        RelationState relation = new RelationState();
-        relation.groupID = json.getLongValue("groupID");
-        relation.userID = json.getLongValue("userID");
-        relation.affinity = clampDouble(json.getDoubleValue("affinity"),0,100);
-        relation.trust = clampDouble(json.getDoubleValue("trust"),0,100);
-        relation.annoyance = clampDouble(json.getDoubleValue("annoyance"),0,100);
-        relation.emotionLabel = safe(json.getString("emotionLabel"));
-        relation.emotionReason = safe(json.getString("emotionReason"));
-        relation.reasonStrength = clamp(json.getIntValue("reasonStrength"),0,100);
-        relation.reasonSource = safe(json.getString("reasonSource"));
-        relation.reasonSince = json.getLongValue("reasonSince");
-        relation.reasonExpire = json.getLongValue("reasonExpire");
-        relation.lastInteraction = json.getLongValue("lastInteraction");
-        relation.updateTime = json.getLongValue("updateTime");
-        relation.dayKey = json.getIntValue("dayKey");
-        relation.dayBaseAffinity = json.getDoubleValue("dayBaseAffinity");
-        relation.dayBaseTrust = json.getDoubleValue("dayBaseTrust");
-        relation.dayBaseAnnoyance = json.getDoubleValue("dayBaseAnnoyance");
-        relation.dayDeltaAffinity = json.getDoubleValue("dayDeltaAffinity");
-        relation.dayDeltaTrust = json.getDoubleValue("dayDeltaTrust");
-        relation.dayDeltaAnnoyance = json.getDoubleValue("dayDeltaAnnoyance");
-        if (relation.emotionLabel.isEmpty()) relation.emotionLabel = relationLabel(relation);
-        return relation;
-    }
 
-    private JSONObject moodJson(MoodState mood) {
-        JSONObject json = new JSONObject(true);
-        json.put("groupID",mood.groupID);
-        json.put("valence",mood.valence);
-        json.put("energy",mood.energy);
-        json.put("patience",mood.patience);
-        json.put("label",mood.label);
-        json.put("reason",mood.reason);
-        json.put("lastEventTime",mood.lastEventTime);
-        json.put("updateTime",mood.updateTime);
-        return json;
-    }
 
-    private JSONObject relationJson(RelationState relation) {
-        JSONObject json = new JSONObject(true);
-        json.put("groupID",relation.groupID);
-        json.put("userID",relation.userID);
-        json.put("affinity",relation.affinity);
-        json.put("trust",relation.trust);
-        json.put("annoyance",relation.annoyance);
-        json.put("emotionLabel",relation.emotionLabel);
-        json.put("emotionReason",relation.emotionReason);
-        json.put("reasonStrength",relation.reasonStrength);
-        json.put("reasonSource",relation.reasonSource);
-        json.put("reasonSince",relation.reasonSince);
-        json.put("reasonExpire",relation.reasonExpire);
-        json.put("lastInteraction",relation.lastInteraction);
-        json.put("updateTime",relation.updateTime);
-        json.put("dayKey",relation.dayKey);
-        json.put("dayBaseAffinity",relation.dayBaseAffinity);
-        json.put("dayBaseTrust",relation.dayBaseTrust);
-        json.put("dayBaseAnnoyance",relation.dayBaseAnnoyance);
-        json.put("dayDeltaAffinity",relation.dayDeltaAffinity);
-        json.put("dayDeltaTrust",relation.dayDeltaTrust);
-        json.put("dayDeltaAnnoyance",relation.dayDeltaAnnoyance);
-        return json;
-    }
 
-    private JSONArray exportMood() {
-        JSONArray result = new JSONArray();
-        List<JSONObject> rows = storage().query("SELECT * FROM `"+MOOD_TABLE+"` ORDER BY `groupID` ASC");
-        if (rows == null) return result;
-        for (JSONObject row : rows) result.add(moodJson(moodFromJson(row)));
-        return result;
-    }
 
-    private JSONArray exportRelations() {
-        JSONArray result = new JSONArray();
-        List<JSONObject> rows = storage().query("SELECT * FROM `"+RELATION_TABLE
-                +"` ORDER BY `groupID` ASC,`userID` ASC");
-        if (rows == null) return result;
-        for (JSONObject row : rows) result.add(relationJson(relationFromJson(row)));
-        return result;
-    }
 
-    private JSONArray exportEvents() {
-        JSONArray result = new JSONArray();
-        List<JSONObject> rows = storage().query("SELECT * FROM `"+EVENT_TABLE+"` ORDER BY `ID` ASC");
-        if (rows == null) return result;
-        for (JSONObject row : rows) {
-            JSONObject item = new JSONObject(true);
-            item.put("groupID",row.getLongValue("groupID"));
-            item.put("userID",row.getLongValue("userID"));
-            item.put("messageID",row.getLongValue("messageID"));
-            item.put("eventType",row.getString("eventType"));
-            item.put("valenceDelta",row.getIntValue("valenceDelta"));
-            item.put("energyDelta",row.getIntValue("energyDelta"));
-            item.put("patienceDelta",row.getIntValue("patienceDelta"));
-            item.put("affinityDelta",row.getDoubleValue("affinityDelta"));
-            item.put("trustDelta",row.getDoubleValue("trustDelta"));
-            item.put("annoyanceDelta",row.getDoubleValue("annoyanceDelta"));
-            item.put("reason",row.getString("reason"));
-            item.put("source",row.getString("source"));
-            item.put("createTime",row.getLongValue("createTime"));
-            result.add(item);
-        }
-        return result;
-    }
 
-    private JSONArray listEvents(long groupID,long userID,int limit) {
-        if (limit < 1) limit = 12;
-        if (limit > 100) limit = 100;
-        List<JSONObject> rows;
-        if (userID > 0) {
-            rows = storage().query("SELECT * FROM `"+EVENT_TABLE
-                            +"` WHERE `groupID`=? AND `userID`=? ORDER BY `ID` DESC LIMIT ?",
-                    groupID,userID,limit);
-        } else {
-            rows = storage().query("SELECT * FROM `"+EVENT_TABLE
-                    +"` WHERE `groupID`=? ORDER BY `ID` DESC LIMIT ?",groupID,limit);
-        }
-        JSONArray result = new JSONArray();
-        if (rows == null) return result;
-        for (int i = rows.size() - 1; i >= 0; i--) {
-            JSONObject row = rows.get(i);
-            JSONObject item = new JSONObject(true);
-            item.put("groupID",row.getLongValue("groupID"));
-            item.put("userID",row.getLongValue("userID"));
-            item.put("messageID",row.getLongValue("messageID"));
-            item.put("eventType",row.getString("eventType"));
-            item.put("valenceDelta",row.getIntValue("valenceDelta"));
-            item.put("energyDelta",row.getIntValue("energyDelta"));
-            item.put("patienceDelta",row.getIntValue("patienceDelta"));
-            item.put("affinityDelta",row.getDoubleValue("affinityDelta"));
-            item.put("trustDelta",row.getDoubleValue("trustDelta"));
-            item.put("annoyanceDelta",row.getDoubleValue("annoyanceDelta"));
-            item.put("reason",row.getString("reason"));
-            item.put("source",row.getString("source"));
-            item.put("createTime",row.getLongValue("createTime"));
-            result.add(item);
-        }
-        return result;
-    }
 
-    private void saveMood(MoodState mood) {
-        storage().insert("INSERT OR REPLACE INTO `"+MOOD_TABLE+"` "
-                        + "(`groupID`,`valence`,`energy`,`patience`,`label`,`reason`,"
-                        + "`lastEventTime`,`lastDecayTime`,`updateTime`) VALUES (?,?,?,?,?,?,?,?,?)",
-                mood.groupID,mood.valence,mood.energy,mood.patience,mood.label,mood.reason,
-                mood.lastEventTime,mood.lastDecayTime,mood.updateTime);
-    }
 
-    private void saveRelation(RelationState relation) {
-        storage().insert("INSERT OR REPLACE INTO `"+RELATION_TABLE+"` "
-                        + "(`groupID`,`userID`,`affinity`,`trust`,`annoyance`,`emotionLabel`,"
-                        + "`emotionReason`,`reasonStrength`,`reasonSource`,`reasonSince`,"
-                        + "`reasonExpire`,`lastInteraction`,`updateTime`,`dayKey`,"
-                        + "`dayBaseAffinity`,`dayBaseTrust`,`dayBaseAnnoyance`,"
-                        + "`dayDeltaAffinity`,`dayDeltaTrust`,`dayDeltaAnnoyance`) "
-                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                relation.groupID,relation.userID,relation.affinity,relation.trust,
-                relation.annoyance,relation.emotionLabel,relation.emotionReason,
-                relation.reasonStrength,relation.reasonSource,relation.reasonSince,
-                relation.reasonExpire,relation.lastInteraction,relation.updateTime,
-                relation.dayKey,relation.dayBaseAffinity,relation.dayBaseTrust,
-                relation.dayBaseAnnoyance,relation.dayDeltaAffinity,relation.dayDeltaTrust,
-                relation.dayDeltaAnnoyance);
-    }
 
-    private void insertEvent(long groupID,long userID,long messageID,String eventType,
-                             int valence,int energy,int patience,double affinity,double trust,
-                             double annoyance,String reason,String source,long createTime) {
-        long time = createTime <= 0 ? System.currentTimeMillis() : createTime;
-        storage().insert("INSERT INTO `"+EVENT_TABLE+"` "
-                        + "(`groupID`,`userID`,`messageID`,`eventType`,`valenceDelta`,`energyDelta`,"
-                        + "`patienceDelta`,`affinityDelta`,`trustDelta`,`annoyanceDelta`,"
-                        + "`reason`,`source`,`createTime`) "
-                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)",
-                groupID,userID,messageID,safe(eventType),valence,energy,patience,affinity,
-                trust,annoyance,trimReason(reason),safe(source),time);
-        if (eventWriteCount.incrementAndGet() % 200 == 0) pruneEvents();
-    }
 
-    private void pruneEvents() {
-        long cutoff = System.currentTimeMillis() - config.emotionEventRetentionDays * DAY_MILLIS;
-        storage().update("DELETE FROM `"+EVENT_TABLE+"` WHERE `createTime`<?",cutoff);
-    }
 
-    private void ensureColumn(String table,String column,String definition) {
-        List<JSONObject> columns = storage().query("PRAGMA table_info(`"+table+"`)");
-        if (columns != null) {
-            for (JSONObject item : columns) {
-                if (column.equalsIgnoreCase(item.getString("name"))) return;
-            }
-        }
-        storage().update("ALTER TABLE `"+table+"` ADD COLUMN `"+column+"` "+definition);
-    }
 
-    private int baselineValence() {
-        return clamp(persona == null ? 65 : persona.emotionBaselineValence,0,100);
-    }
 
-    private int baselineEnergy() {
-        return clamp(persona == null ? 65 : persona.emotionBaselineEnergy,0,100);
-    }
 
-    private int baselinePatience() {
-        return clamp(persona == null ? 65 : persona.emotionBaselinePatience,0,100);
-    }
 
-    private String moodLabel(MoodState mood) {
-        if (mood.patience <= 30 && mood.valence < 55) return "烦躁";
-        if (mood.valence >= 75 && mood.energy >= 65) return "开心";
-        if (mood.energy <= 25) return "困倦";
-        if (mood.valence <= 35) return "低落";
-        if (mood.patience <= 45) return "闹别扭";
-        return "平静";
-    }
 
-    private String relationLabel(RelationState relation) {
-        if (isBotOwner(relation.userID)) return "妈妈";
-        if (isOtherRoleBotUser(relation.userID)) return "同伴";
-        if (relation.annoyance >= 70) return "讨厌";
-        if (relation.affinity >= 85 && relation.annoyance < 40) return "亲近";
-        if (relation.trust >= 75 && relation.annoyance < 50) return "信任";
-        if (relation.affinity < 40) return "疏远";
-        return "普通";
-    }
 
-    private String labelForReason(String reason) {
-        String text = safe(reason);
-        if (text.contains("讨厌") || text.contains("冒名") || text.contains("冒充")
-                || text.contains("攻击") || text.contains("骚扰")) {
-            return "讨厌";
-        }
-        if (text.contains("喜欢") || text.contains("亲近") || text.contains("关心")) {
-            return "亲近";
-        }
-        if (text.contains("信任")) return "信任";
-        return "在意";
-    }
 
-    private String intimacyPrompt(RelationState relation) {
-        if (relation.affinity >= config.intimacyVeryCloseAffinity) {
-            return "亲密程度：非常亲近。对方提出抱抱、牵手、贴贴、靠肩、摸头、膝枕等日常亲密举动时，"
-                    +"可以自然接受、害羞回应或反过来撒娇，不要本能拒绝；只有露骨性内容或现实隐私需要明确挡住。";
-        }
-        if (relation.affinity >= config.intimacyCloseAffinity) {
-            return "亲密程度：关系亲近。可以接受轻微亲密和暧昧互动，例如靠近、牵手、抱一下、摸头，"
-                    +"可以害羞、别扭或吐槽，但不要冷冰冰地拒绝。";
-        }
-        if (relation.affinity >= 60) {
-            return "亲密程度：熟悉。可以接住普通玩笑和轻微暧昧，但明显亲密举动要先表现出害羞、犹豫或转移话题。";
-        }
-        return "亲密程度：还不算亲近。亲密举动要保持距离，先害羞、吐槽或转移话题，不要表现成恋人式亲近。";
-    }
 
     /**
      * 厌烦时的语气约束。
      * 厌烦的表现是冷淡、敷衍、回避，不是攻击性，避免模型把厌烦演成骂人。
      */
-    private String annoyancePrompt(RelationState relation) {
-        if (relation.annoyance >= 75) {
-            return "语气约束：你现在对这个人相当厌烦。表现方式是话变短、敷衍应付、回避话题、"
-                    +"只回必要的一句，或者干脆不想接话；可以用冷淡、无奈、嫌弃的口气。"
-                    +"但不要辱骂、不要人身攻击、不要用命令式或威胁性的语气，也不要真的发火；"
-                    +"角色是有教养的学生，厌烦不等于攻击。\n";
-        }
-        if (relation.annoyance >= 50) {
-            return "语气约束：你对这个人有点不耐烦。可以简短、敷衍、吐槽或半开玩笑地嫌弃，"
-                    +"但不要辱骂、不要人身攻击，也不要突然发火。\n";
-        }
-        return "";
-    }
 
-    private String levelText(double value) {
-        if (value >= 80) return "很高";
-        if (value >= 65) return "较高";
-        if (value >= 45) return "中等";
-        if (value >= 30) return "偏低";
-        return "很低";
-    }
 
-    private String formatDelta(double value) {
-        if (Math.abs(value) < 0.001) return "0";
-        String number = Math.abs(value - Math.rint(value)) < 0.001
-                ? String.valueOf((long) Math.rint(value))
-                : String.format(Locale.CHINA,"%.1f",value);
-        return value > 0 ? "+"+number : number;
-    }
 
-    private int clamp(int value,int min,int max) {
+    int clamp(int value,int min,int max) {
         if (value < min) return min;
         if (value > max) return max;
         return value;
     }
 
-    private double clampDouble(double value,double min,double max) {
+    double clampDouble(double value,double min,double max) {
         if (value < min) return min;
         if (value > max) return max;
         return value;
@@ -1470,51 +936,15 @@ public class RoleplayEmotionService {
         return value;
     }
 
-    private double delta(JSONObject delta,String key) {
-        if (delta == null) return 0;
-        double value = delta.getDoubleValue(key);
-        if (value > config.emotionAnalyzeMaxDelta) value = config.emotionAnalyzeMaxDelta;
-        //降低的幅度单独限得更小，保证关系数值跌得比涨得慢
-        if (value < -config.emotionAnalyzeMaxDecreaseDelta) {
-            value = -config.emotionAnalyzeMaxDecreaseDelta;
-        }
-        return value;
-    }
 
-    private int intDelta(JSONObject delta,String key) {
-        if (delta == null) return 0;
-        return delta.getIntValue(key);
-    }
 
-    private JSONObject parseJson(String content) {
-        String raw = safe(content).trim();
-        if (raw.isEmpty()) return null;
-        try {
-            return JSON.parseObject(raw);
-        } catch (Exception ignored) {
-        }
-        int start = raw.indexOf('{');
-        int end = raw.lastIndexOf('}');
-        if (start < 0 || end <= start) return null;
-        try {
-            return JSON.parseObject(raw.substring(start,end + 1));
-        } catch (Exception ignored) {
-            return null;
-        }
-    }
 
-    private JSONObject message(String role,String content) {
-        JSONObject message = new JSONObject(true);
-        message.put("role",role);
-        message.put("content",content);
-        return message;
-    }
 
-    private String relationKey(long groupID,long userID) {
+    String relationKey(long groupID,long userID) {
         return groupID+"-"+userID;
     }
 
-    private boolean matchesRoleName(String value) {
+    boolean matchesRoleName(String value) {
         String text = safe(value).trim();
         if (text.isEmpty()) return false;
         for (String alias : roleAliases()) {
@@ -1523,7 +953,7 @@ public class RoleplayEmotionService {
         return false;
     }
 
-    private List<String> roleAliases() {
+    List<String> roleAliases() {
         List<String> result = new ArrayList<>();
         if (persona == null) return result;
         if (persona.name != null && !persona.name.isEmpty()) result.add(persona.name);
@@ -1535,39 +965,15 @@ public class RoleplayEmotionService {
         return result;
     }
 
-    private String trimReason(String reason) {
+    String trimReason(String reason) {
         String value = safe(reason).trim();
         if (value.isEmpty()) return "";
         int max = Math.max(20,config.emotionReasonMaxChars);
         return value.length() > max ? value.substring(0,max) : value;
     }
 
-    private String limitText(String value,int max) {
-        if (value == null || value.length() <= max) return value;
-        return value.substring(0,max)+"...";
-    }
 
-    private long dayStart(long time) {
-        TimeZone zone = TimeZone.getTimeZone(config.timeZone == null
-                || config.timeZone.trim().isEmpty() ? "Asia/Shanghai" : config.timeZone.trim());
-        Calendar calendar = Calendar.getInstance(zone,Locale.CHINA);
-        calendar.setTime(new Date(time));
-        calendar.set(Calendar.HOUR_OF_DAY,0);
-        calendar.set(Calendar.MINUTE,0);
-        calendar.set(Calendar.SECOND,0);
-        calendar.set(Calendar.MILLISECOND,0);
-        return calendar.getTimeInMillis();
-    }
 
-    private int dayKey(long time) {
-        TimeZone zone = TimeZone.getTimeZone(config.timeZone == null
-                || config.timeZone.trim().isEmpty() ? "Asia/Shanghai" : config.timeZone.trim());
-        Calendar calendar = Calendar.getInstance(zone,Locale.CHINA);
-        calendar.setTime(new Date(time));
-        return calendar.get(Calendar.YEAR) * 10000
-                + (calendar.get(Calendar.MONTH) + 1) * 100
-                + calendar.get(Calendar.DAY_OF_MONTH);
-    }
 
     private double moveToward(double value,double target,int steps) {
         if (value == target) return value;
@@ -1579,11 +985,11 @@ public class RoleplayEmotionService {
         return value;
     }
 
-    private String safe(String value) {
+    String safe(String value) {
         return value == null ? "" : value;
     }
 
-    private StorageService storage() {
+    StorageService storage() {
         return plugin.getServer().getStorage();
     }
 }
