@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.54.0.0643 | 2026-10-16 | `MBB-AntiSpam` 机器人消息豁免：新增 `ignoreBots`（默认开启）与 `botUsers`（同类机器人 QQ 名单，多个用英文逗号分隔），机器人消息整体跳过——不统计、不提醒、不处置、不写事件表。修复同群部署多个机器人时，一条命令的相同回复被判定为真人集体刷屏的问题；机器人自己上报的消息同样跳过；真人刷屏照常检测，`ignoreBots: false` 可回到原行为 |
 | V0.5.53.0.2301 | 2026-10-16 | `MBB-Roleplay` 继续拆分情绪与命令：新增 `RoleplayRelationService` 负责好感/信任/厌烦的日限幅、自然回落和身份倍率，新增 `RoleplayMoodService` 负责默认心情、自然衰减和标签刷新，`RoleplayEmotionService` 从约 995 行降到约 827 行；`RoleplayCommand` 按命令组拆为 `RoleplayMemoryCommandHandler`、`RoleplayEmotionCommandHandler`、`RoleplayModerationCommandHandler`、`RoleplayContentCommandHandler`、`RoleplayFeedbackCommandHandler`、`RoleplayMemberCommandHandler`、`RoleplayBotCommandHandler`，主命令类从 1282 行降到约 425 行。行为不变，命令分发和权限判断保持原实现 |
 | V0.5.52.0.2301 | 2026-10-16 | `MBB-Roleplay` 情绪服务拆分：新增 `RoleplayEmotionStateRepository` 负责建表、持久化、导入导出、JSON 映射和日期键；新增 `RoleplayEmotionPromptService` 负责情绪/关系摘要、标签和语气约束；新增 `RoleplayEmotionAnalyzer` 负责本地规则、AI 语义分析、事件冷却和重复消息检测。`RoleplayEmotionService` 从 1589 行降到约 995 行，保留状态缓存、事件应用和对外门面。行为不变 |
 | V0.5.51.0.2301 | 2026-10-16 | `MBB-Roleplay` 第二十六轮类拆分：把消息片段提取、忽略内容、消息流水、机器人消息记录、命令判断、提醒判断、owner 判断、诱导记忆判断、半句识别和地址名列表从 `RoleplayService` 迁到独立的 `RoleplayMessageContentService`，主服务保留内容相关包装入口；`RoleplayService` 从约 1445 行降到约 1390 行。行为不变，消息流水、命令前缀和半句识别保持原实现 |

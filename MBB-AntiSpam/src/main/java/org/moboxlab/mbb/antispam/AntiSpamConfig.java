@@ -14,6 +14,17 @@ public class AntiSpamConfig {
     public boolean bypassAdmin = true;
     public String bypassUsers = "";
     public String whitelistUsers = "";
+    /**
+     * 机器人消息是否豁免
+     *
+     * 同群部署多个机器人时，一条命令会让每个机器人各回一条内容相同的回复；
+     * 这些回复如果参与统计，会被当成真人集体刷屏（命中 repeat-group 并发整群提醒），
+     * 还会把机器人自身计入违规。默认豁免机器人消息：机器人自己发的不统计，
+     * botUsers 名单里的同类机器人也完全跳过；真人刷屏照常检测。
+     */
+    public boolean ignoreBots = true;
+    /** 同类机器人 QQ 名单，多个用英文逗号分隔，命中名单的消息完全跳过 */
+    public String botUsers = "";
     public int retentionDays = 30;
 
     public boolean rateEnable = true;
@@ -104,6 +115,8 @@ public class AntiSpamConfig {
         config.bypassAdmin = plugin.getConfig().getBoolean("bypassAdmin",true);
         config.bypassUsers = plugin.getConfig().getString("bypassUsers","");
         config.whitelistUsers = plugin.getConfig().getString("whitelistUsers","");
+        config.ignoreBots = plugin.getConfig().getBoolean("ignoreBots",true);
+        config.botUsers = plugin.getConfig().getString("botUsers","");
         config.retentionDays = plugin.getConfig().getInt("retentionDays",30);
 
         config.rateEnable = plugin.getConfig().getBoolean("rateEnable",true);
