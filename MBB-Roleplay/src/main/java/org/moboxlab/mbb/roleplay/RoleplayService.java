@@ -77,6 +77,7 @@ public class RoleplayService {
     private final RoleplayTextUtils textUtils;
     private final RoleplayJsonUtils jsonUtils;
     private final RoleplayImageContextService imageContextService;
+    private final RoleplayStickerService stickerService;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -91,7 +92,7 @@ public class RoleplayService {
     final Map<Long,Boolean> memoryMergingMap = new ConcurrentHashMap<>();
 
 
-    private final Map<String,RecentSticker> recentStickerMap = new ConcurrentHashMap<>();
+
     //被并入延后回合的消息 ID，处理下一批时直接跳过，避免同一句话回两次
     final Set<Long> mergedMessageIDs = Collections.newSetFromMap(
             new ConcurrentHashMap<Long,Boolean>());
@@ -123,10 +124,6 @@ public class RoleplayService {
             "(?is)<\\s*global[\\s_-]?remember\\s*/?\\s*>");
     private static final Pattern GLOBAL_REMEMBER_CLOSE = Pattern.compile(
             "(?is)<\\s*/\\s*global[\\s_-]?remember\\s*>");
-    private static final Pattern STICKER_PAIR = Pattern.compile(
-            "(?is)<\\s*sticker\\s*>(.*?)<\\s*/\\s*sticker\\s*>");
-    private static final Pattern STICKER_OPEN = Pattern.compile(
-            "(?is)<\\s*sticker\\s*/?\\s*>");
 
     static class MemoryCursor {
         final long time;
@@ -188,7 +185,7 @@ public class RoleplayService {
         final String reply;
         final String tags;
 
-        private StickerMarkerResult(boolean requested,String reply,String tags) {
+        StickerMarkerResult(boolean requested,String reply,String tags) {
             this.requested = requested;
             this.reply = reply;
             this.tags = tags;
@@ -210,11 +207,11 @@ public class RoleplayService {
         }
     }
 
-    private static class RecentSticker {
-        private final String emotion;
+    static class RecentSticker {
+        final String emotion;
         final long expireAt;
 
-        private RecentSticker(String emotion,long expireAt) {
+        RecentSticker(String emotion,long expireAt) {
             this.emotion = emotion;
             this.expireAt = expireAt;
         }
@@ -277,6 +274,7 @@ public class RoleplayService {
         this.textUtils = new RoleplayTextUtils(this);
         this.jsonUtils = new RoleplayJsonUtils();
         this.imageContextService = new RoleplayImageContextService(this);
+        this.stickerService = new RoleplayStickerService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -1005,7 +1003,7 @@ public class RoleplayService {
     }
 
     void sendStickerMessage(long groupID,long userID,String tags) {
-        sendSticker(groupID,userID,tags);
+        stickerService.sendSticker(groupID,userID,tags);
     }
 
     boolean isOwnerUser(long userID) {
@@ -1315,7 +1313,7 @@ public class RoleplayService {
         memoryErrorTypeMap.clear();
         memoryMergingMap.clear();
         imageContextService.clearRuntimeState();
-        recentStickerMap.clear();
+        stickerService.clearRuntimeState();
         turnProcessor.clearRuntimeState();
         emotionService.clearCache();
     }
@@ -1986,61 +1984,8 @@ public class RoleplayService {
         return new GlobalRememberResult(false,text.trim(),"");
     }
 
-    StickerMarkerResult extractStickerMarker(String text) {
-        if (text == null || text.trim().isEmpty()) {
-            return new StickerMarkerResult(false,"","");
-        }
-        Matcher pair = STICKER_PAIR.matcher(text);
-        if (pair.find()) {
-            String reply = (text.substring(0,pair.start())+text.substring(pair.end())).trim();
-            return new StickerMarkerResult(true,reply,pair.group(1).trim());
-        }
-        Matcher open = STICKER_OPEN.matcher(text);
-        if (open.find()) {
-            String reply = text.substring(0,open.start()).trim();
-            String tags = text.substring(open.end()).trim();
-            return new StickerMarkerResult(true,reply,tags);
-        }
-        return new StickerMarkerResult(false,text.trim(),"");
-    }
 
-    String stickerPrompt() {
-        PluginService sticker = plugin.getServer().getPluginManager().getService("MBB-Sticker");
-        if (sticker == null) return "";
-        JSONObject result = sticker.call("tags",null);
-        if (result == null || !result.getBooleanValue("status")) return "";
-        JSONArray tags = result.getJSONArray("tags");
-        if (tags == null || tags.isEmpty()) return "";
-        StringBuilder builder = new StringBuilder("当前可用表情包标签：");
-        for (int i = 0; i < tags.size(); i++) {
-            if (i > 0) builder.append(", ");
-            builder.append(tags.getString(i));
-        }
-        builder.append("\n表情包是可选表达，不是每句话都必须带；只有情绪或场景明显合适时才偶尔使用，")
-                .append("避免连续多条回复都发表情包。适合时输出 ")
-                .append("{\"type\":\"sticker\",\"args\":{\"tags\":\"tag1,tag2\"}}；")
-                .append("只能使用上面的标签，没有合适标签时不要输出。");
-        return builder.toString();
-    }
 
-    private void sendSticker(long groupID,long userID,String tags) {
-        PluginService sticker = plugin.getServer().getPluginManager().getService("MBB-Sticker");
-        if (sticker == null) return;
-        JSONObject params = new JSONObject(true);
-        JSONArray tagArray = new JSONArray();
-        for (String item : safe(tags).split("[,，]")) {
-            if (!item.trim().isEmpty()) tagArray.add(item.trim());
-        }
-        if (tagArray.isEmpty()) return;
-        params.put("tags",tagArray);
-        params.put("groupID",groupID);
-        params.put("userID",userID);
-        JSONObject result = sticker.call("random",params);
-        if (result == null || !result.getBooleanValue("status")) return;
-        OneBotClient client = plugin.getServer().getOneBotClient();
-        if (client == null) return;
-        client.sendGroupMessage(groupID,MessageUtil.message(MessageUtil.image(result.getString("file"))));
-    }
 
     private String cleanGlobalRememberText(String text) {
         if (text == null) return "";
@@ -2127,29 +2072,8 @@ public class RoleplayService {
 
 
 
-    void rememberStickerEmotion(long groupID,long userID,String emotion) {
-        if (emotion == null || emotion.trim().isEmpty()) return;
-        recentStickerMap.put(recentImageKey(groupID,userID),new RecentSticker(
-                emotion.trim(),System.currentTimeMillis() + config.stickerAttachWindowSecond * 1000L));
-    }
 
-    String recentStickerEmotion(long groupID,long userID) {
-        String key = recentImageKey(groupID,userID);
-        RecentSticker recent = recentStickerMap.get(key);
-        if (recent == null) return "";
-        if (recent.expired()) {
-            recentStickerMap.remove(key);
-            return "";
-        }
-        return recent.emotion;
-    }
 
-    String mergeStickerEmotion(String content,String emotion) {
-        String text = safe(content);
-        String sticker = safe(emotion).trim();
-        if (sticker.isEmpty()) return text;
-        return text+"\n"+sticker;
-    }
 
 
 
@@ -2328,6 +2252,27 @@ public class RoleplayService {
     String enrichImageContent(GroupMessageEvent event,String context,long groupID,
                               RecentImage currentImage) {
         return imageContextService.enrichImageContent(event,context,groupID,currentImage);
+    }
+
+
+    StickerMarkerResult extractStickerMarker(String text) {
+        return stickerService.extractStickerMarker(text);
+    }
+
+    String stickerPrompt() {
+        return stickerService.stickerPrompt();
+    }
+
+    void rememberStickerEmotion(long groupID,long userID,String emotion) {
+        stickerService.rememberStickerEmotion(groupID,userID,emotion);
+    }
+
+    String recentStickerEmotion(long groupID,long userID) {
+        return stickerService.recentStickerEmotion(groupID,userID);
+    }
+
+    String mergeStickerEmotion(String content,String emotion) {
+        return stickerService.mergeStickerEmotion(content,emotion);
     }
 
     StorageService storage() {
