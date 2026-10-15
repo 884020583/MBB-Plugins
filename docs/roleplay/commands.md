@@ -26,6 +26,8 @@
 | `/role expression promote <ID>` | `BOT_ADMIN` | 通过表达候选并允许注入提示词 |
 | `/role expression reject <ID>` | `BOT_ADMIN` | 拒绝表达候选 |
 | `/role expression clear` | `BOT_ADMIN` | 清空当前群表达候选 |
+| `/role review [now]` | `BOT_ADMIN` | 手动触发当前群每日复盘 |
+| `/role attention [reset]` | `BOT_ADMIN` | 查看或重置当前群注意力 |
 
 `/role quiet add` 和 `/role quiet remove` 允许普通群员自助使用；`/role` 的其他子命令仍然需要 `BOT_ADMIN`。
 

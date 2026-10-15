@@ -138,6 +138,14 @@ public class RoleplayCommand extends BotCommand {
             handleExpression(sender,args);
             return true;
         }
+        if ("review".equals(action)) {
+            handleReview(sender,args);
+            return true;
+        }
+        if ("attention".equals(action)) {
+            handleAttention(sender,args);
+            return true;
+        }
         if ("member".equals(action)) {
             handleMember(sender,args);
             return true;
@@ -850,6 +858,41 @@ public class RoleplayCommand extends BotCommand {
     }
 
     /**
+     * /role review [now]：手动触发当前群每日复盘
+     */
+    private void handleReview(CommandSender sender,String[] args) {
+        long groupID = sender.getGroupID();
+        if (groupID <= 0) {
+            sender.sendMessage("请在群聊中使用。");
+            return;
+        }
+        if (args.length <= 2 || "now".equalsIgnoreCase(args[2])) {
+            service.triggerDailyReview(groupID);
+            sender.sendMessage("当前群每日复盘已开始，完成后会把结果写入短期记忆。");
+            return;
+        }
+        sender.sendMessage("用法：/role review [now]");
+    }
+
+    /**
+     * /role attention [reset]：查看或重置当前群注意力
+     */
+    private void handleAttention(CommandSender sender,String[] args) {
+        long groupID = sender.getGroupID();
+        if (groupID <= 0) {
+            sender.sendMessage("请在群聊中使用。");
+            return;
+        }
+        if (args.length > 2 && "reset".equalsIgnoreCase(args[2])) {
+            service.getAttentionService().reset(groupID);
+            sender.sendMessage("当前群注意力已重置。");
+            return;
+        }
+        double score = service.getAttentionService().score(groupID);
+        sender.sendMessage("当前群注意力："+String.format(java.util.Locale.ROOT,"%.2f",score)
+                +"\n0.5 为基线，低于阈值会降低非直接消息的接话概率。");
+    }
+    /**
      * /role help：按分类查看完整命令表
      */
     private void handleHelp(CommandSender sender,String[] args) {
@@ -895,7 +938,8 @@ public class RoleplayCommand extends BotCommand {
             sender.sendMessage("记忆："
                     +"\n/role memory [页码|merge|backup|backups|restore <文件名>]"
                     +"\n/role gmemory [页码|backup|merge|group ...]"
-                    +"\n/role forget");
+                    +"\n/role forget"
+                    +"\n/role review [now]");
             return;
         }
         if ("role".equals(category)) {
@@ -917,7 +961,8 @@ public class RoleplayCommand extends BotCommand {
                     +"\n/role expression list [pending|approved|rejected]"
                     +"\n/role expression promote <ID>"
                     +"\n/role expression reject <ID>"
-                    +"\n/role expression clear");
+                    +"\n/role expression clear"
+                    +"\n/role attention [reset]");
             return;
         }
         sender.sendMessage("MBB-Roleplay 命令分类："

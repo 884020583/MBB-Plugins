@@ -15,7 +15,7 @@ import java.util.List;
  * Roleplay 配置迁移与缺失项补全
  */
 public class RoleplayConfigMigrator {
-    private static final String CURRENT_VERSION = "32";
+    private static final String CURRENT_VERSION = "33";
 
     private static class ConfigEntry {
         private final String key;
@@ -175,6 +175,18 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("expressionMinUsers","2","表达候选至少被多少不同群员使用才进入待审"),
             new ConfigEntry("expressionMaxCandidates","200","每个群最多注入多少条已通过表达"),
             new ConfigEntry("expressionInjectMaxChars","800","已通过表达注入提示词的最大字符数"),
+            new ConfigEntry("attentionDriftEnable","true","是否启用注意力漂移"),
+            new ConfigEntry("attentionDecayMinute","30","注意力向基线衰减的半衰期分钟数"),
+            new ConfigEntry("attentionLowThreshold","0.25","低于该注意力时降低主动接话概率"),
+            new ConfigEntry("attentionHighThreshold","0.70","高于该注意力时提高主动接话概率"),
+            new ConfigEntry("attentionMaxPenalty","0.20","低注意力时最多降低多少回复概率"),
+            new ConfigEntry("attentionBonus","0.05","高注意力时最多提高多少回复概率"),
+            new ConfigEntry("attentionTopicLimit","200","每个群最多追踪多少话题的注意力"),
+            new ConfigEntry("dailyReviewEnable","true","是否启用每日复盘"),
+            new ConfigEntry("dailyReviewHour","4","每日复盘在本地时间的几点执行"),
+            new ConfigEntry("dailyReviewMaxMessages","300","每日复盘最多读取多少条消息"),
+            new ConfigEntry("dailyReviewMaxTokens","4000","每日复盘输出 Token 上限"),
+            new ConfigEntry("dailyReviewTimeoutSecond","180","每日复盘请求超时秒数"),
             new ConfigEntry("memoryRelevanceSort","true","长期记忆与永久记忆是否按当前对话相关性排序后注入"),
             new ConfigEntry("memoryRelevancePoolSize","600","相关性排序前先加载多少条长期记忆作为候选池"),
             new ConfigEntry("memoryRelevanceMaxChars","5000","长期记忆按相关性注入的字符上限"),
@@ -272,7 +284,7 @@ public class RoleplayConfigMigrator {
                 plugin.getLogger().sendWarn("自动补全 Roleplay 配置失败，请检查 config.yml 权限！");
             }
         }
-        if (version < 32) {
+        if (version < 33) {
             config.set("configVersion",CURRENT_VERSION);
             if (!versionMissing) changed++;
         }
@@ -381,7 +393,7 @@ public class RoleplayConfigMigrator {
             config.set("replySegmentMaxChars","30");
             changed++;
         }
-        if (version < 32 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
+        if (version < 33 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
                 || legacyRouterMaxTokens || legacyRouterMaxTokens1200
                 || legacyPromptTotalChars || legacyMemoryRelevanceMaxChars
                 || legacyGlobalMemoryRelevanceMaxChars || legacyRouterReasoningEffort

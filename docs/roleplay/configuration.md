@@ -170,6 +170,18 @@ expressionMinCount: 3
 expressionMinUsers: 2
 expressionMaxCandidates: 200
 expressionInjectMaxChars: 800
+attentionDriftEnable: true
+attentionDecayMinute: 30
+attentionLowThreshold: 0.25
+attentionHighThreshold: 0.70
+attentionMaxPenalty: 0.20
+attentionBonus: 0.05
+attentionTopicLimit: 200
+dailyReviewEnable: true
+dailyReviewHour: 4
+dailyReviewMaxMessages: 300
+dailyReviewMaxTokens: 4000
+dailyReviewTimeoutSecond: 180
 recentReplyCheckCount: 8
 repeatSuppressEnable: false
 repeatSimilarityThreshold: 0.72
@@ -189,6 +201,9 @@ quietReplyEnable: true
 `cameraEnable` 默认 `true`。设为 `false` 后只关闭 `draw` 技能里的手机自拍和拍照模式，角色会忽略 `camera=selfie/photo`，普通生图仍可继续使用。改完执行 `/role reload` 或重启主程序后生效。
 
 `topicFatigueEnable` 默认 `true`。插件会按群记录话题疲劳：同一话题在 `topicFatigueWindowMinute` 分钟内出现次数达到 `topicFatigueMinCount`，且角色自己参与达到 `topicFatigueSelfCount` 时，路由层会降权或跳过主动回复；直接点名、引用回复或明确提问仍可打破疲劳。记录保留 `topicFatigueKeepHours` 小时。
+
+`attentionDriftEnable` 默认 `true`，注意力以 0.5 为基线，按 `attentionDecayMinute` 向基线衰减。直接点名和连续参与会提高注意力，低注意力会降低非直接消息的接话概率，高注意力会小幅提高。
+`dailyReviewEnable` 默认 `true`，每天 `dailyReviewHour`（默认 4 点，本地时区）对当天群聊做一次复盘，把主要话题、氛围和角色行为压成一条短期记忆；`/role review now` 可以手动触发。
 
 `replyFeedbackEnable` 默认 `true`，角色主动发言后在 `replyFeedbackWindowSecond` 秒内出现真人发言就算被接话。累计样本达到 `replyFeedbackMinSamples` 后，反馈会修正非直接消息的回复概率；连续没人接时最多降低 `replyFeedbackMaxPenalty`，经常被接话时最多提高 `replyFeedbackBonus`。
 

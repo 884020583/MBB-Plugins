@@ -239,6 +239,30 @@ expressionMinUsers: 2
 expressionMaxCandidates: 200
 #已通过表达注入提示词的最大字符数
 expressionInjectMaxChars: 800
+#是否启用注意力漂移
+attentionDriftEnable: true
+#注意力向基线衰减的半衰期分钟数
+attentionDecayMinute: 30
+#低于该注意力时降低主动接话概率
+attentionLowThreshold: 0.25
+#高于该注意力时提高主动接话概率
+attentionHighThreshold: 0.70
+#低注意力时最多降低多少回复概率
+attentionMaxPenalty: 0.20
+#高注意力时最多提高多少回复概率
+attentionBonus: 0.05
+#每个群最多追踪多少话题的注意力
+attentionTopicLimit: 200
+#是否启用每日复盘
+dailyReviewEnable: true
+#每日复盘在本地时间的几点执行
+dailyReviewHour: 4
+#每日复盘最多读取多少条消息
+dailyReviewMaxMessages: 300
+#每日复盘输出 Token 上限
+dailyReviewMaxTokens: 4000
+#每日复盘请求超时秒数
+dailyReviewTimeoutSecond: 180
 #长期记忆与永久记忆是否按当前对话相关性排序后注入
 memoryRelevanceSort: true
 #相关性排序前先加载多少条长期记忆作为候选池

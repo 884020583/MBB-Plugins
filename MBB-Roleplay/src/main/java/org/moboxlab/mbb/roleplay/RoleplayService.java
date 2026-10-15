@@ -65,6 +65,10 @@ public class RoleplayService {
     private final RoleplayQuietService quietService;
     private final RoleplayReplyFeedbackService replyFeedbackService;
     private final RoleplayExpressionService expressionService;
+    private final RoleplayAttentionService attentionService;
+    private volatile boolean dailyReviewScheduled = false;
+    private volatile String lastDailyReviewDay = "";
+    private final Set<Long> dailyReviewRunning = Collections.newSetFromMap(new ConcurrentHashMap<Long,Boolean>());
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -286,6 +290,7 @@ public class RoleplayService {
         private RecentImage imageContext;
         private RoleplayDecisionEngine.Signals signals;
         private RoleplayEmotionService.LocalEvent emotionEvent;
+        private String attentionTopic = "";
     }
 
     private static class TopicFatigue {
@@ -323,6 +328,7 @@ public class RoleplayService {
         this.quietService = new RoleplayQuietService(plugin,config);
         this.replyFeedbackService = new RoleplayReplyFeedbackService(plugin,config);
         this.expressionService = new RoleplayExpressionService(plugin,config);
+        this.attentionService = new RoleplayAttentionService(plugin,config);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -391,8 +397,10 @@ public class RoleplayService {
         quietService.init();
         replyFeedbackService.init();
         expressionService.init();
+        attentionService.reload(config);
         ensureTurnExecutor();
         ensureBackgroundExecutor();
+        ensureDailyReviewTask();
     }
 
     public void reload(RoleplayConfig config,RoleplayPersona persona) {
@@ -407,10 +415,105 @@ public class RoleplayService {
         quietService.reload(config);
         replyFeedbackService.reload(config);
         expressionService.reload(config);
+        attentionService.reload(config);
         ensureTurnExecutor();
         ensureBackgroundExecutor();
+        ensureDailyReviewTask();
     }
 
+    /**
+     * 每日复盘：按本地时区在配置的小时执行一次，把当天消息压成短期记忆。
+     */
+    private void ensureDailyReviewTask() {
+        if (dailyReviewScheduled) return;
+        dailyReviewScheduled = true;
+        plugin.getServer().getPluginManager().runTaskTimer(plugin,this::dailyReviewTick,60,3600);
+    }
+
+    private void dailyReviewTick() {
+        if (!config.dailyReviewEnable) return;
+        java.time.ZonedDateTime now = java.time.ZonedDateTime.now(java.time.ZoneId.of(config.timeZone));
+        if (now.getHour() != config.dailyReviewHour) return;
+        String day = now.toLocalDate().toString();
+        if (day.equals(lastDailyReviewDay)) return;
+        lastDailyReviewDay = day;
+        JSONArray groups = listGroups();
+        for (Object object : groups) {
+            long groupID = object == null ? 0L : Long.parseLong(String.valueOf(object));
+            if (groupID <= 0) continue;
+            submitBackground(() -> dailyReviewGroup(groupID,day));
+        }
+        plugin.getLogger().sendInfo("[复盘] "+day+" 每日复盘已开始，群数="+groups.size());
+    }
+
+    public void triggerDailyReview(long groupID) {
+        if (groupID <= 0 || !config.dailyReviewEnable) return;
+        String day = java.time.ZonedDateTime.now(java.time.ZoneId.of(config.timeZone))
+                .toLocalDate().toString();
+        submitBackground(() -> dailyReviewGroup(groupID,day));
+    }
+
+    private void dailyReviewGroup(long groupID,String day) {
+        if (!dailyReviewRunning.add(groupID)) return;
+        try {
+            long now = System.currentTimeMillis();
+            List<JSONObject> rows = storage().query(
+                    "SELECT `messageID`,`userName`,`content`,`messageTime`,`ID` FROM `"+MSG_TABLE+"` "
+                            + "WHERE `groupID`=? AND `messageTime`>=? ORDER BY `messageTime` ASC,`ID` ASC LIMIT ?",
+                    groupID,now - 24L * 60L * 60L * 1000L,config.dailyReviewMaxMessages);
+            if (rows == null || rows.isEmpty()) return;
+            StringBuilder transcript = new StringBuilder();
+            long lastTime = 0L;
+            long lastID = 0L;
+            for (JSONObject row : rows) {
+                lastTime = row.getLongValue("messageTime");
+                lastID = row.getLongValue("ID");
+                transcript.append("[").append(new java.text.SimpleDateFormat("HH:mm",java.util.Locale.CHINA)
+                                .format(new java.util.Date(lastTime))).append("] ")
+                        .append(safe(row.getString("userName"))).append("：")
+                        .append(safe(row.getString("content"))).append("\n");
+            }
+            PluginService ai = plugin.getServer().getPluginManager().getService("MBB-AI");
+            if (ai == null) return;
+            JSONArray messages = new JSONArray();
+            messages.add(message("system","你是角色扮演插件的每日复盘器。角色："+persona.name
+                    +"。把下面一天内的群聊整理成一条短期记忆，保留主要话题、群内氛围、角色自己做过的事、"
+                    +"群友之间的重要互动和有长期价值的信息；忽略零碎寒暄、重复内容、广告、图片和表情。"
+                    +"只输出 JSON，不要 Markdown：{\"shortTerm\":\"整理后的短期记忆\"}。"
+                    +"已有短期记忆如下：\n"+shortSummary(groupID)));
+            messages.add(message("user",transcript.toString()));
+            JSONObject params = new JSONObject(true);
+            String profile = config.memoryProfile == null || config.memoryProfile.trim().isEmpty()
+                    ? config.aiProfile : config.memoryProfile.trim();
+            params.put("profile",profile);
+            params.put("maxTokens",config.dailyReviewMaxTokens);
+            params.put("temperature",0.1);
+            params.put("reasoningEffort",config.memoryReasoningEffort);
+            params.put("timeoutSeconds",config.dailyReviewTimeoutSecond);
+            params.put("retryCount",0);
+            params.put("sessionId","roleplay-daily-"+groupID+"-"+day);
+            params.put("messages",messages);
+            long startTime = System.currentTimeMillis();
+            JSONObject response = ai.call("chat",params);
+            RoleplayAiLog.log(plugin.getLogger(),"每日复盘",groupID,response,
+                    System.currentTimeMillis() - startTime);
+            if (response == null || !response.getBooleanValue("status")) return;
+            JSONObject parsed = parseJson(response.getString("content"));
+            if (parsed == null) parsed = parseJson(response.getString("reasoningContent"));
+            String summary = parsed == null ? "" : safe(parsed.getString("shortTerm")).trim();
+            if (summary.isEmpty()) {
+                plugin.getLogger().sendWarn("[复盘] 群"+groupID+" 没有返回有效 shortTerm");
+                return;
+            }
+            saveMemoryState(groupID,summary,lastTime,lastID);
+            plugin.getLogger().sendInfo("[复盘] 群"+groupID+" 每日复盘完成，短期记忆"
+                    +summary.length()+"字");
+        } catch (Exception e) {
+            plugin.getLogger().sendException(e);
+        } finally {
+            dailyReviewRunning.remove(groupID);
+        }
+    }
     /**
      * 回合执行线程池按配置维护，配置变更时重建
      */
@@ -712,6 +815,8 @@ public class RoleplayService {
         }
         replyFeedbackService.observeHumanMessage(groupID,event.getUserID(),content,event.getMessageID());
         expressionService.observe(groupID,event.getUserID(),content);
+        String attentionTopic = attentionService.topicKey(content);
+        attentionService.observe(groupID,event.getUserID(),attentionTopic,direct,otherRoleBot);
         boolean sameUserContinuation = isContinuation(groupID,event.getUserID());
         boolean justRepliedToSameUser = justRepliedToSameUser(groupID,event.getUserID());
         boolean groupActive = isGroupActive(groupID);
@@ -798,6 +903,7 @@ public class RoleplayService {
         prepared.imageContext = replyImage;
         prepared.signals = signals;
         prepared.emotionEvent = emotionEvent;
+        prepared.attentionTopic = attentionTopic;
         return prepared;
     }
 
@@ -814,6 +920,8 @@ public class RoleplayService {
                 decision.chance,prepared.direct,prepared.otherRoleBot);
         decision.chance = replyFeedbackService.adjustChance(groupID,decision.chance,
                 prepared.direct,prepared.otherRoleBot);
+        decision.chance = attentionService.adjustChance(groupID,prepared.attentionTopic,
+                decision.chance,prepared.direct,prepared.otherRoleBot);
         if (decision.chance < 1.0 && Math.random() >= decision.chance) {
             plugin.getLogger().sendInfo("[角色] 群"+groupID+" 概率跳过 概率="
                     +decision.chance+" 原因="+decision.reason);
@@ -881,6 +989,8 @@ public class RoleplayService {
                 decision.chance,primary.direct,primary.otherRoleBot);
         decision.chance = replyFeedbackService.adjustChance(groupID,decision.chance,
                 primary.direct,primary.otherRoleBot);
+        decision.chance = attentionService.adjustChance(groupID,primary.attentionTopic,
+                decision.chance,primary.direct,primary.otherRoleBot);
         if (decision.chance < 1.0 && Math.random() >= decision.chance) {
             plugin.getLogger().sendInfo("[角色] 群"+groupID+" 合批概率跳过 概率="
                     +decision.chance+" 原因="+decision.reason);
@@ -1564,6 +1674,10 @@ public class RoleplayService {
         return expressionService;
     }
 
+    public RoleplayAttentionService getAttentionService() {
+        return attentionService;
+    }
+
     public void blacklistAdd(long groupID,long userID,String reason,long operatorID) {
         blacklistService.add(groupID,userID,reason,operatorID);
     }
@@ -1708,6 +1822,7 @@ public class RoleplayService {
                 +"当前发言者关系："+relationship+"\n"
                 +emotionService.promptText(groupID,userID,otherRoleBot)
                 +replyFeedbackService.promptText(groupID)
+                +attentionService.promptText(groupID)
                 +(actionIds.contains("reminder") ? reminderPromptText(groupID,userID,messageText) : "")
                 +dynamicMaterials
                 +outputFormatTail(decision,batchCount);

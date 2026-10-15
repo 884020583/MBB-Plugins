@@ -11,7 +11,7 @@ MoBoxBot 角色扮演插件。插件读取 persona 文件，让角色以普通�
 | 会话与回复 | 群级开关、参与概率、冷却、消息合批、路由判断、引用回复、结构化输出 | [回复架构](roleplay/architecture.md) |
 | 记忆系统 | 短期、长期、永久、群员个人记忆；相关性注入、合并、备份与恢复 | [记忆系统](roleplay/memory.md) |
 | 情绪与关系 | 群级情绪、好感、信任、厌烦、黑名单、用户关系原因 | [情绪与关系](roleplay/emotion.md) |
-| 反馈与表达 | 主动发言被接话统计、概率修正、群内表达候选提取与管理员复核 | [回复架构](roleplay/architecture.md) |
+| 反馈与表达 | 主动发言反馈、注意力漂移、每日复盘、群内表达候选提取与管理员复核 | [回复架构](roleplay/architecture.md) |
 | 资料与提示词 | persona、台词语料、知识库、提示词缓存前缀 | [回复架构](roleplay/architecture.md) / [技能与集成](roleplay/integrations.md) |
 | 技能与外部插件 | 提醒、识图、表情包、ComfyUI 生图、戳回去 | [技能与集成](roleplay/integrations.md) |
 | 多角色部署 | 其他角色机器人 QQ、接话概率、连续往返限制、名称识别 | [多角色部署](roleplay/multi-role.md) |
