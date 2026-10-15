@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.41.0.2301 | 2026-10-16 | `MBB-Roleplay` 第十五轮类拆分：把艾特目标判断、引用角色判断、多角色同时点名、群员身份识别、关系称呼、被引用消息读取和角色机器人识别从 `RoleplayService` 迁到独立的 `RoleplayAddressService`，主服务保留发言指向包装入口；`RoleplayService` 从约 2282 行降到约 2143 行。行为不变，艾特/引用优先级、别名匹配和引用上下文格式保持原实现 |
 | V0.5.40.0.2301 | 2026-10-16 | `MBB-Roleplay` 第十四轮类拆分：把表情包标签提示、随机发送、旧 `<sticker>` 标签解析、等待窗口内的表情情绪缓存和正文合并从 `RoleplayService` 迁到独立的 `RoleplayStickerService`，主服务保留标签解析与情绪缓存包装入口；`RoleplayService` 从约 2337 行降到约 2282 行。行为不变，表情包技能、随机选择和等待回合唤醒保持原链路 |
 | V0.5.39.0.2301 | 2026-10-16 | `MBB-Roleplay` 第十三轮类拆分：把图片/表情片段判定、最近图片缓存、图片数据读取、识图限流、异步识图、图片描述注入和学生外貌参考调用从 `RoleplayService` 迁到独立的 `RoleplayImageContextService`，主服务保留识图相关包装入口；`RoleplayService` 从约 2510 行降到约 2337 行。行为不变，图片缓存、表情等待唤醒和识图日志保持原链路 |
 | V0.5.38.0.2301 | 2026-10-16 | `MBB-Roleplay` 第十二轮类拆分：把模型输出清洗、宽松 JSON 提取、损坏修复、注释剥离、控制字符转义和消息对象构造从 `RoleplayService` 迁到独立的 `RoleplayJsonUtils`，主服务保留 `parseJson` 与 `message` 包装入口；`RoleplayService` 从约 2664 行降到约 2510 行。行为不变，JSON 修复顺序和宽松提取保持原实现 |

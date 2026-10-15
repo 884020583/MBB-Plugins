@@ -48,7 +48,7 @@ public class RoleplayService {
     static final String STATE_TABLE = "plugin_mbb_roleplay_state";
     private static final String GROUP_TABLE = "plugin_mbb_roleplay_group";
     static final String TOPIC_TABLE = "plugin_mbb_roleplay_topic";    /** 引用回复里被引用内容的截断长度 */
-    private static final int QUOTE_CONTEXT_MAX_CHARS = 60;
+
     /** 分句时优先保留的句末标点 */
 
     private final Plugin plugin;
@@ -78,6 +78,7 @@ public class RoleplayService {
     private final RoleplayJsonUtils jsonUtils;
     private final RoleplayImageContextService imageContextService;
     private final RoleplayStickerService stickerService;
+    private final RoleplayAddressService addressService;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -275,6 +276,7 @@ public class RoleplayService {
         this.jsonUtils = new RoleplayJsonUtils();
         this.imageContextService = new RoleplayImageContextService(this);
         this.stickerService = new RoleplayStickerService(this);
+        this.addressService = new RoleplayAddressService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -1506,14 +1508,6 @@ public class RoleplayService {
 
 
 
-    String relationshipLabel(GroupMessageEvent event,boolean otherRoleBot) {
-        if (otherRoleBot) return "其他角色机器人";
-        if (event != null && isOwner(event.getUserID())) return "妈妈";
-        JSONObject sender = event == null ? null : event.getSender();
-        String role = sender == null ? "" : safe(sender.getString("role")).trim().toLowerCase(Locale.CHINA);
-        if ("owner".equals(role) || "admin".equals(role)) return "老师";
-        return "朋友";
-    }
 
     private boolean isInducedMemoryRequest(String content) {
         String text = safe(content);
@@ -1528,65 +1522,13 @@ public class RoleplayService {
         return owners != null && owners.contains(userID);
     }
 
-    boolean isAddressedToOtherRole(GroupMessageEvent event,String content,long selfID) {
-        return mentionsOtherRole(event,content,selfID) && !mentionsSelfRole(event,content,selfID);
-    }
 
-    boolean isMultiRoleAddress(GroupMessageEvent event,String content,long selfID) {
-        return mentionsOtherRole(event,content,selfID) && mentionsSelfRole(event,content,selfID);
-    }
 
-    boolean mentionsSelfRole(GroupMessageEvent event,String content,long selfID) {
-        if (isMentioningSelf(event,selfID)) return true;
-        String text = normalizeAddressText(content);
-        if (containsRoleAlias(text,persona.name)) return true;
-        for (String alias : persona.aliases) {
-            if (containsRoleAlias(text,alias)) return true;
-        }
-        return containsRoleAlias(text,plugin.getServer().getBotName());
-    }
 
-    private boolean mentionsOtherRole(GroupMessageEvent event,String content,long selfID) {
-        if (event != null && event.getMessage() != null) {
-            JSONArray message = event.getMessage();
-            for (int i = 0; i < message.size(); i++) {
-                JSONObject segment = message.getJSONObject(i);
-                if (segment == null || !"at".equals(segment.getString("type"))) continue;
-                JSONObject data = segment.getJSONObject("data");
-                long atID = data == null ? 0L : data.getLongValue("qq");
-                //只有艾特到另一个角色机器人才算"提到其他角色"，普通群友不算
-                if (atID > 0 && atID != selfID && containsCSVLong(config.otherRoleBotQQs,atID)) {
-                    return true;
-                }
-            }
-        }
-        String text = normalizeAddressText(content);
-        String names = config.otherRoleBotNames;
-        for (String item : names.split(",")) {
-            String name = item.trim();
-            if (name.isEmpty() || isOwnRoleName(name)) continue;
-            if (containsRoleAlias(text,name)) return true;
-        }
-        return false;
-    }
 
     /**
      * 这条消息是否艾特了普通群成员：既不是角色自己，也不是另一个角色机器人
      */
-    boolean mentionsOtherMember(GroupMessageEvent event,long selfID) {
-        if (event == null || event.getMessage() == null) return false;
-        JSONArray message = event.getMessage();
-        for (int i = 0; i < message.size(); i++) {
-            JSONObject segment = message.getJSONObject(i);
-            if (segment == null || !"at".equals(segment.getString("type"))) continue;
-            JSONObject data = segment.getJSONObject("data");
-            long atID = data == null ? 0L : data.getLongValue("qq");
-            if (atID > 0 && atID != selfID && !containsCSVLong(config.otherRoleBotQQs,atID)) {
-                return true;
-            }
-        }
-        return false;
-    }
 
 
 
@@ -1653,152 +1595,28 @@ public class RoleplayService {
         return previous == null ? created : previous;
     }
 
-    boolean isDirect(GroupMessageEvent event,String content,long selfID) {
-        boolean mentionedSelf = false;
-        boolean mentionedOther = false;
-        JSONArray message = event.getMessage();
-        if (message != null) {
-            long lastBot = state(event.getGroupID()).lastBotMessageID;
-            for (int i = 0; i < message.size(); i++) {
-                JSONObject segment = message.getJSONObject(i);
-                if (segment == null) continue;
-                JSONObject data = segment.getJSONObject("data");
-                if ("at".equals(segment.getString("type")) && data != null) {
-                    long atID = data.getLongValue("qq");
-                    if (atID == selfID) mentionedSelf = true;
-                    else if (atID > 0) mentionedOther = true;
-                }
-                if ("reply".equals(segment.getString("type")) && data != null && lastBot > 0
-                        && data.getLongValue("id") == lastBot) return true;
-            }
-        }
-        if (mentionedSelf) return true;
-        if (mentionedOther) return false;
-
-        String text = content == null ? "" : content.trim();
-        if (startsWithAlias(text,persona.name) || startsWithAlias(text,plugin.getServer().getBotName())) return true;
-        for (String alias : persona.aliases) {
-            if (startsWithAlias(text,alias)) return true;
-        }
-
-        String raw = event.getRawMessage();
-        if (raw != null && selfID > 0) {
-            if (raw.contains("[CQ:at,qq="+selfID+"]") || raw.contains("[CQ:at,qq=\""+selfID+"\"]")) return true;
-        }
-        return false;
-    }
 
     /**
      * 这条消息是否引用了机器人自己的上一条消息
      */
-    boolean isQuotingSelf(GroupMessageEvent event,long selfID) {
-        JSONArray message = event.getMessage();
-        if (message == null) return false;
-        long lastBot = state(event.getGroupID()).lastBotMessageID;
-        if (lastBot <= 0) return false;
-        for (int i = 0; i < message.size(); i++) {
-            JSONObject segment = message.getJSONObject(i);
-            if (segment == null || !"reply".equals(segment.getString("type"))) continue;
-            JSONObject data = segment.getJSONObject("data");
-            if (data != null && data.getLongValue("id") == lastBot) return true;
-        }
-        return false;
-    }
 
     /**
      * 被引用消息的 id，没有引用时返回 0
      */
-    private long quotedMessageID(GroupMessageEvent event) {
-        JSONArray message = event == null ? null : event.getMessage();
-        if (message == null) return 0L;
-        for (int i = 0; i < message.size(); i++) {
-            JSONObject segment = message.getJSONObject(i);
-            if (segment == null || !"reply".equals(segment.getString("type"))) continue;
-            JSONObject data = segment.getJSONObject("data");
-            if (data == null) continue;
-            long id = data.getLongValue("id");
-            if (id > 0) return id;
-        }
-        return 0L;
-    }
 
     /**
      * 被引用消息的文本，形如「[引用 某人：内容] 」。
      * 先从本地消息流水里找，找不到再退回 OneBot 的 get_msg，两者都拿不到就返回空串。
      */
-    String quotedText(long groupID,GroupMessageEvent event) {
-        long quotedID = quotedMessageID(event);
-        if (quotedID <= 0) return "";
-        String userName = "";
-        String content = "";
-        JSONObject row = storage().queryOne(
-                "SELECT `userName`,`content` FROM `"+MSG_TABLE+"` WHERE `groupID`=? AND `messageID`=? LIMIT 1",
-                groupID,quotedID);
-        if (row != null) {
-            userName = safe(row.getString("userName"));
-            content = safe(row.getString("content"));
-        }
-        if (content.trim().isEmpty()) {
-            JSONObject fetched = fetchQuotedMessage(quotedID);
-            if (fetched != null) {
-                userName = quotedUserName(fetched,userName);
-                content = extractContent(fetched.getJSONArray("message"));
-                if (content.trim().isEmpty()) content = safe(fetched.getString("raw_message"));
-            }
-        }
-        content = content == null ? "" : content.replaceAll("\\s+"," ").trim();
-        if (content.isEmpty()) return "";
-        if (content.length() > QUOTE_CONTEXT_MAX_CHARS) {
-            content = content.substring(0,QUOTE_CONTEXT_MAX_CHARS)+"...";
-        }
-        return "[引用 "+(userName.isEmpty() ? "某条消息" : userName)+"："+content+"] ";
-    }
 
     /**
      * 本地流水里没有这条消息时，向 OneBot 要一次原文
      */
-    private JSONObject fetchQuotedMessage(long messageID) {
-        OneBotClient client = plugin.getServer().getOneBotClient();
-        if (client == null) return null;
-        try {
-            JSONObject params = new JSONObject(true);
-            params.put("message_id",messageID);
-            JSONObject response = client.callAction("get_msg",params);
-            if (response == null || response.getIntValue("retcode") != 0) return null;
-            return response.getJSONObject("data");
-        } catch (Exception e) {
-            return null;
-        }
-    }
 
-    private String quotedUserName(JSONObject message,String fallback) {
-        if (message == null) return fallback;
-        JSONObject sender = message.getJSONObject("sender");
-        if (sender != null) {
-            String card = safe(sender.getString("card"));
-            if (!card.isEmpty()) return card;
-            String nickname = safe(sender.getString("nickname"));
-            if (!nickname.isEmpty()) return nickname;
-        }
-        long userID = message.getLongValue("user_id");
-        return userID > 0 ? String.valueOf(userID) : fallback;
-    }
 
     /**
      * 这条消息是否艾特了机器人自己
      */
-    boolean isMentioningSelf(GroupMessageEvent event,long selfID) {
-        if (selfID <= 0) return false;
-        JSONArray message = event.getMessage();
-        if (message == null) return false;
-        for (int i = 0; i < message.size(); i++) {
-            JSONObject segment = message.getJSONObject(i);
-            if (segment == null || !"at".equals(segment.getString("type"))) continue;
-            JSONObject data = segment.getJSONObject("data");
-            if (data != null && data.getLongValue("qq") == selfID) return true;
-        }
-        return false;
-    }
 
 
     boolean isContinuation(long groupID,long userID) {
@@ -1883,13 +1701,7 @@ public class RoleplayService {
         return state.otherRoleStreak;
     }
 
-    boolean isOtherRoleBot(GroupMessageEvent event,long selfID) {
-        if (event == null || event.getUserID() <= 0 || event.getUserID() == selfID) return false;
-        return containsCSVLong(config.otherRoleBotQQs,event.getUserID());
-    }
 
-    boolean isRoleParticipantUser(long userID) {        return userID > 0 && containsCSVLong(config.otherRoleBotQQs,userID);
-    }
 
 
     boolean shouldSuppressRepeat(long groupID,String reply) {
@@ -2273,6 +2085,55 @@ public class RoleplayService {
 
     String mergeStickerEmotion(String content,String emotion) {
         return stickerService.mergeStickerEmotion(content,emotion);
+    }
+
+
+    boolean isAddressedToOtherRole(GroupMessageEvent event,String content,long selfID) {
+        return addressService.isAddressedToOtherRole(event,content,selfID);
+    }
+
+    boolean isMultiRoleAddress(GroupMessageEvent event,String content,long selfID) {
+        return addressService.isMultiRoleAddress(event,content,selfID);
+    }
+
+    boolean mentionsSelfRole(GroupMessageEvent event,String content,long selfID) {
+        return addressService.mentionsSelfRole(event,content,selfID);
+    }
+
+    boolean mentionsOtherMember(GroupMessageEvent event,long selfID) {
+        return addressService.mentionsOtherMember(event,selfID);
+    }
+
+    boolean isDirect(GroupMessageEvent event,String content,long selfID) {
+        return addressService.isDirect(event,content,selfID);
+    }
+
+    boolean isQuotingSelf(GroupMessageEvent event,long selfID) {
+        return addressService.isQuotingSelf(event,selfID);
+    }
+
+    long quotedMessageID(GroupMessageEvent event) {
+        return addressService.quotedMessageID(event);
+    }
+
+    String quotedText(long groupID,GroupMessageEvent event) {
+        return addressService.quotedText(groupID,event);
+    }
+
+    boolean isMentioningSelf(GroupMessageEvent event,long selfID) {
+        return addressService.isMentioningSelf(event,selfID);
+    }
+
+    String relationshipLabel(GroupMessageEvent event,boolean otherRoleBot) {
+        return addressService.relationshipLabel(event,otherRoleBot);
+    }
+
+    boolean isOtherRoleBot(GroupMessageEvent event,long selfID) {
+        return addressService.isOtherRoleBot(event,selfID);
+    }
+
+    boolean isRoleParticipantUser(long userID) {
+        return addressService.isRoleParticipantUser(userID);
     }
 
     StorageService storage() {
