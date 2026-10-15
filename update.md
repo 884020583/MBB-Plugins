@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.50.0.2301 | 2026-10-16 | `MBB-Roleplay` 第二十四至二十五轮类拆分：把规则兜底/AI 路由、动作清单、情绪提示、艾特与引用目标说明迁到 `RoleplayRoutingService`；把提醒清单、可选知识库、学生印象、外貌参考、语料情绪、场景提示和语料检索提示迁到 `RoleplayPromptMaterialService`。主服务保留路由与资料包装入口；`RoleplayService` 从约 1543 行降到约 1445 行。行为不变，路由优先级、资料目录和语料检索参数保持原实现 |
 | V0.5.49.0.2301 | 2026-10-16 | `MBB-Roleplay` 第二十三轮类拆分：把单条/合批回复消息装配、图片上下文合并、提示词装配调用、AI 调用和回复日志从 `RoleplayService` 迁到独立的 `RoleplayReplyGenerationService`，主服务保留两个 `reply` 重载入口；`RoleplayService` 从约 1599 行降到约 1543 行。行为不变，回复提示词顺序、图片输入和日志格式保持原实现 |
 | V0.5.48.0.2301 | 2026-10-16 | `MBB-Roleplay` 第二十二轮类拆分：把回合线程池、后台任务线程池、动态线程数调整、任务提交和关闭从 `RoleplayService` 迁到独立的 `RoleplayExecutorService`，主服务保留任务提交与关闭包装入口；`RoleplayService` 从约 1638 行降到约 1599 行。行为不变，线程命名、守护线程、拒绝回退和线程数上限保持原实现 |
 | V0.5.47.0.2301 | 2026-10-16 | `MBB-Roleplay` 第二十一轮类拆分：把消息表、记忆表、状态表、群表、话题表、补列、索引和过期清理从 `RoleplayService.init` 迁到独立的 `RoleplaySchemaService`，主服务初始化只保留服务加载顺序；`RoleplayService` 从约 1696 行降到约 1638 行。行为不变，建表顺序、补列和索引保持原实现 |

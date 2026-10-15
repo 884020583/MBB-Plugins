@@ -87,6 +87,8 @@ public class RoleplayService {
     private final RoleplaySchemaService schemaService;
     private final RoleplayExecutorService executorService;
     private final RoleplayReplyGenerationService replyGenerationService;
+    private final RoleplayRoutingService routingService;
+    private final RoleplayPromptMaterialService promptMaterialService;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -293,6 +295,8 @@ public class RoleplayService {
         this.schemaService = new RoleplaySchemaService(this);
         this.executorService = new RoleplayExecutorService(this);
         this.replyGenerationService = new RoleplayReplyGenerationService(this);
+        this.routingService = new RoleplayRoutingService(this);
+        this.promptMaterialService = new RoleplayPromptMaterialService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -553,6 +557,10 @@ public class RoleplayService {
         return styler;
     }
 
+    RoleplayRouter router() {
+        return router;
+    }
+
     RoleplaySkillRegistry skillRegistry() {
         return skillRegistry;
     }
@@ -635,189 +643,42 @@ public class RoleplayService {
      * 只有对方确实在问提醒安排时才给完整清单，其他情况只给条数与最近一条，
      * 否则模型会把待办当成聊天素材逐条念出来。
      */
-    String reminderPromptText(long groupID,long userID,String content) {
-        String text = safe(content);
-        boolean asking = text.contains("提醒") || text.contains("几点") || text.contains("什么时候")
-                || text.contains("安排") || text.contains("记了") || text.contains("记下");
-        String body = asking ? reminderService.pendingText(groupID,userID)
-                : reminderService.pendingBrief(groupID,userID);
-        return "当前用户的待触发提醒（只是背景资料，不要在回复里逐条复述时间与内容）：\n"+body+"\n";
-    }
 
     /**
      * 可选资料清单，给路由层点名用
      */
-    String materialCatalogue() {
-        //角色核心、外貌、学生名录与固定规则现在都是常驻资料，不需要路由点名
-        String catalogue = "";
-        //学生档案库接管学生资料后，不再向路由层推荐插件自带的详细设定
-        if (!knowledgeService.isStudentsLibraryEnabled()) {
-            catalogue += "students.detail：被提到的学生的完整外貌，问起某位学生时带上\n";
-        }
-        String knowledge = knowledgeService.catalogueText();
-        if (!knowledge.isEmpty()) {
-            catalogue += "可选知识库（问到相关内容时点选，不需要就不要选）：\n"+knowledge;
-        }
-        return catalogue;
-    }
 
     /**
      * 角色了解的学生一句话印象。
      * 学生档案库启用时用条目 summary 覆盖人设里写死的印象，避免两处说法不一致。
      */
-    String studentBriefText() {
-        if (!knowledgeService.isStudentsLibraryEnabled()) return persona.studentBriefText();
-        if (persona.otherStudents.isEmpty()) return "";
-        StringBuilder builder = new StringBuilder("了解的学生：");
-        boolean first = true;
-        for (String item : persona.otherStudents) {
-            String text = safe(item).trim();
-            if (text.isEmpty()) continue;
-            String name = text;
-            int colon = text.indexOf('：');
-            if (colon > 0) name = text.substring(0,colon).trim();
-            String summary = knowledgeService.studentsSummary(name);
-            if (!summary.isEmpty()) text = name+"："+summary;
-            if (!first) builder.append("；");
-            builder.append(text);
-            first = false;
-        }
-        builder.append("\n");
-        return builder.toString();
-    }
 
     /**
      * 识图用的学生外貌参考。
      * 知识库学生库启用时从条目取外貌并按总预算均分，否则退回插件自带的学生图鉴。
      */
-    String visionReferenceText() {
-        String text = knowledgeService.visionReferenceText(persona.name,persona.appearance,
-                config.visionReferenceMaxChars);
-        return text.isEmpty() ? persona.visionReferenceText() : text;
-    }
 
     /**
      * 语料检索用的情绪提示。
      * 只在情绪明显偏离基线时才给：语料里 neutral 占四分之三，给成 neutral 等于没给。
      */
-    private String speechEmotionHint(long groupID,long userID,boolean otherRoleBot) {
-        if (!config.emotionEnable || groupID <= 0) return "";
-        List<String> hints = new ArrayList<>();
-        double annoyance = otherRoleBot || userID <= 0 ? 0 : emotionService.annoyance(groupID,userID);
-        int valence = emotionService.valence(groupID);
-        int patience = emotionService.patience(groupID);
-        if (annoyance >= 65 || patience < 30) {
-            hints.add("annoyed");
-            hints.add("serious");
-        } else if (valence >= 70) {
-            hints.add("happy");
-            hints.add("excited");
-            hints.add("proud");
-        } else if (valence < 35) {
-            hints.add("sad");
-            hints.add("serious");
-        }
-        return String.join(",",hints);
-    }
 
     /**
      * 语料检索用的场景提示，取值必须是语料里出现过的 scene
      */
-    private String speechScene(String content,RoleplayRouteDecision decision) {
-        String text = safe(content);
-        if (text.contains("[戳一戳]")) return "group_chat";
-        if (decision != null && "direct".equals(decision.addressed)) return "reply";
-        return "daily";
-    }
 
-    String speechPrompt(long groupID,long userID,String content,boolean otherRoleBot,
-                                RoleplayRouteDecision decision) {
-        return speechCorpusService.promptText(content,contextService.recentContext(groupID),
-                speechEmotionHint(groupID,userID,otherRoleBot),speechScene(content,decision));
-    }
 
-    String emotionRouterText(long groupID,long userID,boolean otherRoleBot) {
-        return emotionService.routerText(groupID,userID,otherRoleBot);
-    }
 
     /**
      * 给路由层看的发言指向说明，避免把别人之间的对话当成对角色说的
      */
-    private String addressingHint(GroupMessageEvent event,long groupID,
-                                  RoleplayDecisionEngine.Signals signals) {
-        if (signals == null) return "";
-        List<String> parts = new ArrayList<>();
-        parts.add("艾特目标："+atTargetInfo(event));
-        parts.add("引用目标："+quotedTargetInfo(groupID,event));
-        if (signals.mentioningSelf) parts.add("指向角色：艾特了角色本人");
-        if (signals.quotingSelf) parts.add("指向角色：回复的是角色本人上一条消息");
-        if (signals.direct && !signals.mentioningSelf) parts.add("指向角色：开头或句首叫了角色的名字");
-        if (signals.addressedToOtherMember) parts.add("其他指向：艾特的是其他群成员，不是角色");
-        if (signals.addressedToOtherRole) parts.add("其他指向：艾特的是另一个角色机器人");
-        if (parts.size() <= 2) parts.add("指向角色：未明确指向角色，需要结合上下文判断");
-        return String.join("；",parts);
-    }
 
-    String atTargetInfo(GroupMessageEvent event) {
-        if (event == null || event.getMessage() == null) return "无";
-        List<String> targets = new ArrayList<>();
-        JSONArray message = event.getMessage();
-        for (int i = 0; i < message.size(); i++) {
-            JSONObject segment = message.getJSONObject(i);
-            if (segment == null || !"at".equals(segment.getString("type"))) continue;
-            JSONObject data = segment.getJSONObject("data");
-            long atID = data == null ? 0L : data.getLongValue("qq");
-            if (atID > 0) targets.add("QQ "+atID);
-        }
-        return targets.isEmpty() ? "无" : String.join("、",targets);
-    }
 
-    String quotedTargetInfo(long groupID,GroupMessageEvent event) {
-        long quotedID = quotedMessageID(event);
-        if (quotedID <= 0) return "无";
-        JSONObject row = storage().queryOne(
-                "SELECT `userID`,`userName` FROM `"+MSG_TABLE+"` WHERE `groupID`=? AND `messageID`=? LIMIT 1",
-                groupID,quotedID);
-        if (row == null) return "未知（消息ID："+quotedID+"）";
-        String name = safe(row.getString("userName"));
-        long userID = row.getLongValue("userID");
-        return (name.isEmpty() ? "未知" : name)+"（QQ："+userID+"）";
-    }
 
     /**
      * 产出本轮决策
      * 规则先算一遍作为兜底，路由可用时以路由结果为准，但规则保留否决权
      */
-    RoleplayRouteDecision routeDecision(RoleplayDecisionEngine.Signals signals,
-                                                GroupMessageEvent event,long groupID,long selfID,
-                                                String content) {
-        RoleplayRouteDecision ruleDecision = RoleplayDecisionEngine.decide(config,signals);
-        if (!config.routerEnable) return ruleDecision;
-        RoleplayRouteDecision routed = router.route(config,persona,skillRegistry,state(groupID),
-                content,senderName(event),relationshipLabel(event,signals.otherRoleBot),
-                contextService.recentContext(groupID),emotionRouterText(groupID,event.getUserID(),
-                        signals.otherRoleBot),addressingHint(event,groupID,signals),
-                signals.topicHint);
-        if (routed == null) {
-            plugin.getLogger().sendWarn("[角色] 群"+groupID+" 路由失败，回退规则决策");
-            return ruleDecision;
-        }
-        if (signals.direct) {
-            routed.reply = true;
-            routed.addressed = "direct";
-        }
-        routed.quoteRequired = config.quoteReplyEnable
-                && (signals.quotingSelf || signals.mentioningSelf);
-        routed.otherRoleBot = signals.otherRoleBot;
-        if (signals.otherRoleBot) {
-            //机器人互聊必须服从规则层概率，AI 路由只能决定“想不想接”，不能把概率抬到 1.0
-            routed.addressed = "ambient";
-            routed.chance = Math.min(routed.chance,config.otherRoleBotReplyChance);
-            routed.confidence = Math.min(routed.confidence,config.otherRoleBotReplyChance);
-        }
-        routed.actions = skillRegistry.actionIds(config);
-        return routed;
-    }
 
 
     public synchronized String backupAllMemories(String reason) {
@@ -1534,6 +1395,47 @@ public class RoleplayService {
                      RoleplayRouteDecision decision,String batchText,int batchCount) {
         return replyGenerationService.reply(groupID,userID,userName,content,otherRoleBot,
                 relationship,imageContext,decision,batchText,batchCount);
+    }
+
+
+    RoleplayRouteDecision routeDecision(RoleplayDecisionEngine.Signals signals,
+                                        GroupMessageEvent event,long groupID,long selfID,
+                                        String content) {
+        return routingService.routeDecision(signals,event,groupID,selfID,content);
+    }
+
+    String emotionRouterText(long groupID,long userID,boolean otherRoleBot) {
+        return routingService.emotionRouterText(groupID,userID,otherRoleBot);
+    }
+
+    String atTargetInfo(GroupMessageEvent event) {
+        return routingService.atTargetInfo(event);
+    }
+
+    String quotedTargetInfo(long groupID,GroupMessageEvent event) {
+        return routingService.quotedTargetInfo(groupID,event);
+    }
+
+
+    String reminderPromptText(long groupID,long userID,String content) {
+        return promptMaterialService.reminderPromptText(groupID,userID,content);
+    }
+
+    String materialCatalogue() {
+        return promptMaterialService.materialCatalogue();
+    }
+
+    String studentBriefText() {
+        return promptMaterialService.studentBriefText();
+    }
+
+    String visionReferenceText() {
+        return promptMaterialService.visionReferenceText();
+    }
+
+    String speechPrompt(long groupID,long userID,String content,boolean otherRoleBot,
+                        RoleplayRouteDecision decision) {
+        return promptMaterialService.speechPrompt(groupID,userID,content,otherRoleBot,decision);
     }
 
     StorageService storage() {
