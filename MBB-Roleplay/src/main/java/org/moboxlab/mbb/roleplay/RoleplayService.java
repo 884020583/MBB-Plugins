@@ -47,8 +47,7 @@ public class RoleplayService {
     private static final String MEMORY_TABLE = "plugin_mbb_roleplay_memory";
     private static final String STATE_TABLE = "plugin_mbb_roleplay_state";
     private static final String GROUP_TABLE = "plugin_mbb_roleplay_group";
-    private static final String TOPIC_TABLE = "plugin_mbb_roleplay_topic";
-    /** 引用回复里被引用内容的截断长度 */
+    static final String TOPIC_TABLE = "plugin_mbb_roleplay_topic";    /** 引用回复里被引用内容的截断长度 */
     private static final int QUOTE_CONTEXT_MAX_CHARS = 60;
     /** 分句时优先保留的句末标点 */
 
@@ -67,6 +66,7 @@ public class RoleplayService {
     private final RoleplayAttentionService attentionService;
     private final RoleplayDailyReviewService dailyReviewService;
     private final RoleplayMessageSender messageSender;
+    private final RoleplayContextService contextService;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -100,14 +100,6 @@ public class RoleplayService {
     private final Map<Long,Long> batchBufferStartMap = new HashMap<>();
     private static final Pattern REMEMBER_PAIR = Pattern.compile(
             "(?is)<\\s*remember\\s*>(.*?)<\\s*/\\s*remember\\s*>");
-    private static final Set<String> TOPIC_STOPWORDS = new LinkedHashSet<>();
-    static {
-        Collections.addAll(TOPIC_STOPWORDS,
-                "我们","你们","他们","这个","那个","什么","就是","不是","没有","一个",
-                "今天","明天","昨天","现在","已经","还是","可以","不能","怎么","为什么",
-                "这样","那样","一下","有点","自己","大家","老师","群友","感觉","而且",
-                "但是","因为","所以","如果","然后","真的","哈哈","不是","没有","不是");
-    }
     private static final Pattern REMEMBER_OPEN = Pattern.compile(
             "(?is)<\\s*remember\\s*/?\\s*>");
     private static final Pattern REMEMBER_CLOSE = Pattern.compile(
@@ -289,25 +281,6 @@ public class RoleplayService {
         private String attentionTopic = "";
     }
 
-    private static class TopicFatigue {
-        private final String key;
-        private final int count;
-        private final int selfCount;
-        private final String hint;
-        private final boolean fatigued;
-
-        private TopicFatigue() {
-            this("",0,0,"",false);
-        }
-
-        private TopicFatigue(String key,int count,int selfCount,String hint,boolean fatigued) {
-            this.key = key == null ? "" : key;
-            this.count = count;
-            this.selfCount = selfCount;
-            this.hint = hint == null ? "" : hint;
-            this.fatigued = fatigued;
-        }
-    }
 
     public RoleplayService(Plugin plugin,RoleplayConfig config,RoleplayPersona persona) {
         this.plugin = plugin;
@@ -327,6 +300,7 @@ public class RoleplayService {
         this.attentionService = new RoleplayAttentionService(plugin,config);
         this.dailyReviewService = new RoleplayDailyReviewService(plugin,config,this);
         this.messageSender = new RoleplayMessageSender(this);
+        this.contextService = new RoleplayContextService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -753,7 +727,7 @@ public class RoleplayService {
         if (!hasImage) replyImage = findRecentImageContext(groupID,event.getUserID(),content);
         boolean recentImageQuestion = !hasImage && replyImage != null;
         recordMessage(event,content,false);
-        recordTopic(groupID,content,false);
+        contextService.recordTopic(groupID,content,false);
         int count = countMessage(groupID);
         if (count >= config.memoryUpdateMessages) {
             messageCountMap.put(groupID,0);
@@ -787,9 +761,9 @@ public class RoleplayService {
         signals.interest = interest;
         signals.recentImageQuestion = recentImageQuestion;
         signals.contentLength = content.length();
-        TopicFatigue topicFatigue = topicFatigue(groupID,content);
-        signals.topicFatigued = topicFatigue.fatigued;
-        signals.topicHint = topicFatigue.hint;
+        RoleplayContextService.TopicFatigue topicFatigue = contextService.topicFatigue(groupID,content);
+        signals.topicFatigued = topicFatigue.fatigued();
+        signals.topicHint = topicFatigue.hint();
         String skipReason = RoleplayDecisionEngine.skipReason(config,signals);
         if (skipReason != null) return null;
         RoleplayEmotionService.LocalEvent emotionEvent = emotionService.observeMessage(
@@ -889,9 +863,9 @@ public class RoleplayService {
         PreparedMessage primary = primaryMessage(messages);
         if (rateLimited(groupID)) return;
         String batchText = batchPromptText(messages);
-        TopicFatigue batchFatigue = topicFatigue(groupID,batchText);
-        primary.signals.topicFatigued = batchFatigue.fatigued;
-        primary.signals.topicHint = batchFatigue.hint;
+        RoleplayContextService.TopicFatigue batchFatigue = contextService.topicFatigue(groupID,batchText);
+        primary.signals.topicFatigued = batchFatigue.fatigued();
+        primary.signals.topicHint = batchFatigue.hint();
         RoleplayRouteDecision decision = routeDecision(primary.signals,primary.event,groupID,
                 primary.selfID,batchText);
         if (decision == null || !decision.reply) return;
@@ -1652,12 +1626,12 @@ public class RoleplayService {
                     +"当前关系："+relationship+"\n"
                     +"本批主消息指向："+addressingText(decision)+"\n"
                     +"这批连续消息（共 "+batchCount+" 条，按时间顺序）：\n"+batchText+"\n\n"
-                    +"最近群聊上下文：\n"+recentContext(groupID);
+                    +"最近群聊上下文：\n"+contextService.recentContext(groupID);
         } else {
             userText = "当前发言者："+(userName == null ? "" : userName)+"（QQ："+userID+"）\n"
                     +"当前关系："+relationship+"\n"
                     +"当前消息指向："+addressingText(decision)+"\n"
-                    +"当前消息：\n"+content+"\n\n最近群聊上下文：\n"+recentContext(groupID);
+                    +"当前消息：\n"+content+"\n\n最近群聊上下文：\n"+contextService.recentContext(groupID);
         }
         if (imageContext != null && !content.contains("[图片")) {
             String summary = imageSummary(imageContext);
@@ -1712,8 +1686,8 @@ public class RoleplayService {
     private String buildSystemPrompt(long groupID,long userID,boolean otherRoleBot,
                                      String relationship,String speechPrompt,String messageText,
                                      RoleplayRouteDecision decision,int batchCount) {
-        String recentReplies = recentRoleReplyText(groupID);
-        String otherRoleReplies = recentOtherRoleReplyText(groupID);
+        String recentReplies = contextService.recentRoleReplyText(groupID);
+        String otherRoleReplies = contextService.recentOtherRoleReplyText(groupID);
         List<String> actionIds = decision == null ? skillRegistry.actionIds(config) : decision.actions;
         //缓存前缀块按稳定性从高到低排列：静态资料与固定规则 -> 短期记忆 -> 输出格式总则
         String stable = assembleStableMaterials()+stableRulesText();
@@ -2066,7 +2040,7 @@ public class RoleplayService {
 
     private String speechPrompt(long groupID,long userID,String content,boolean otherRoleBot,
                                 RoleplayRouteDecision decision) {
-        return speechCorpusService.promptText(content,recentContext(groupID),
+        return speechCorpusService.promptText(content,contextService.recentContext(groupID),
                 speechEmotionHint(groupID,userID,otherRoleBot),speechScene(content,decision));
     }
 
@@ -2129,7 +2103,7 @@ public class RoleplayService {
         if (!config.routerEnable) return ruleDecision;
         RoleplayRouteDecision routed = router.route(config,persona,skillRegistry,state(groupID),
                 content,senderName(event),relationshipLabel(event,signals.otherRoleBot),
-                recentContext(groupID),emotionRouterText(groupID,event.getUserID(),
+                contextService.recentContext(groupID),emotionRouterText(groupID,event.getUserID(),
                         signals.otherRoleBot),addressingHint(event,groupID,signals),
                 signals.topicHint);
         if (routed == null) {
@@ -2946,190 +2920,6 @@ public class RoleplayService {
         emotionService.clearCache();
     }
 
-    private String recentRoleReplyText(long groupID) {
-        JSONArray replies = recentRoleRepliesForPrompt(groupID,true);
-        if (replies.isEmpty()) return "暂无。";
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < replies.size(); i++) {
-            builder.append("- [自己] ").append(safe(replies.getJSONObject(i).getString("content")))
-                    .append("\n");
-        }
-        return builder.toString();
-    }
-
-    private String recentOtherRoleReplyText(long groupID) {
-        JSONArray replies = recentRoleRepliesForPrompt(groupID,false);
-        if (replies.isEmpty()) return "暂无。";
-        StringBuilder builder = new StringBuilder();
-        for (int i = 0; i < replies.size(); i++) {
-            JSONObject row = replies.getJSONObject(i);
-            String name = safe(row.getString("userName"));
-            builder.append("- [其他角色机器人] ")
-                    .append(name.isEmpty() ? "未命名" : name)
-                    .append("（QQ：").append(row.getLongValue("userID")).append("）：")
-                    .append(safe(row.getString("content"))).append("\n");
-        }
-        return builder.toString();
-    }
-
-    private JSONArray recentRoleRepliesForPrompt(long groupID,boolean self) {
-        JSONArray result = new JSONArray();
-        List<JSONObject> rows = storage().query(
-                "SELECT `userName`,`content`,`isBot`,`userID` FROM `"+MSG_TABLE+"` "
-                        + "WHERE `groupID`=? ORDER BY `messageTime` DESC,`ID` DESC LIMIT ?",
-                groupID,Math.max(20,config.recentReplyCheckCount * 3));
-        if (rows == null || rows.isEmpty()) return result;
-        List<JSONObject> selected = new ArrayList<>();
-        for (JSONObject row : rows) {
-            boolean isSelf = row.getIntValue("isBot") == 1;
-            boolean isOtherRole = !isSelf && isRoleParticipantUser(row.getLongValue("userID"));
-            if (self ? isSelf : isOtherRole) {
-                selected.add(row);
-                if (selected.size() >= config.recentReplyCheckCount) break;
-            }
-        }
-        for (int i = selected.size() - 1; i >= 0; i--) {
-            JSONObject item = new JSONObject(true);
-            item.put("userName",selected.get(i).getString("userName"));
-            item.put("userID",selected.get(i).getLongValue("userID"));
-            item.put("content",selected.get(i).getString("content"));
-            result.add(item);
-        }
-        return result;
-    }
-
-    private JSONArray recentRoleReplies(long groupID) {
-        JSONArray result = new JSONArray();
-        List<JSONObject> rows = storage().query(
-                "SELECT `userName`,`content`,`isBot`,`userID` FROM `"+MSG_TABLE+"` "
-                        + "WHERE `groupID`=? AND (`isBot`=1 OR `userID` NOT IN "
-                        + "(SELECT `userID` FROM `plugin_mbb_roleplay_blacklist` WHERE `groupID`=?)) "
-                        + "ORDER BY `messageTime` DESC,`ID` DESC LIMIT ?",
-                groupID,groupID,Math.max(20,config.recentReplyCheckCount * 3));
-        if (rows == null || rows.isEmpty()) return result;
-        List<JSONObject> selected = new ArrayList<>();
-        for (JSONObject row : rows) {
-            if (row.getIntValue("isBot") == 1
-                    || isRoleParticipantUser(row.getLongValue("userID"))) {
-                selected.add(row);
-                if (selected.size() >= config.recentReplyCheckCount) break;
-            }
-        }
-        for (int i = selected.size() - 1; i >= 0; i--) {
-            JSONObject item = new JSONObject(true);
-            item.put("content",selected.get(i).getString("content"));
-            result.add(item);
-        }
-        return result;
-    }
-
-    private String recentContext(long groupID) {
-        List<JSONObject> rows = storage().query(
-                "SELECT `userID`,`userName`,`content`,`isBot` FROM `"+MSG_TABLE+"` WHERE `groupID`=? "
-                        + "AND `userID` NOT IN (SELECT `userID` FROM `plugin_mbb_roleplay_blacklist` "
-                        + "WHERE `groupID`=?) ORDER BY `messageTime` DESC LIMIT ?",
-                groupID,groupID,config.shortContextMessages);
-        if (rows == null || rows.isEmpty()) return "无";
-        StringBuilder builder = new StringBuilder();
-        for (int i = rows.size() - 1; i >= 0; i--) {
-            JSONObject row = rows.get(i);
-            //带上 QQ，群友随时可能改昵称，只靠名字会让模型把 A 的发言记到 B 头上
-            builder.append(contextIdentity(row))
-                    .append(" ").append(safe(row.getString("userName")))
-                    .append("（QQ：").append(row.getLongValue("userID")).append("）：")
-                    .append(safe(row.getString("content"))).append("\n");
-        }
-        return builder.toString();
-    }
-
-    private String contextIdentity(JSONObject row) {
-        if (row == null) return "[群友]";
-        if (row.getIntValue("isBot") == 1) return "[自己]";
-        if (isRoleParticipantUser(row.getLongValue("userID"))) return "[其他角色机器人]";
-        return "[群友]";
-    }
-
-    private void recordTopic(long groupID,String content,boolean self) {
-        if (!config.topicFatigueEnable) return;
-        String key = topicKeyForMessage(groupID,content);
-        if (key.isEmpty()) return;
-        long now = System.currentTimeMillis();
-        JSONObject row = storage().queryOne(
-                "SELECT `ID`,`selfCount` FROM `"+TOPIC_TABLE+"` WHERE `groupID`=? AND `topicKey`=?",
-                groupID,key);
-        if (row == null) {
-            storage().insert("INSERT INTO `"+TOPIC_TABLE+"` "
-                            + "(`groupID`,`topicKey`,`lastTime`,`count`,`selfCount`,`lastSelfTime`,`updateTime`) "
-                            + "VALUES (?,?,?,?,?,?,?)",
-                    groupID,key,now,1,self ? 1 : 0,self ? now : 0L,now);
-        } else {
-            storage().update("UPDATE `"+TOPIC_TABLE+"` SET `lastTime`=?,`count`=`count`+1,"
-                            + "`selfCount`=`selfCount`+?,`lastSelfTime`=?,`updateTime`=? WHERE `ID`=?",
-                    now,self ? 1 : 0,self ? now : 0L,now,row.getLongValue("ID"));
-        }
-    }
-
-    private TopicFatigue topicFatigue(long groupID,String content) {
-        if (!config.topicFatigueEnable) return new TopicFatigue();
-        String key = topicKeyForMessage(groupID,content);
-        if (key.isEmpty()) return new TopicFatigue();
-        JSONObject row = storage().queryOne(
-                "SELECT `lastTime`,`count`,`selfCount` FROM `"+TOPIC_TABLE+"` "
-                        + "WHERE `groupID`=? AND `topicKey`=?",
-                groupID,key);
-        if (row == null) return new TopicFatigue(key,0,0,"",false);
-        long now = System.currentTimeMillis();
-        long window = Math.max(1,config.topicFatigueWindowMinute) * 60000L;
-        if (now - row.getLongValue("lastTime") > window) {
-            return new TopicFatigue(key,row.getIntValue("count"),row.getIntValue("selfCount"),"",false);
-        }
-        int count = row.getIntValue("count");
-        int selfCount = row.getIntValue("selfCount");
-        boolean fatigued = count >= config.topicFatigueMinCount
-                && selfCount >= config.topicFatigueSelfCount;
-        String hint = "";
-        if (fatigued || count >= config.topicFatigueMinCount) {
-            hint = "话题疲劳：话题“"+shortText(key,20)+"”最近"
-                    +config.topicFatigueWindowMinute+"分钟内出现"+count+"次，角色自己参与"
-                    +selfCount+"次。"
-                    +(fatigued ? "除非有明显新信息或直接提问，否则不要主动展开、复述或接着重复这个话题。"
-                    : "减少主动接话，不要主动延长这个话题。");
-        }
-        return new TopicFatigue(key,count,selfCount,hint,fatigued);
-    }
-
-    private String topicKeyForMessage(long groupID,String content) {
-        String normalized = SpeechCorpusEntry.normalize(content == null ? "" : content);
-        if (normalized.length() < 2) return "";
-        List<JSONObject> rows = storage().query(
-                "SELECT `content` FROM `"+MSG_TABLE+"` WHERE `groupID`=? "
-                        + "ORDER BY `messageTime` DESC,`ID` DESC LIMIT ?",
-                groupID,Math.max(20,config.shortContextMessages / 2));
-        String best = "";
-        int bestScore = 0;
-        int maxLength = Math.min(6,normalized.length());
-        for (int len = 2; len <= maxLength; len++) {
-            for (int start = 0; start + len <= normalized.length(); start++) {
-                String candidate = normalized.substring(start,start + len);
-                if (TOPIC_STOPWORDS.contains(candidate)) continue;
-                int count = 0;
-                if (rows != null) {
-                    for (JSONObject row : rows) {
-                        if (SpeechCorpusEntry.normalize(row.getString("content")).contains(candidate)) {
-                            count++;
-                        }
-                    }
-                }
-                int score = count * len;
-                if (count >= 2 && score > bestScore) {
-                    best = candidate;
-                    bestScore = score;
-                }
-            }
-        }
-        if (!best.isEmpty()) return best;
-        return normalized.length() > 12 ? normalized.substring(0,12) : normalized;
-    }
 
     private String longMemoryText(long groupID,long userID,String query) {
         //相关性排序时先取更大的候选池，避免重要度低但很贴题的老记忆根本没机会参与排序
@@ -3292,7 +3082,7 @@ public class RoleplayService {
     void recordBotMessage(long groupID,long botID,String content,long messageID) {
         storage().insert("INSERT INTO `"+MSG_TABLE+"` (`messageID`,`groupID`,`userID`,`userName`,`messageTime`,`content`,`isBot`) VALUES (?,?,?,?,?,?,?)",
                 messageID,groupID,botID,"角色",System.currentTimeMillis(),content,1);
-        recordTopic(groupID,content,true);
+        contextService.recordTopic(groupID,content,true);
     }
 
 
@@ -3876,8 +3666,7 @@ public class RoleplayService {
         return containsCSVLong(config.otherRoleBotQQs,event.getUserID());
     }
 
-    private boolean isRoleParticipantUser(long userID) {
-        return userID > 0 && containsCSVLong(config.otherRoleBotQQs,userID);
+    boolean isRoleParticipantUser(long userID) {        return userID > 0 && containsCSVLong(config.otherRoleBotQQs,userID);
     }
 
     private boolean containsCSVLong(String csv,long value) {
@@ -3893,7 +3682,7 @@ public class RoleplayService {
 
     private boolean shouldSuppressRepeat(long groupID,String reply) {
         if (reply == null || reply.trim().length() < config.repeatCheckMinChars) return false;
-        JSONArray recent = recentRoleReplies(groupID);
+        JSONArray recent = contextService.recentRoleReplies(groupID);
         if (recent.isEmpty()) return false;
         String candidate = normalizeForSimilarity(reply);
         if (candidate.length() < config.repeatCheckMinChars) return false;
