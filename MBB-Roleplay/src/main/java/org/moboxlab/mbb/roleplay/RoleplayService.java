@@ -80,6 +80,7 @@ public class RoleplayService {
     private final RoleplayStickerService stickerService;
     private final RoleplayAddressService addressService;
     private final RoleplayRateLimitService rateLimitService;
+    private final RoleplayMemoryQueryService memoryQueryService;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -131,7 +132,7 @@ public class RoleplayService {
         final long time;
         final long id;
 
-        private MemoryCursor(long time,long id) {
+        MemoryCursor(long time,long id) {
             this.time = time;
             this.id = id;
         }
@@ -279,6 +280,7 @@ public class RoleplayService {
         this.stickerService = new RoleplayStickerService(this);
         this.addressService = new RoleplayAddressService(this);
         this.rateLimitService = new RoleplayRateLimitService(this);
+        this.memoryQueryService = new RoleplayMemoryQueryService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -1322,154 +1324,13 @@ public class RoleplayService {
     }
 
 
-    String longMemoryText(long groupID,long userID,String query) {
-        //相关性排序时先取更大的候选池，避免重要度低但很贴题的老记忆根本没机会参与排序
-        int pool = config.memoryRelevanceSort
-                ? Math.max(config.memoryRelevancePoolSize,config.maxLongMemories)
-                : config.maxLongMemories;
-        JSONArray memories = longMemories(groupID,true,pool);
-        if (memories.isEmpty()) return "暂无长期记忆。";
-        if (!config.memoryRelevanceSort) {
-            StringBuilder plain = new StringBuilder();
-            for (int i = 0; i < memories.size(); i++) {
-                JSONObject item = memories.getJSONObject(i);
-                plain.append("- [").append(safe(item.getString("type"))).append("] ")
-                        .append(safe(item.getString("content"))).append("\n");
-            }
-            return plain.toString();
-        }
-        List<JSONObject> ranked = rankMemories(memories,userID,query);
-        StringBuilder builder = new StringBuilder();
-        int used = 0;
-        int count = 0;
-        for (JSONObject item : ranked) {
-            String line = "- ["+safe(item.getString("type"))+"] "
-                    +safe(item.getString("content"))+"\n";
-            if (count > 0 && used + line.length() > config.memoryRelevanceMaxChars) break;
-            builder.append(line);
-            used += line.length();
-            count++;
-        }
-        plugin.getLogger().sendInfo("[记忆] 群"+groupID+" 长期记忆按相关性注入 "+count
-                +"/"+memories.size()+" 条，占用 "+used+" 字符");
-        return builder.length() == 0 ? "暂无长期记忆。" : builder.toString();
-    }
 
-    /**
-     * 记忆相关性排序：与当前消息的字符重合度为主，重要性与同用户归属为辅
-     * 这样注入的是"和这次对话有关"的记忆，而不是只按重要度取前几条
-     */
-    private List<JSONObject> rankMemories(JSONArray memories,long userID,String query) {
-        Set<String> queryBigrams = SpeechCorpusEntry.bigrams(
-                SpeechCorpusEntry.normalize(query == null ? "" : query));
-        long now = System.currentTimeMillis();
-        List<MemoryScore> scored = new ArrayList<>();
-        for (int i = 0; i < memories.size(); i++) {
-            JSONObject item = memories.getJSONObject(i);
-            Set<String> bigrams = SpeechCorpusEntry.bigrams(
-                    SpeechCorpusEntry.normalize(safe(item.getString("content"))));
-            //重要度给足权重，避免一次无关的关键词命中就压过明显更重要的记忆
-            double score = item.getIntValue("importance") * 0.8;
-            if (!queryBigrams.isEmpty()) {
-                int overlap = 0;
-                for (String bigram : queryBigrams) {
-                    if (bigrams.contains(bigram)) overlap++;
-                }
-                //按 query 长度归一化，长记忆不再靠体量天然占优
-                score += (double) overlap / queryBigrams.size() * 8.0;
-            }
-            if (userID > 0 && item.getLongValue("subjectID") == userID) score += 2.0;
-            score += recencyBonus(item.getLongValue("updateTime"),now);
-            scored.add(new MemoryScore(item,score));
-        }
-        Collections.sort(scored,new Comparator<MemoryScore>() {
-            @Override
-            public int compare(MemoryScore left,MemoryScore right) {
-                return Double.compare(right.score,left.score);
-            }
-        });
-        List<JSONObject> result = new ArrayList<>();
-        for (MemoryScore item : scored) result.add(item.memory);
-        return result;
-    }
 
-    /**
-     * 新记忆加分：随时间平滑衰减，越新越靠前，避免老记忆长期霸占注入位
-     */
-    private double recencyBonus(long updateTime,long now) {
-        if (updateTime <= 0) return 0;
-        double days = (now - updateTime) / 86400000.0;
-        if (days < 0) days = 0;
-        return 2.0 / (1.0 + days / 10.0);
-    }
 
-    private static class MemoryScore {
-        private final JSONObject memory;
-        private final double score;
 
-        private MemoryScore(JSONObject memory,double score) {
-            this.memory = memory;
-            this.score = score;
-        }
-    }
 
-    private JSONArray longMemories(long groupID) {
-        return longMemories(groupID,true);
-    }
 
-    private JSONArray longMemories(long groupID,boolean excludeBlacklisted) {
-        return longMemories(groupID,excludeBlacklisted,config.maxLongMemories);
-    }
 
-    private JSONArray longMemories(long groupID,boolean excludeBlacklisted,int limit) {
-        JSONArray result = new JSONArray();
-        int capped = limit < 1 ? config.maxLongMemories : limit;
-        List<JSONObject> rows;
-        if (excludeBlacklisted) {
-            rows = storage().query(
-                    "SELECT `memoryType`,`subjectID`,`content`,`importance`,`updateTime` FROM `"+MEMORY_TABLE+"` "
-                            + "WHERE `groupID`=? AND (`subjectID`=0 OR `subjectID` NOT IN "
-                            + "(SELECT `userID` FROM `plugin_mbb_roleplay_blacklist` "
-                            + "WHERE `groupID`=?)) "
-                            + "ORDER BY `importance` DESC,`updateTime` DESC LIMIT ?",
-                    groupID,groupID,capped);
-        } else {
-            rows = storage().query(
-                    "SELECT `memoryType`,`subjectID`,`content`,`importance`,`updateTime` FROM `"+MEMORY_TABLE+"` "
-                            + "WHERE `groupID`=? ORDER BY `importance` DESC,`updateTime` DESC LIMIT ?",
-                    groupID,capped);
-        }
-        if (rows == null) return result;
-        for (JSONObject row : rows) {
-            JSONObject item = new JSONObject(true);
-            item.put("type",row.getString("memoryType"));
-            item.put("subjectID",row.getLongValue("subjectID"));
-            item.put("content",row.getString("content"));
-            item.put("importance",row.getIntValue("importance"));
-            item.put("updateTime",row.getLongValue("updateTime"));
-            result.add(item);
-        }
-        return result;
-    }
-
-    String shortSummary(long groupID) {
-        JSONObject row = storage().queryOne("SELECT `shortSummary` FROM `"+STATE_TABLE+"` WHERE `groupID`=?",groupID);
-        return row == null || row.getString("shortSummary") == null || row.getString("shortSummary").isEmpty()
-                ? "暂无短期记忆。" : row.getString("shortSummary");
-    }
-
-    MemoryCursor memoryCursor(long groupID) {
-        JSONObject row = storage().queryOne(
-                "SELECT `lastMemoryTime`,`lastMemoryID` FROM `"+STATE_TABLE+"` WHERE `groupID`=?",groupID);
-        return row == null
-                ? new MemoryCursor(0L,0L)
-                : new MemoryCursor(row.getLongValue("lastMemoryTime"),row.getLongValue("lastMemoryID"));
-    }
-
-    int memoryCount(long groupID) {
-        List<JSONObject> rows = storage().query("SELECT COUNT(*) AS `count` FROM `"+MEMORY_TABLE+"` WHERE `groupID`=?",groupID);
-        return rows == null || rows.isEmpty() ? 0 : rows.get(0).getIntValue("count");
-    }
 
     void recordMessage(GroupMessageEvent event,String content,boolean isBot) {
         JSONObject sender = event.getSender();
@@ -1732,28 +1593,6 @@ public class RoleplayService {
     }
 
 
-    List<JSONObject> limitMemoryRows(List<JSONObject> rows,int maxChars) {
-        List<JSONObject> result = new ArrayList<>();
-        if (rows == null || rows.isEmpty()) return result;
-        int total = 0;
-        for (JSONObject row : rows) {
-            String userName = safe(row.getString("userName"));
-            String content = safe(row.getString("content"));
-            int length = userName.length() + content.length() + 8;
-            if (result.isEmpty() && length > maxChars) {
-                JSONObject copy = new JSONObject(true);
-                copy.putAll(row);
-                copy.put("content",content.length() > maxChars
-                        ? content.substring(0,maxChars) : content);
-                result.add(copy);
-                break;
-            }
-            if (!result.isEmpty() && total + length > maxChars) break;
-            result.add(row);
-            total += length;
-        }
-        return result;
-    }
 
 
     String extractContent(JSONArray message) {
@@ -2075,6 +1914,35 @@ public class RoleplayService {
 
     boolean isContinuation(long groupID,long userID) {
         return rateLimitService.isContinuation(groupID,userID);
+    }
+
+
+    String longMemoryText(long groupID,long userID,String query) {
+        return memoryQueryService.longMemoryText(groupID,userID,query);
+    }
+
+    JSONArray longMemories(long groupID) {
+        return memoryQueryService.longMemories(groupID);
+    }
+
+    JSONArray longMemories(long groupID,boolean excludeBlacklisted) {
+        return memoryQueryService.longMemories(groupID,excludeBlacklisted);
+    }
+
+    String shortSummary(long groupID) {
+        return memoryQueryService.shortSummary(groupID);
+    }
+
+    MemoryCursor memoryCursor(long groupID) {
+        return memoryQueryService.memoryCursor(groupID);
+    }
+
+    int memoryCount(long groupID) {
+        return memoryQueryService.memoryCount(groupID);
+    }
+
+    List<JSONObject> limitMemoryRows(List<JSONObject> rows,int maxChars) {
+        return memoryQueryService.limitMemoryRows(rows,maxChars);
     }
 
     StorageService storage() {
