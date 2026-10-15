@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.35.0.2301 | 2026-10-16 | `MBB-Roleplay` 第九轮类拆分：把回复结果解析、单条/合批发送、旧标签兼容、技能调用、风格化调用和动作校验从 `RoleplayService` 迁到独立的 `RoleplayReplyExecutor`，主服务保留技能包装入口；`RoleplayService` 从约 3324 行降到 3033 行。行为不变，回复分段、引用、旧标签和技能执行保持原链路 |
 | V0.5.34.0.2301 | 2026-10-16 | `MBB-Roleplay` 第八轮类拆分：把戳一戳事件过滤、戳一戳回合、成员信息读取、短回复截断和回戳动作从 `RoleplayService` 迁到独立的 `RoleplayPokeService`，主服务保留 `handlePoke` 入口；`RoleplayService` 从约 3455 行降到 3324 行。行为不变，情绪结算、短回复和回戳逻辑保持原实现 |
 | V0.5.33.0.2301 | 2026-10-16 | `MBB-Roleplay` 第七轮类拆分：把消息入口、合批窗口、批次刷新、同群串行和过期消息过滤从 `RoleplayService` 迁到独立的 `RoleplayBatchScheduler`，主服务保留 `handle` 入口；`RoleplayService` 从约 3612 行降到 3455 行。行为不变，合批、串行、待处理回合唤醒和线程池提交保持原链路 |
 | V0.5.32.0.2301 | 2026-10-16 | `MBB-Roleplay` 第六轮类拆分：把短期/长期/永久记忆提取、长期记忆合并、永久记忆合并、批量并发与重试从 `RoleplayService` 迁到独立的 `RoleplayMemoryUpdateService`，运行态 Map 和线程池仍由主服务统一持有；`RoleplayService` 从约 4170 行降到 3612 行。行为不变，记忆游标、合并快照、并发和重试逻辑保持原实现 |
