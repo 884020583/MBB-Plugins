@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.33.0.2301 | 2026-10-16 | `MBB-Roleplay` 第七轮类拆分：把消息入口、合批窗口、批次刷新、同群串行和过期消息过滤从 `RoleplayService` 迁到独立的 `RoleplayBatchScheduler`，主服务保留 `handle` 入口；`RoleplayService` 从约 3612 行降到 3455 行。行为不变，合批、串行、待处理回合唤醒和线程池提交保持原链路 |
 | V0.5.32.0.2301 | 2026-10-16 | `MBB-Roleplay` 第六轮类拆分：把短期/长期/永久记忆提取、长期记忆合并、永久记忆合并、批量并发与重试从 `RoleplayService` 迁到独立的 `RoleplayMemoryUpdateService`，运行态 Map 和线程池仍由主服务统一持有；`RoleplayService` 从约 4170 行降到 3612 行。行为不变，记忆游标、合并快照、并发和重试逻辑保持原实现 |
 | V0.5.31.0.2301 | 2026-10-16 | `MBB-Roleplay` 第五轮类拆分：把记忆备份、备份列表、恢复流程和短期/长期记忆导入导出从 `RoleplayService` 迁到独立的 `RoleplayMemoryBackupService`，主服务保留同名公开入口；`RoleplayService` 从约 4351 行降到 4170 行。行为不变，恢复前自动备份、路径校验和恢复结果统计保持原逻辑 |
 | V0.5.30.0.2301 | 2026-10-16 | `MBB-Roleplay` 第四轮类拆分：把系统提示词、静态块/动态块资料、输出格式和资料预算从 `RoleplayService` 迁到独立的 `RoleplayPromptAssembler`，主服务只保留调用入口；`RoleplayService` 从约 4567 行降到 4351 行。行为不变，提示词顺序和缓存前缀结构保持原样 |

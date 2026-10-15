@@ -70,6 +70,7 @@ public class RoleplayService {
     private final RoleplayPromptAssembler promptAssembler;
     private final RoleplayMemoryBackupService memoryBackupService;
     private final RoleplayMemoryUpdateService memoryUpdateService;
+    private final RoleplayBatchScheduler batchScheduler;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -88,19 +89,19 @@ public class RoleplayService {
     private final Map<String,RecentSticker> recentStickerMap = new ConcurrentHashMap<>();
     private final Map<String,Integer> pendingGenerationMap = new ConcurrentHashMap<>();
     //被并入延后回合的消息 ID，处理下一批时直接跳过，避免同一句话回两次
-    private final Set<Long> mergedMessageIDs = Collections.newSetFromMap(
+    final Set<Long> mergedMessageIDs = Collections.newSetFromMap(
             new ConcurrentHashMap<Long,Boolean>());
-    private final Object groupQueueLock = new Object();
-    private final Map<Long,Boolean> groupBusyMap = new HashMap<>();
+    final Object groupQueueLock = new Object();
+    final Map<Long,Boolean> groupBusyMap = new HashMap<>();
     //回合执行线程池：路由与生成都是长耗时 AI 调用，不再占用共享的定时任务线程
     private volatile ExecutorService turnExecutor;
     private volatile int turnThreads = 0;
     //后台任务线程池：记忆整理、情绪分析、识图这类长耗时调用同样不占共享定时线程
     private volatile ExecutorService backgroundExecutor;
     //合批缓冲：同一群在窗口内到达的消息先攒起来，窗口结束后当成一个回合处理
-    private final Map<Long,List<GroupMessageEvent>> batchBufferMap = new HashMap<>();
-    private final Map<Long,Integer> batchGenerationMap = new HashMap<>();
-    private final Map<Long,Long> batchBufferStartMap = new HashMap<>();
+    final Map<Long,List<GroupMessageEvent>> batchBufferMap = new HashMap<>();
+    final Map<Long,Integer> batchGenerationMap = new HashMap<>();
+    final Map<Long,Long> batchBufferStartMap = new HashMap<>();
     private static final Pattern REMEMBER_PAIR = Pattern.compile(
             "(?is)<\\s*remember\\s*>(.*?)<\\s*/\\s*remember\\s*>");
     private static final Pattern REMEMBER_OPEN = Pattern.compile(
@@ -307,6 +308,7 @@ public class RoleplayService {
         this.promptAssembler = new RoleplayPromptAssembler(this);
         this.memoryBackupService = new RoleplayMemoryBackupService(this);
         this.memoryUpdateService = new RoleplayMemoryUpdateService(this);
+        this.batchScheduler = new RoleplayBatchScheduler(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -432,7 +434,7 @@ public class RoleplayService {
     /**
      * 把一整个回合丢到独立线程池执行；线程池不可用时退回当前线程，保证功能不丢
      */
-    private void submitTurn(Runnable task) {
+    void submitTurn(Runnable task) {
         if (task == null) return;
         ExecutorService executor = turnExecutor;
         if (executor == null) {
@@ -478,180 +480,15 @@ public class RoleplayService {
      * 这样连续快速发言不会被逐条排队，旧消息也不会挤掉新消息。
      */
     public void handle(GroupMessageEvent event) {
-        if (event == null || !config.enable) return;
-        //已经并入延后回合的消息不再单独处理
-        if (event.getMessageID() > 0 && mergedMessageIDs.contains(event.getMessageID())) {
-            return;
-        }
-        long groupID = event.getGroupID();
-        if (groupID <= 0) {
-            processGroupMessage(event);
-            return;
-        }
-        boolean scheduled = false;
-        synchronized (groupQueueLock) {
-            List<GroupMessageEvent> buffer = batchBufferMap.get(groupID);
-            if (buffer == null) {
-                buffer = new ArrayList<>();
-                batchBufferMap.put(groupID,buffer);
-                batchBufferStartMap.put(groupID,System.currentTimeMillis());
-            }
-            if (buffer.size() >= config.messageBatchMaxMessages) {
-                //批内已满：优先丢掉最早的非点名消息，避免刷屏把关键消息挤出去
-                dropOldestBatchMessage(buffer);
-            }
-            buffer.add(event);
-            if (!Boolean.TRUE.equals(groupBusyMap.get(groupID))) {
-                groupBusyMap.put(groupID,true);
-                scheduled = true;
-            }
-        }
-        //该用户还在继续说，立刻结束他上一轮的表情包等待；图片和表情走识图链路，不在这里提前唤醒
-        if (!hasImageContent(event.getMessage()) && !hasStickerContent(event.getMessage())) {
-            wakePendingTurnForUser(groupID,event);
-        }
-        if (scheduled) scheduleBatchFlush(groupID);
+        batchScheduler.handle(event);
     }
 
-    /**
-     * 丢掉等太久又不是点名的消息，避免回复几十秒前已经翻篇的话题
-     */
-    private List<GroupMessageEvent> filterStaleBatchMessages(long groupID,
-                                                             List<GroupMessageEvent> batch) {
-        if (config.messageBatchMaxAgeSecond <= 0) return batch;
-        long now = System.currentTimeMillis();
-        long maxAge = config.messageBatchMaxAgeSecond * 1000L;
-        List<GroupMessageEvent> fresh = new ArrayList<>();
-        int dropped = 0;
-        for (GroupMessageEvent event : batch) {
-            long time = eventTimeMillis(event);
-            if (time <= 0 || now - time <= maxAge || isBatchMessageImportant(event)) {
-                fresh.add(event);
-            } else {
-                dropped++;
-            }
-        }
-        if (dropped > 0) {
-            plugin.getLogger().sendInfo("[角色] 群"+groupID+" 合批丢弃 "+dropped
-                    +" 条等待超过 "+config.messageBatchMaxAgeSecond+" 秒的过期消息");
-        }
-        return fresh;
-    }
-
-    private long eventTimeMillis(GroupMessageEvent event) {
-        if (event == null || event.getRaw() == null) return 0L;
-        long seconds = event.getRaw().getLongValue("time");
-        return seconds <= 0 ? 0L : seconds * 1000L;
-    }
-
-    /**
-     * 批内消息过多时丢掉一条最不重要的：优先丢最早的非点名消息
-     */
-    private void dropOldestBatchMessage(List<GroupMessageEvent> buffer) {
-        for (int i = 0; i < buffer.size(); i++) {
-            GroupMessageEvent item = buffer.get(i);
-            if (!isBatchMessageImportant(item)) {
-                buffer.remove(i);
-                return;
-            }
-        }
-        buffer.remove(0);
-    }
-
-    private boolean isBatchMessageImportant(GroupMessageEvent event) {
-        if (event == null || event.getRaw() == null) return false;
-        long selfID = event.getRaw().getLongValue("self_id");
-        if (selfID <= 0) return false;
-        return isMentioningSelf(event,selfID) || isQuotingSelf(event,selfID);
-    }
-
-    /**
-     * 窗口结束后处理这一批；处理期间到达的消息由下一次调度接手
-     */
-    private void scheduleBatchFlush(long groupID) {
-        int generation;
-        long delaySeconds;
-        synchronized (groupQueueLock) {
-            Integer current = batchGenerationMap.get(groupID);
-            generation = current == null ? 1 : current + 1;
-            batchGenerationMap.put(groupID,generation);
-            long window = config.messageBatchEnable ? config.messageBatchWindowSecond * 1000L : 0L;
-            Long start = batchBufferStartMap.get(groupID);
-            if (window <= 0) {
-                delaySeconds = 0;
-            } else if (start == null) {
-                delaySeconds = (window + 999) / 1000;
-            } else {
-                //批内最早的消息可能已经在上一批处理期间等满了窗口，这里只补剩余时间
-                long remain = window - (System.currentTimeMillis() - start);
-                delaySeconds = remain <= 0 ? 0 : (remain + 999) / 1000;
-            }
-        }
-        final int expected = generation;
-        plugin.getServer().getPluginManager().runTaskLater(plugin,
-                () -> flushBatch(groupID,expected),delaySeconds);
-    }
-
-    private void flushBatch(long groupID,int generation) {
-        List<GroupMessageEvent> batch = null;
-        synchronized (groupQueueLock) {
-            Integer current = batchGenerationMap.get(groupID);
-            if (current == null || current != generation) return;
-            batch = batchBufferMap.remove(groupID);
-        }
-        //定时任务线程只负责调度，真正耗时的路由与生成交给独立线程池
-        final List<GroupMessageEvent> taken = batch;
-        submitTurn(() -> runBatchTurn(groupID,taken));
-    }
-
-    private void runBatchTurn(long groupID,List<GroupMessageEvent> batch) {
-        boolean deferred = false;
-        try {
-            if (batch != null && !batch.isEmpty()) {
-                List<GroupMessageEvent> fresh = filterStaleBatchMessages(groupID,batch);
-                if (fresh.isEmpty()) {
-                    plugin.getLogger().sendInfo("[角色] 群"+groupID+" 合批消息全部过期，本轮跳过");
-                } else if (fresh.size() == 1) {
-                    deferred = processGroupMessage(fresh.get(0));
-                } else {
-                    deferred = processMessageBatch(groupID,fresh);
-                }
-            }
-        } catch (Exception e) {
-            plugin.getLogger().sendException(e);
-        }
-        //延后回合（表情包等待）还没出声，由 executePendingTurn 收尾，这里不能提前放行下一批
-        if (!deferred) finishTurn(groupID);
-    }
-
-    /**
-     * 回合真正结束（回复已发出或本轮放弃）后调用
-     *
-     * 同群串行化：上一回合没结束就不处理下一批，避免同一段连续发言被两个回合并发各回一次。
-     * 缓冲里还有消息时接着调度下一批，否则释放忙碌标记。
-     */
-    private void finishTurn(long groupID) {
-        boolean more;
-        synchronized (groupQueueLock) {
-            //已经收尾过的回合直接忽略，保证重复调用安全
-            if (!Boolean.TRUE.equals(groupBusyMap.get(groupID))) return;
-            List<GroupMessageEvent> next = batchBufferMap.get(groupID);
-            more = next != null && !next.isEmpty();
-            if (!more) {
-                batchBufferMap.remove(groupID);
-                batchGenerationMap.remove(groupID);
-                batchBufferStartMap.remove(groupID);
-                groupBusyMap.remove(groupID);
-            }
-        }
-        if (more) scheduleBatchFlush(groupID);
-    }
 
     /**
      * 单条消息入口：准备阶段通过后按单回合链路处理
      * 返回 true 表示这一轮交给了延后回合，调用方不能当成已结束
      */
-    private boolean processGroupMessage(GroupMessageEvent event) {
+    boolean processGroupMessage(GroupMessageEvent event) {
         PreparedMessage prepared = prepareMessage(event);
         if (prepared == null) return false;
         return handleSingleTurn(prepared);
@@ -851,7 +688,7 @@ public class RoleplayService {
      * 合批回合：先把批内每条消息各自过一遍准备阶段，再只做一次路由和一次生成
      * 返回 true 表示这一轮交给了延后回合，调用方不能当成已结束
      */
-    private boolean processMessageBatch(long groupID,List<GroupMessageEvent> batch) {
+    boolean processMessageBatch(long groupID,List<GroupMessageEvent> batch) {
         List<PreparedMessage> messages = new ArrayList<>();
         for (GroupMessageEvent event : batch) {
             PreparedMessage prepared = prepareMessage(event);
@@ -2266,6 +2103,12 @@ public class RoleplayService {
         return false;
     }
 
+    private long eventTimeMillis(GroupMessageEvent event) {
+        if (event == null || event.getRaw() == null) return 0L;
+        long seconds = event.getRaw().getLongValue("time");
+        return seconds <= 0 ? 0L : seconds * 1000L;
+    }
+
     private String senderName(GroupMessageEvent event) {
         JSONObject sender = event.getSender();
         String name = sender == null ? "" : sender.getString("card");
@@ -2515,7 +2358,7 @@ public class RoleplayService {
     /**
      * 这条消息是否引用了机器人自己的上一条消息
      */
-    private boolean isQuotingSelf(GroupMessageEvent event,long selfID) {
+    boolean isQuotingSelf(GroupMessageEvent event,long selfID) {
         JSONArray message = event.getMessage();
         if (message == null) return false;
         long lastBot = state(event.getGroupID()).lastBotMessageID;
@@ -2611,7 +2454,7 @@ public class RoleplayService {
     /**
      * 这条消息是否艾特了机器人自己
      */
-    private boolean isMentioningSelf(GroupMessageEvent event,long selfID) {
+    boolean isMentioningSelf(GroupMessageEvent event,long selfID) {
         if (selfID <= 0) return false;
         JSONArray message = event.getMessage();
         if (message == null) return false;
@@ -2997,7 +2840,7 @@ public class RoleplayService {
         return builder.toString().trim();
     }
 
-    private boolean hasImageContent(JSONArray message) {
+    boolean hasImageContent(JSONArray message) {
         if (message == null) return false;
         for (int i = 0; i < message.size(); i++) {
             JSONObject segment = message.getJSONObject(i);
@@ -3149,7 +2992,7 @@ public class RoleplayService {
     /**
      * 同一用户又发言时立刻结束他的表情包等待，不再让回合干等到窗口结束
      */
-    private void wakePendingTurnForUser(long groupID,GroupMessageEvent event) {
+    void wakePendingTurnForUser(long groupID,GroupMessageEvent event) {
         if (!config.stickerAttachWaitUntilNextMessage) return;
         long userID = event.getUserID();
         String key = recentImageKey(groupID,userID);
@@ -3215,7 +3058,7 @@ public class RoleplayService {
                     pending.relationship,content,result,pending.decision,pending.emotionEvent);
         } finally {
             //延后回合到这里才算结束，释放同群串行位并接着处理缓冲里的下一批
-            finishTurn(groupID);
+            batchScheduler.finishTurn(groupID);
         }
     }
 
@@ -3276,7 +3119,7 @@ public class RoleplayService {
         return direct || sameUserContinuation;
     }
 
-    private boolean hasStickerContent(JSONArray message) {
+    boolean hasStickerContent(JSONArray message) {
         if (message == null) return false;
         for (int i = 0; i < message.size(); i++) {
             JSONObject segment = message.getJSONObject(i);
