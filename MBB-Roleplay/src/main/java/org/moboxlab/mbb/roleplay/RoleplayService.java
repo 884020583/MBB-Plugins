@@ -83,6 +83,7 @@ public class RoleplayService {
     private final RoleplayMemoryQueryService memoryQueryService;
     private final RoleplayDrawNotifyService drawNotifyService;
     private final RoleplayGroupStatusService groupStatusService;
+    private final RoleplayMessagePreprocessor messagePreprocessor;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -285,6 +286,7 @@ public class RoleplayService {
         this.memoryQueryService = new RoleplayMemoryQueryService(this);
         this.drawNotifyService = new RoleplayDrawNotifyService(this);
         this.groupStatusService = new RoleplayGroupStatusService(this);
+        this.messagePreprocessor = new RoleplayMessagePreprocessor(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -475,7 +477,7 @@ public class RoleplayService {
         turnProcessor.wakePendingTurnForUser(groupID,event);
     }
 
-    private void markStickerRecognitionPending(long groupID,long userID) {
+    void markStickerRecognitionPending(long groupID,long userID) {
         turnProcessor.markStickerRecognitionPending(groupID,userID);
     }
 
@@ -487,141 +489,6 @@ public class RoleplayService {
      * 消息准备：过滤、识图、记流水、规则预判、情绪观察和提醒识别
      * 返回 null 表示这条消息本轮不需要角色出声
      */
-    PreparedMessage prepareMessage(GroupMessageEvent event) {
-        if (event == null || !config.enable) return null;
-        long groupID = event.getGroupID();
-        if (!isGroupEnabled(groupID)) return null;
-        //已经并入延后回合的消息不再单独成一轮
-        if (event.getMessageID() > 0 && mergedMessageIDs.remove(event.getMessageID())) {
-            plugin.getLogger().sendInfo("[角色] 群"+groupID+" 跳过已并入上一回合的消息 "
-                    +event.getMessageID());
-            return null;
-        }
-        long selfID = event.getRaw().getLongValue("self_id");
-        if (selfID > 0 && selfID == event.getUserID()) return null;
-        if (blacklistService.contains(groupID,event.getUserID())) {
-            plugin.getLogger().sendInfo("[角色] 群"+groupID+" 忽略黑名单用户 "
-                    +event.getUserID()+" 的消息");
-            return null;
-        }
-        if (containsIgnoredContent(event.getMessage())) return null;
-        String content = extractContent(event.getMessage());
-        if (content == null || content.trim().isEmpty()) return null;
-        if (isCommand(content)) return null;
-        boolean otherRoleBot = isOtherRoleBot(event,selfID);
-        boolean hasImage = hasImageContent(event.getMessage());
-        boolean hasSticker = hasStickerContent(event.getMessage());
-        //另一个角色机器人的图片和表情不进入识图与回复链路，避免两个机器人围着同一张图互聊
-        if (otherRoleBot && (hasImage || hasSticker)) {
-            plugin.getLogger().sendInfo("[角色] 群"+groupID+" 忽略其他角色机器人的图片或表情消息");
-            return null;
-        }
-        int otherRoleStreak = updateOtherRoleMessageStreak(groupID,otherRoleBot);
-        boolean addressedToOtherRole = isAddressedToOtherRole(event,content,selfID);
-        boolean addressedToOtherMember = config.addressedOtherMemberSkip
-                && mentionsOtherMember(event,selfID) && !mentionsSelfRole(event,content,selfID);
-        boolean multiRoleAddress = isMultiRoleAddress(event,content,selfID);
-        boolean direct = isDirect(event,content,selfID) || multiRoleAddress;
-        //免打扰名单：名单内的群员只在主动叫到角色时才得到回复，其他消息不进入回复链路
-        boolean quietAddressed = direct || mentionsSelfRole(event,content,selfID);
-        if (quietService.shouldStayQuiet(groupID,event.getUserID(),quietAddressed)) {
-            plugin.getLogger().sendInfo("[角色] 群"+groupID+" 用户"+event.getUserID()
-                    +" 在免打扰名单中且未叫到角色，本轮保持沉默");
-            return null;
-        }
-        replyFeedbackService.observeHumanMessage(groupID,event.getUserID(),content,event.getMessageID());
-        expressionService.observe(groupID,event.getUserID(),content);
-        String attentionTopic = attentionService.topicKey(content);
-        attentionService.observe(groupID,event.getUserID(),attentionTopic,direct,otherRoleBot);
-        boolean sameUserContinuation = isContinuation(groupID,event.getUserID());
-        boolean justRepliedToSameUser = justRepliedToSameUser(groupID,event.getUserID());
-        boolean groupActive = isGroupActive(groupID);
-        boolean interest = persona.matchesInterest(content);
-        boolean hasText = hasMeaningfulText(event.getMessage());
-        boolean pureImage = hasImage && !hasText;
-        RecentImage currentImage = null;
-        if (hasImage) {
-            if (hasSticker) {
-                markStickerRecognitionPending(groupID,event.getUserID());
-            }
-            currentImage = rememberImageContext(event,groupID);
-            //纯图片消息的识图交给独立异步任务，不占用这一组的处理线程
-            boolean asyncImage = pureImage && config.imageAsyncEnable;
-            if (!asyncImage && shouldUnderstandImages(event,content,direct,sameUserContinuation)) {
-                content = enrichImageContent(event,content,groupID,currentImage);
-                addressedToOtherRole = isAddressedToOtherRole(event,content,selfID);
-                multiRoleAddress = isMultiRoleAddress(event,content,selfID);
-                direct = isDirect(event,content,selfID) || multiRoleAddress;
-                interest = persona.matchesInterest(content);
-            }
-        }
-        RecentImage replyImage = currentImage;
-        if (!hasImage) replyImage = findRecentImageContext(groupID,event.getUserID(),content);
-        boolean recentImageQuestion = !hasImage && replyImage != null;
-        recordMessage(event,content,false);
-        contextService.recordTopic(groupID,content,false);
-        int count = countMessage(groupID);
-        if (count >= config.memoryUpdateMessages) {
-            rateLimitService.resetGroup(groupID);
-            triggerMemory(groupID,"定时整理");
-        }
-        if (pureImage) {
-            if (config.imageAsyncEnable) {
-                dispatchImageUnderstanding(event,groupID,currentImage,hasSticker,
-                        direct,sameUserContinuation);
-            } else if (hasSticker) {
-                String emotion = content == null || content.trim().isEmpty() ? "[表情包]" : content.trim();
-                finishStickerRecognition(groupID,event.getUserID(),emotion);
-            }
-            return null;
-        }
-        RoleplayDecisionEngine.Signals signals = new RoleplayDecisionEngine.Signals();
-        signals.otherRoleBot = otherRoleBot;
-        signals.otherRoleStreak = otherRoleStreak;
-        signals.addressedToOtherRole = addressedToOtherRole;
-        signals.addressedToOtherMember = addressedToOtherMember;
-        signals.reminderNotification = isReminderNotification(content);
-        signals.direct = direct;
-        signals.quotingSelf = isQuotingSelf(event,selfID);
-        signals.mentioningSelf = isMentioningSelf(event,selfID);
-        signals.sameUserContinuation = sameUserContinuation;
-        signals.justRepliedToSameUser = justRepliedToSameUser;
-        //只在"刚回复过同一用户"时才需要查上一条，省一次数据库查询
-        signals.completesPreviousMessage = justRepliedToSameUser
-                && completesPreviousIncomplete(groupID,event.getUserID());
-        signals.groupActive = groupActive;
-        signals.interest = interest;
-        signals.recentImageQuestion = recentImageQuestion;
-        signals.contentLength = content.length();
-        RoleplayContextService.TopicFatigue topicFatigue = contextService.topicFatigue(groupID,content);
-        signals.topicFatigued = topicFatigue.fatigued();
-        signals.topicHint = topicFatigue.hint();
-        String skipReason = RoleplayDecisionEngine.skipReason(config,signals);
-        if (skipReason != null) return null;
-        RoleplayEmotionService.LocalEvent emotionEvent = emotionService.observeMessage(
-                groupID,event.getUserID(),senderName(event),relationshipLabel(event,otherRoleBot),
-                content,event.getMessageID(),direct,otherRoleBot);
-        if (!otherRoleBot && reminderService.handle(event,content)) return null;
-        //引用回复：把被引用的那条消息一并带给模型，否则角色看不到对方在回哪句话
-        String quoted = quotedText(groupID,event);
-        PreparedMessage prepared = new PreparedMessage();
-        prepared.event = event;
-        prepared.groupID = groupID;
-        prepared.selfID = selfID;
-        prepared.userID = event.getUserID();
-        prepared.userName = senderName(event);
-        prepared.relationship = relationshipLabel(event,otherRoleBot);
-        prepared.content = quoted.isEmpty() ? content : quoted+content;
-        prepared.otherRoleBot = otherRoleBot;
-        prepared.direct = direct;
-        prepared.hasImage = hasImage;
-        prepared.stickerEmotion = recentStickerEmotion(groupID,event.getUserID());
-        prepared.imageContext = replyImage;
-        prepared.signals = signals;
-        prepared.emotionEvent = emotionEvent;
-        prepared.attentionTopic = attentionTopic;
-        return prepared;
-    }
 
 
     /**
@@ -1815,6 +1682,11 @@ public class RoleplayService {
 
     public void clearMemory(long groupID) {
         groupStatusService.clearMemory(groupID);
+    }
+
+
+    RoleplayService.PreparedMessage prepareMessage(GroupMessageEvent event) {
+        return messagePreprocessor.prepareMessage(event);
     }
 
     StorageService storage() {
