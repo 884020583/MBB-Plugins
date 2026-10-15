@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.47.0.2301 | 2026-10-16 | `MBB-Roleplay` 第二十一轮类拆分：把消息表、记忆表、状态表、群表、话题表、补列、索引和过期清理从 `RoleplayService.init` 迁到独立的 `RoleplaySchemaService`，主服务初始化只保留服务加载顺序；`RoleplayService` 从约 1696 行降到约 1638 行。行为不变，建表顺序、补列和索引保持原实现 |
 | V0.5.46.0.2301 | 2026-10-16 | `MBB-Roleplay` 第二十轮类拆分：把消息过滤、识图触发、消息流水、情绪观察、提醒识别、规则信号组装和 PreparedMessage 构造从 `RoleplayService` 迁到独立的 `RoleplayMessagePreprocessor`，主服务保留 `prepareMessage` 包装入口；`RoleplayService` 从约 1824 行降到约 1696 行。行为不变，过滤顺序、识图模式、情绪观察和规则信号保持原实现 |
 | V0.5.45.0.2301 | 2026-10-16 | `MBB-Roleplay` 第十九轮类拆分：把群启用状态、上下文 token 生成/轮换、状态卡片数据、群列表、记忆统计和清空记忆从 `RoleplayService` 迁到独立的 `RoleplayGroupStatusService`，主服务保留状态与群管理包装入口；`RoleplayService` 从约 1870 行降到约 1824 行。行为不变，SQLite 查询、上下文 token 轮换和清空范围保持原实现 |
 | V0.5.44.0.2301 | 2026-10-16 | `MBB-Roleplay` 第十八轮类拆分：把生图完成/失败回调、回调文案生成、AI 提醒调用、兜底文案和群内艾特发送从 `RoleplayService` 迁到独立的 `RoleplayDrawNotifyService`，主服务保留四个公开回调入口；`RoleplayService` 从约 1970 行降到约 1870 行。行为不变，生图回调日志、AI 调用参数和兜底文案保持原实现 |

@@ -84,6 +84,7 @@ public class RoleplayService {
     private final RoleplayDrawNotifyService drawNotifyService;
     private final RoleplayGroupStatusService groupStatusService;
     private final RoleplayMessagePreprocessor messagePreprocessor;
+    private final RoleplaySchemaService schemaService;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -287,64 +288,14 @@ public class RoleplayService {
         this.drawNotifyService = new RoleplayDrawNotifyService(this);
         this.groupStatusService = new RoleplayGroupStatusService(this);
         this.messagePreprocessor = new RoleplayMessagePreprocessor(this);
+        this.schemaService = new RoleplaySchemaService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
     }
 
     public void init() {
-        storage().update("CREATE TABLE IF NOT EXISTS `"+MSG_TABLE+"` ("
-                + "`ID` INTEGER PRIMARY KEY AUTOINCREMENT,"
-                + "`messageID` INTEGER NOT NULL DEFAULT 0,"
-                + "`groupID` INTEGER NOT NULL DEFAULT 0,"
-                + "`userID` INTEGER NOT NULL DEFAULT 0,"
-                + "`userName` TEXT NOT NULL DEFAULT '',"
-                + "`messageTime` INTEGER NOT NULL DEFAULT 0,"
-                + "`content` TEXT NOT NULL DEFAULT '',"
-                + "`isBot` INTEGER NOT NULL DEFAULT 0"
-                + ")");
-        storage().update("CREATE TABLE IF NOT EXISTS `"+MEMORY_TABLE+"` ("
-                + "`ID` INTEGER PRIMARY KEY AUTOINCREMENT,"
-                + "`groupID` INTEGER NOT NULL DEFAULT 0,"
-                + "`memoryType` TEXT NOT NULL DEFAULT '',"
-                + "`subjectID` INTEGER NOT NULL DEFAULT 0,"
-                + "`content` TEXT NOT NULL DEFAULT '',"
-                + "`importance` INTEGER NOT NULL DEFAULT 1,"
-                + "`updateTime` INTEGER NOT NULL DEFAULT 0"
-                + ")");
-        storage().update("CREATE TABLE IF NOT EXISTS `"+STATE_TABLE+"` ("
-                + "`ID` INTEGER PRIMARY KEY AUTOINCREMENT,"
-                + "`groupID` INTEGER NOT NULL DEFAULT 0 UNIQUE,"
-                + "`shortSummary` TEXT NOT NULL DEFAULT '',"
-                + "`lastMemoryTime` INTEGER NOT NULL DEFAULT 0,"
-                + "`lastMemoryID` INTEGER NOT NULL DEFAULT 0,"
-                + "`lastMergeTime` INTEGER NOT NULL DEFAULT 0,"
-                + "`updateTime` INTEGER NOT NULL DEFAULT 0"
-                + ")");
-        ensureColumn(STATE_TABLE,"lastMemoryID","INTEGER NOT NULL DEFAULT 0");
-        ensureColumn(STATE_TABLE,"lastMergeTime","INTEGER NOT NULL DEFAULT 0");
-        storage().update("CREATE TABLE IF NOT EXISTS `"+GROUP_TABLE+"` ("
-                + "`ID` INTEGER PRIMARY KEY AUTOINCREMENT,"
-                + "`groupID` INTEGER NOT NULL DEFAULT 0 UNIQUE,"
-                + "`enabled` INTEGER NOT NULL DEFAULT 0,"
-                + "`contextToken` TEXT NOT NULL DEFAULT '',"
-                + "`updateTime` INTEGER NOT NULL DEFAULT 0"
-                + ")");
-        storage().update("CREATE TABLE IF NOT EXISTS `"+TOPIC_TABLE+"` ("
-                + "`ID` INTEGER PRIMARY KEY AUTOINCREMENT,"
-                + "`groupID` INTEGER NOT NULL DEFAULT 0,"
-                + "`topicKey` TEXT NOT NULL DEFAULT '',"
-                + "`lastTime` INTEGER NOT NULL DEFAULT 0,"
-                + "`count` INTEGER NOT NULL DEFAULT 0,"
-                + "`selfCount` INTEGER NOT NULL DEFAULT 0,"
-                + "`lastSelfTime` INTEGER NOT NULL DEFAULT 0,"
-                + "`updateTime` INTEGER NOT NULL DEFAULT 0,"
-                + "UNIQUE(`groupID`,`topicKey`)"
-                + ")");
-        storage().update("DELETE FROM `"+TOPIC_TABLE+"` WHERE `updateTime`<?",
-                System.currentTimeMillis() - Math.max(1,config.topicFatigueKeepHours) * 3600000L);
-        ensureColumn(GROUP_TABLE,"contextToken","TEXT NOT NULL DEFAULT ''");
-        storage().update("CREATE INDEX IF NOT EXISTS `idx_plugin_mbb_roleplay_msg_group` ON `"+MSG_TABLE+"` (`groupID`,`messageTime`)");
+        schemaService.initSchema();
         reminderService.init();
         globalMemoryService.init();
         speechCorpusService.init();
@@ -1360,15 +1311,6 @@ public class RoleplayService {
 
 
 
-    private void ensureColumn(String table,String column,String definition) {
-        List<JSONObject> columns = storage().query("PRAGMA table_info(`"+table+"`)");
-        if (columns != null) {
-            for (JSONObject item : columns) {
-                if (column.equalsIgnoreCase(safe(item.getString("name")))) return;
-            }
-        }
-        storage().update("ALTER TABLE `"+table+"` ADD COLUMN `"+column+"` "+definition);
-    }
 
 
     String safe(String value) {
