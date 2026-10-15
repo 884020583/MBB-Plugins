@@ -51,7 +51,6 @@ public class RoleplayService {
     /** 引用回复里被引用内容的截断长度 */
     private static final int QUOTE_CONTEXT_MAX_CHARS = 60;
     /** 分句时优先保留的句末标点 */
-    private static final String STRONG_SPLIT_PUNCTUATION = "。！？!?…";
 
     private final Plugin plugin;
     private final RoleplayReminderService reminderService;
@@ -67,6 +66,7 @@ public class RoleplayService {
     private final RoleplayExpressionService expressionService;
     private final RoleplayAttentionService attentionService;
     private final RoleplayDailyReviewService dailyReviewService;
+    private final RoleplayMessageSender messageSender;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
@@ -100,8 +100,6 @@ public class RoleplayService {
     private final Map<Long,Long> batchBufferStartMap = new HashMap<>();
     private static final Pattern REMEMBER_PAIR = Pattern.compile(
             "(?is)<\\s*remember\\s*>(.*?)<\\s*/\\s*remember\\s*>");
-    private static final Pattern REPLY_URL_PATTERN = Pattern.compile(
-            "(?i)(https?://\\S+|www\\.\\S+|\\b[\\w-]+\\.(?:com|cn|net|org|io|ai|top|xyz|me|tv)(?:/\\S*)?)");
     private static final Set<String> TOPIC_STOPWORDS = new LinkedHashSet<>();
     static {
         Collections.addAll(TOPIC_STOPWORDS,
@@ -328,6 +326,7 @@ public class RoleplayService {
         this.expressionService = new RoleplayExpressionService(plugin,config);
         this.attentionService = new RoleplayAttentionService(plugin,config);
         this.dailyReviewService = new RoleplayDailyReviewService(plugin,config,this);
+        this.messageSender = new RoleplayMessageSender(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -1033,7 +1032,7 @@ public class RoleplayService {
         if (sendText) ensurePokeBackAction(draft,decision,reply);
         OneBotClient client = plugin.getServer().getOneBotClient();
         if (sendText && client != null) {
-            sendReply(client,groupID,selfID,event.getUserID(),reply,
+            messageSender.sendReply(client,groupID,selfID,event.getUserID(),reply,
                     decision != null && decision.quoteRequired,draft.quote,event.getMessageID());
         }
         executeSkillCalls(decision,draft,groupID,event.getUserID(),event.getMessageID(),selfID,
@@ -1114,11 +1113,11 @@ public class RoleplayService {
                 boolean quote = config.quoteReplyEnable && quoteAllowed
                         && (forceQuote || segment.quote) && quoteMessageID > 0;
                 //和单回合保持一致：段内换行按多段发送，引用只挂在第一段上
-                List<String> parts = splitReply(reply);
+                List<String> parts = messageSender.splitReply(reply);
                 int partLimit = Math.min(parts.size(),Math.max(1,config.replyMaxSegments));
                 for (int p = 0; p < partLimit && sent < messageBudget; p++) {
                     if (p > 0 && !sleepQuietly(250L)) break;
-                    if (!sendSingleMessage(client,groupID,selfID,target.userID,parts.get(p),
+                    if (!messageSender.sendSingleMessage(client,groupID,selfID,target.userID,parts.get(p),
                             quote && p == 0,quoteMessageID)) break;
                     if (!responded.contains(target)) responded.add(target);
                     sent++;
@@ -1288,7 +1287,7 @@ public class RoleplayService {
         }
         OneBotClient client = plugin.getServer().getOneBotClient();
         if (sendText && client != null) {
-            sendSingleMessage(client,groupID,selfID,userID,text,false,0L);
+            messageSender.sendSingleMessage(client,groupID,selfID,userID,text,false,0L);
         }
         plugin.getLogger().sendInfo("[角色] 戳一戳 群"+groupID+" 用户"+userID
                 +" 回复="+(sendText ? shortText(text,60) : "无"));
@@ -1304,12 +1303,12 @@ public class RoleplayService {
         String value = safe(text).replaceAll("\\s+"," ").trim();
         int maxChars = Math.max(8,config.pokeReplyMaxChars);
         if (value.length() <= maxChars) return value;
-        int cut = findSplitCut(value,maxChars,true);
-        if (cut <= 0) cut = findSplitCut(value,maxChars,false);
+        int cut = messageSender.findSplitCut(value,maxChars,true);
+        if (cut <= 0) cut = messageSender.findSplitCut(value,maxChars,false);
         if (cut <= 0) cut = maxChars;
         String result = value.substring(0,cut).trim();
-        if (cut < value.length() && isWeakSplitPunctuation(value.charAt(cut - 1))) {
-            result = trimWeakSplitPunctuation(result);
+        if (cut < value.length() && messageSender.isWeakSplitPunctuation(value.charAt(cut - 1))) {
+            result = messageSender.trimWeakSplitPunctuation(result);
         }
         if (result.isEmpty()) result = value.substring(0,maxChars).trim();
         return result;
@@ -1578,6 +1577,10 @@ public class RoleplayService {
     }
 
     public RoleplayReplyFeedbackService getReplyFeedbackService() {
+        return replyFeedbackService;
+    }
+
+    RoleplayReplyFeedbackService replyFeedbackService() {
         return replyFeedbackService;
     }
 
@@ -3286,67 +3289,14 @@ public class RoleplayService {
                 System.currentTimeMillis(),content,isBot ? 1 : 0);
     }
 
-    private void recordBotMessage(long groupID,long botID,String content,long messageID) {
+    void recordBotMessage(long groupID,long botID,String content,long messageID) {
         storage().insert("INSERT INTO `"+MSG_TABLE+"` (`messageID`,`groupID`,`userID`,`userName`,`messageTime`,`content`,`isBot`) VALUES (?,?,?,?,?,?,?)",
                 messageID,groupID,botID,"角色",System.currentTimeMillis(),content,1);
         recordTopic(groupID,content,true);
     }
 
-    private void sendReply(OneBotClient client,long groupID,long selfID,long userID,String reply,
-                           boolean quoteRequired,boolean quoteSuggested,long quoteMessageID) {
-        List<String> segments = splitReply(reply);
-        if (segments.isEmpty()) return;
-        // 引用由规则强制或模型建议，取或；没有可引用的消息 ID 时退化为普通发送
-        boolean quote = config.quoteReplyEnable
-                && (quoteRequired || quoteSuggested) && quoteMessageID > 0;
-        int count = Math.min(segments.size(),config.replyMaxSegments);
-        for (int i = 0; i < count; i++) {
-            sendSingleMessage(client,groupID,selfID,userID,segments.get(i),quote && i == 0,
-                    quoteMessageID);
-            if (i + 1 < count) {
-                //发送失败或线程被中断都不再继续补后面的分段
-                if (!sleepQuietly(250L)) return;
-            }
-        }
-    }
 
-    /**
-     * 发送单条消息并登记发言状态，供普通分段和合批分段共用
-     */
-    private boolean sendSingleMessage(OneBotClient client,long groupID,long selfID,long userID,
-                                      String text,boolean quote,long quoteMessageID) {
-        if (client == null || text == null || text.trim().isEmpty()) return false;
-        text = filterReplyLinks(groupID,text);
-        if (text.isEmpty()) return false;
-        JSONArray message = quote && quoteMessageID > 0
-                ? MessageUtil.message(MessageUtil.reply(quoteMessageID),MessageUtil.text(text))
-                : MessageUtil.message(MessageUtil.text(text));
-        JSONObject response = client.sendGroupMessage(groupID,message);
-        if (response == null || response.getIntValue("retcode") != 0) return false;
-        long messageID = response.getJSONObject("data") == null
-                ? 0L : response.getJSONObject("data").getLongValue("message_id");
-        RoleplayConversationState state = state(groupID);
-        state.lastBotMessageID = messageID;
-        state.lastReplyUser = userID;
-        state.botStreak++;
-        recordBotMessage(groupID,selfID,text,messageID);
-        replyFeedbackService.onBotMessage(groupID,messageID,text);
-        return true;
-    }
-
-    private String filterReplyLinks(long groupID,String text) {
-        String value = safe(text);
-        if (!config.replyLinkFilterEnable || value.isEmpty()) return value;
-        String filtered = REPLY_URL_PATTERN.matcher(value).replaceAll(" ")
-                .replaceAll("\\s+"," ").trim();
-        if (!filtered.equals(value)) {
-            plugin.getLogger().sendInfo("[角色] 群"+groupID+" 已过滤模型输出链接："
-                    +shortText(value,120));
-        }
-        return filtered;
-    }
-
-    private boolean sleepQuietly(long millis) {
+    boolean sleepQuietly(long millis) {
         try {
             Thread.sleep(millis);
             return true;
@@ -3462,22 +3412,6 @@ public class RoleplayService {
         return call;
     }
 
-    private List<String> splitReply(String text) {
-        List<String> result = new ArrayList<>();
-        if (text == null || text.trim().isEmpty()) return result;
-        String normalized = text.replace("\\n","\n").replace("\r\n","\n").replace("\r","\n");
-        String[] paragraphs = normalized.split("\n");
-        for (String paragraph : paragraphs) {
-            String value = paragraph.replaceAll("\\s+"," ").trim();
-            if (value.isEmpty()) continue;
-            if (value.length() <= config.replySegmentMaxChars) {
-                result.add(value);
-            } else {
-                addParagraph(result,value,config.replySegmentMaxChars);
-            }
-        }
-        return result;
-    }
 
     private boolean isCommand(String content) {
         String text = content == null ? "" : content.trim();
@@ -3488,60 +3422,6 @@ public class RoleplayService {
             if (!prefix.trim().isEmpty() && text.startsWith(prefix.trim())) return true;
         }
         return false;
-    }
-
-    private void addParagraph(List<String> result,String text,int maxChars) {
-        while (text.length() > maxChars) {
-            int cut = findSplitCut(text,maxChars,true);
-            if (cut <= 0) cut = findSplitCut(text,maxChars,false);
-            if (cut <= 0) cut = maxChars;
-            //省略号是「……」，别把它从中间劈开：整对挪到下一段，这样既不拆散也不超上限
-            if (cut > 0 && cut < text.length() && text.charAt(cut) == '…') {
-                int runStart = cut;
-                while (runStart > 0 && text.charAt(runStart - 1) == '…') runStart--;
-                if (runStart > 0) {
-                    cut = runStart;
-                } else {
-                    while (cut < text.length() && text.charAt(cut) == '…') cut++;
-                }
-            }
-            String segment = trimWeakSplitPunctuation(text.substring(0,cut).trim());
-            if (!segment.isEmpty()) result.add(segment);
-            text = text.substring(cut).trim();
-        }
-        if (!text.isEmpty()) result.add(text);
-    }
-
-    private int findSplitCut(String text,int maxChars,boolean strong) {
-        int start = Math.max(0,maxChars - 20);
-        for (int i = Math.min(maxChars - 1,text.length() - 1); i >= start; i--) {
-            char value = text.charAt(i);
-            if (strong ? isStrongSplitPunctuation(value) : isWeakSplitPunctuation(value)) {
-                return i + 1;
-            }
-        }
-        return -1;
-    }
-
-    private boolean isSplitPunctuation(char value) {
-        String punctuation = config.replySplitPunctuation;
-        return punctuation != null && punctuation.indexOf(value) >= 0;
-    }
-
-    private boolean isStrongSplitPunctuation(char value) {
-        return isSplitPunctuation(value) && STRONG_SPLIT_PUNCTUATION.indexOf(value) >= 0;
-    }
-
-    private boolean isWeakSplitPunctuation(char value) {
-        return isSplitPunctuation(value) && !isStrongSplitPunctuation(value);
-    }
-
-    private String trimWeakSplitPunctuation(String text) {
-        String value = text == null ? "" : text.trim();
-        while (!value.isEmpty() && isWeakSplitPunctuation(value.charAt(value.length() - 1))) {
-            value = value.substring(0,value.length() - 1).trim();
-        }
-        return value;
     }
 
     private String senderName(GroupMessageEvent event) {
@@ -3746,7 +3626,7 @@ public class RoleplayService {
         }
     }
 
-    private RoleplayConversationState state(long groupID) {
+    RoleplayConversationState state(long groupID) {
         RoleplayConversationState existing = conversationStateMap.get(groupID);
         if (existing != null) return existing;
         RoleplayConversationState created = new RoleplayConversationState();
@@ -4261,7 +4141,7 @@ public class RoleplayService {
         return result;
     }
 
-    private String shortText(String text,int maxChars) {
+    String shortText(String text,int maxChars) {
         String value = safe(text).replace("\n"," ").trim();
         if (value.length() <= maxChars) return value;
         return value.substring(0,maxChars)+"...";
