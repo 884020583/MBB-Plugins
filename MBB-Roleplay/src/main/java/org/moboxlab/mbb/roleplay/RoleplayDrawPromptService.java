@@ -129,6 +129,7 @@ public class RoleplayDrawPromptService {
         target.appearance = persona.appearance;
         target.imageTags.addAll(persona.imageTags);
         target.negativeTags.addAll(persona.imageNegativeTags);
+        target.aliases.addAll(persona.aliases);
         target.canonicalTag = target.imageTags.isEmpty() ? persona.name : target.imageTags.get(0);
         if (target.imageTags.isEmpty()) target.imageTags.add(target.canonicalTag);
         return target;

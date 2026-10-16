@@ -158,6 +158,10 @@ public class RoleplayKnowledgeService {
         target.imageTags.add(target.canonicalTag);
         target.imageTags.add("blue archive");
         target.imageTags.add("1girl");
+        for (String tag : entry.visualTags) {
+            if (!target.imageTags.contains(tag)) target.imageTags.add(tag);
+        }
+        target.aliases.addAll(entry.aliases);
         return target;
     }
 
@@ -509,6 +513,7 @@ public class RoleplayKnowledgeService {
         entry.aliases = splitList(value(fields,"aliases",""));
         entry.tags = splitList(value(fields,"tags",""));
         entry.keywords = splitList(value(fields,"keywords",""));
+        entry.visualTags = splitList(value(fields,"visualTags",""));
         entry.school = value(fields,"school","");
         entry.club = value(fields,"club","");
         entry.category = value(fields,"category","");

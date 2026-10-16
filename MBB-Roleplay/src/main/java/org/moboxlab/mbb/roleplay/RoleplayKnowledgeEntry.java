@@ -35,6 +35,7 @@ public class RoleplayKnowledgeEntry {
     public List<String> aliases = new ArrayList<>();
     public List<String> tags = new ArrayList<>();
     public List<String> keywords = new ArrayList<>();
+    public List<String> visualTags = new ArrayList<>();
     public String school = "";
     public String club = "";
     public String category = "";

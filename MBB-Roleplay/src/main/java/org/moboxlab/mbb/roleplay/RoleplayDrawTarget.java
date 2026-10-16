@@ -14,6 +14,7 @@ public class RoleplayDrawTarget {
     public boolean currentRole;
     public List<String> imageTags = new ArrayList<>();
     public List<String> negativeTags = new ArrayList<>();
+    public List<String> aliases = new ArrayList<>();
 
     public String tagText() {
         return String.join(", ",imageTags);
