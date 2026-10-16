@@ -42,10 +42,10 @@ flowchart LR
 
 生图不再由角色层直接写最终 booru prompt，而是拆成两段：
 
-1. 角色层只输出结构化 `brief`：主体、动作、表情、服装、场景、构图、尺寸、必须出现和禁止出现；
-2. `RoleplayDrawPromptService` 用独立上下文把 `brief` 编译成最终 prompt，并注入当前角色的 `imageTags`、`imageNegativeTags`、外貌资料和当前角色知识库条目。
+1. 角色层只输出结构化 `brief`：目标角色、主体、动作、表情、服装、场景、构图、尺寸、必须出现和禁止出现；
+2. `RoleplayDrawPromptService` 用独立上下文把 `brief` 编译成最终 prompt，并按 `brief.characters/subject` 解析目标角色，注入对应角色的 `imageTags`、`imageNegativeTags`、外貌资料和知识库条目。
 
-编译器只取当前角色自己的学生条目，不会把凯伊、柯伊或其他同源角色的外貌一起注入。编译完成后 `RoleplayDrawPromptValidator` 会做本地质检：把其他角色和冲突外貌词从正向 prompt 移到负向 prompt，强制当前角色 canonical tag 和人数标签。最终交给 `MBB-ComfyUI` 的是 `prompt + negativePrompt + size + camera`，其中 `negativePrompt` 会追加到 ComfyUI 全局负向词后面。
+编译器只取目标角色自己的学生条目，不会把其他角色或同源角色的外貌一起注入。用户让角色画别人时，目标角色就是别人，不会自动把当前角色画进画面。编译完成后 `RoleplayDrawPromptValidator` 会做本地质检：把其他角色和冲突外貌词从正向 prompt 移到负向 prompt，强制目标角色 canonical tag 和人数标签。最终交给 `MBB-ComfyUI` 的是 `prompt + negativePrompt + size + camera`，其中 `negativePrompt` 会追加到 ComfyUI 全局负向词后面。
 
 ## 戳一戳与引用
 

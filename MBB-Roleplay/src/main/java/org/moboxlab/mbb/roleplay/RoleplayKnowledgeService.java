@@ -142,6 +142,64 @@ public class RoleplayKnowledgeService {
         return builder.length() <= "当前角色生图外貌参考：\n".length() ? "" : builder.toString();
     }
 
+    /**
+     * 生图编译器用：按名字或别名解析一个可绘制角色。
+     */
+    public RoleplayDrawTarget findCharacterTarget(String name) {
+        RoleplayKnowledgeLibrary library = studentsLibrary();
+        if (library == null || name == null || name.trim().isEmpty()) return null;
+        RoleplayKnowledgeEntry entry = findCharacterEntry(library,name.trim());
+        if (entry == null) return null;
+        RoleplayDrawTarget target = new RoleplayDrawTarget();
+        target.id = entry.id;
+        target.name = entry.name;
+        target.canonicalTag = canonicalTag(entry);
+        target.appearance = appearanceText(entry,1800);
+        target.imageTags.add(target.canonicalTag);
+        target.imageTags.add("blue archive");
+        target.imageTags.add("1girl");
+        return target;
+    }
+
+    private RoleplayKnowledgeEntry findCharacterEntry(RoleplayKnowledgeLibrary library,String name) {
+        for (RoleplayKnowledgeEntry entry : library.entries) {
+            if (entry == null) continue;
+            if (matchesCharacterName(entry.name,name)) return entry;
+            for (String alias : entry.aliases) {
+                if (matchesCharacterName(alias,name)) return entry;
+            }
+        }
+        return null;
+    }
+
+    private boolean matchesCharacterName(String left,String right) {
+        String a = normalizedCharacterName(left);
+        String b = normalizedCharacterName(right);
+        return !a.isEmpty() && a.equals(b);
+    }
+
+    private String normalizedCharacterName(String value) {
+        String text = value == null ? "" : value.trim().toLowerCase(java.util.Locale.ROOT);
+        int index = text.indexOf('(');
+        if (index > 0) text = text.substring(0,index);
+        return text.replace('_',' ').replaceAll("\\s+"," ").trim();
+    }
+
+    private String canonicalTag(RoleplayKnowledgeEntry entry) {
+        String id = entry.id == null ? "" : entry.id.trim();
+        if (!id.isEmpty() && id.matches("[A-Za-z0-9_\\-]+")) {
+            return id.toLowerCase(java.util.Locale.ROOT)+" (blue archive)";
+        }
+        return entry.name;
+    }
+
+    private String appearanceText(RoleplayKnowledgeEntry entry,int maxChars) {
+        StringBuilder builder = new StringBuilder();
+        appendAppearanceSection(builder,entry,"外貌",maxChars);
+        appendAppearanceSection(builder,entry,"变体",maxChars);
+        return builder.toString().trim();
+    }
+
     private RoleplayKnowledgeEntry findCurrentCharacterEntry(RoleplayKnowledgeLibrary library,
                                                              RoleplayPersona persona) {
         for (RoleplayKnowledgeEntry entry : library.entries) {

@@ -221,11 +221,25 @@ public class RoleplayPromptAssembler {
     }
 
     private String outputFormatTail(RoleplayRouteDecision decision,int batchCount) {
-        if (batchCount > 1) return actionPrompt(decision);
+        if (batchCount > 1) return actionPrompt(decision)+drawOutputContext(decision);
         return (decision != null && decision.quoteRequired
                 ? "这条消息正在直接回复或艾特你，quote 必须为 true。"
                 : "如果引用当前这条消息会让对话更自然，可以把 quote 设为 true，否则保持 false。")
-                +actionPrompt(decision);
+                +actionPrompt(decision)+drawOutputContext(decision);
+    }
+
+    /**
+     * draw 技能额外输出上下文：角色层只写 brief，目标角色按用户要求解析。
+     */
+    private String drawOutputContext(RoleplayRouteDecision decision) {
+        if (decision == null || decision.actions == null || !decision.actions.contains("draw")) {
+            return "";
+        }
+        return "本轮使用 draw 时，必须输出 brief，不要直接写最终 booru prompt；"
+                +"brief.characters 写用户要求画面的目标角色，brief.subject 写画面主体。"
+                +"如果用户让当前角色画别人，目标角色就是别人，不要把当前角色自动当成主体；"
+                +"只有用户明确要求画当前角色本人时，brief.characters 才填当前角色。"
+                +"画其他角色时不要在 brief 里写当前角色的外貌特征，编译层会按目标角色补全 canonical tag。";
     }
 
     private String memoryQuery(String messageText,RoleplayRouteDecision decision) {

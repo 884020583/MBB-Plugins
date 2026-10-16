@@ -20,17 +20,25 @@ public class RoleplayDrawPromptValidator {
             "extra person"
     };
 
-    public static RoleplayDrawPromptResult validate(RoleplayPersona persona,
+    public static RoleplayDrawPromptResult validate(java.util.List<RoleplayDrawTarget> targets,
                                                      RoleplayDrawBrief brief,
                                                      String prompt,
                                                      String negativePrompt,
                                                      int maxPromptChars,
                                                      int maxNegativeChars) {
-        if (persona == null) return RoleplayDrawPromptResult.failed("缺少角色设定，无法质检生图 prompt");
+        if (targets == null || targets.isEmpty()) {
+            return RoleplayDrawPromptResult.failed("缺少生图目标角色，无法质检 prompt");
+        }
         LinkedHashSet<String> positive = tags(prompt);
         LinkedHashSet<String> negative = tags(negativePrompt);
         LinkedHashSet<String> forbidden = new LinkedHashSet<>();
-        addAll(forbidden,persona.imageNegativeTags);
+        LinkedHashSet<String> canonical = new LinkedHashSet<>();
+        for (RoleplayDrawTarget target : targets) {
+            if (target == null) continue;
+            addTag(canonical,target.canonicalTag);
+            addAll(canonical,target.imageTags);
+            addAll(forbidden,target.negativeTags);
+        }
         if (brief != null) addAll(forbidden,brief.mustExclude);
         for (String item : GLOBAL_IDENTITY_NEGATIVE) forbidden.add(item);
 
@@ -46,8 +54,8 @@ public class RoleplayDrawPromptValidator {
         }
 
         LinkedHashSet<String> finalPositive = new LinkedHashSet<>();
-        for (String tag : persona.imageTags) addTag(finalPositive,tag);
-        int characterCount = brief == null || brief.characters.isEmpty() ? 1 : brief.characters.size();
+        for (String tag : canonical) addTag(finalPositive,tag);
+        int characterCount = targets.size();
         addTag(finalPositive,characterCount >= 2 ? "2girls" : "1girl");
         if (brief != null) addAll(finalPositive,brief.mustInclude);
         for (String tag : kept) addTag(finalPositive,tag);
@@ -60,7 +68,8 @@ public class RoleplayDrawPromptValidator {
         if (positiveText.trim().isEmpty()) {
             return RoleplayDrawPromptResult.failed("生图 prompt 为空，已取消任务");
         }
-        String validation = "canonical="+persona.imageTags.size()
+        String validation = "targets="+targets.size()
+                +",canonical="+canonical.size()
                 +",removedPositive="+removed
                 +",negative="+finalNegative.size()
                 +",count="+(characterCount >= 2 ? "2girls" : "1girl");

@@ -4,10 +4,14 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import org.moboxlab.moboxbot.API.PluginService;
 
+import java.util.ArrayList;
+import java.util.List;
+import java.util.Locale;
+
 /**
  * 生图 prompt 编译层
  *
- * 角色层只提供画面 brief；本服务用独立上下文注入当前角色的 canonical tag、
+ * 角色层只提供画面 brief；本服务解析 brief 里的目标角色，注入对应角色的 canonical tag、
  * 外貌资料和禁止标签，再输出最终给 ComfyUI 的正向/负向 prompt。
  */
 public class RoleplayDrawPromptService {
@@ -25,17 +29,20 @@ public class RoleplayDrawPromptService {
             return RoleplayDrawPromptResult.failed("生图 brief 为空，已取消任务");
         }
         RoleplayConfig config = service.config();
-        RoleplayPersona persona = service.persona();
+        List<RoleplayDrawTarget> targets = resolveTargets(brief);
+        if (targets.isEmpty()) {
+            return RoleplayDrawPromptResult.failed("生图没有解析到目标角色");
+        }
         String size = safe(brief.size).isEmpty() ? safe(requestedSize) : brief.size;
         String camera = safe(brief.camera).isEmpty() ? safe(requestedCamera) : brief.camera;
         if (!config.drawPromptCompilerEnable) {
-            return fallback(persona,brief,size,camera,"compiler-disabled");
+            return fallback(targets,brief,size,camera,"compiler-disabled");
         }
         PluginService ai = service.plugin().getServer().getPluginManager().getService("MBB-AI");
-        if (ai == null) return fallback(persona,brief,size,camera,"ai-missing");
+        if (ai == null) return fallback(targets,brief,size,camera,"ai-missing");
         try {
             JSONArray messages = new JSONArray();
-            messages.add(service.message("system",compilerPrompt(persona,brief)));
+            messages.add(service.message("system",compilerPrompt(targets,brief)));
             messages.add(service.message("user","请把下面的画面 brief 编译成最终生图 JSON：\n"
                     +brief.toJson().toJSONString()));
             JSONObject params = new JSONObject(true);
@@ -58,13 +65,13 @@ public class RoleplayDrawPromptService {
             }
             if (parsed == null) {
                 service.plugin().getLogger().sendWarn("[生图] prompt 编译没有返回合法 JSON，使用兜底编译。");
-                return fallback(persona,brief,size,camera,"invalid-json");
+                return fallback(targets,brief,size,camera,"invalid-json");
             }
             String prompt = safe(parsed.getString("prompt"));
             String negative = safe(parsed.getString("negativePrompt"));
             String compiledSize = safe(parsed.getString("size"));
             String compiledCamera = safe(parsed.getString("camera"));
-            RoleplayDrawPromptResult result = RoleplayDrawPromptValidator.validate(persona,brief,
+            RoleplayDrawPromptResult result = RoleplayDrawPromptValidator.validate(targets,brief,
                     prompt,negative,config.drawPromptMaxChars,config.drawPromptNegativeMaxChars);
             if (!result.status) return result;
             if (!compiledSize.isEmpty()) result.size = compiledSize;
@@ -78,26 +85,87 @@ public class RoleplayDrawPromptService {
         } catch (Exception e) {
             service.plugin().getLogger().sendWarn("[生图] prompt 编译异常，使用兜底编译："
                     +service.safe(e.getMessage()));
-            return fallback(persona,brief,size,camera,"exception");
+            return fallback(targets,brief,size,camera,"exception");
         }
     }
 
-    private String compilerPrompt(RoleplayPersona persona,RoleplayDrawBrief brief) {
-        String knowledge = service.getKnowledgeService().currentCharacterAppearanceText(
-                persona,service.config().drawPromptKnowledgeMaxChars);
+    private List<RoleplayDrawTarget> resolveTargets(RoleplayDrawBrief brief) {
+        List<RoleplayDrawTarget> result = new ArrayList<>();
+        if (brief.characters != null) {
+            for (String name : brief.characters) {
+                RoleplayDrawTarget target = resolveTarget(name);
+                if (target != null) result.add(target);
+            }
+        }
+        if (result.isEmpty() && !safe(brief.subject).isEmpty()
+                && !"当前角色".equals(brief.subject.trim())
+                && !matchesCurrentPersona(brief.subject)) {
+            RoleplayDrawTarget target = resolveTarget(brief.subject);
+            if (target != null) result.add(target);
+        }
+        if (result.isEmpty()) result.add(currentTarget());
+        return result;
+    }
+
+    private RoleplayDrawTarget resolveTarget(String name) {
+        String value = safe(name);
+        if (value.isEmpty()) return null;
+        if (matchesCurrentPersona(value)) return currentTarget();
+        RoleplayDrawTarget target = service.getKnowledgeService().findCharacterTarget(value);
+        if (target != null) return target;
+        target = new RoleplayDrawTarget();
+        target.name = value;
+        target.canonicalTag = value;
+        target.imageTags.add(value);
+        return target;
+    }
+
+    private RoleplayDrawTarget currentTarget() {
+        RoleplayPersona persona = service.persona();
+        RoleplayDrawTarget target = new RoleplayDrawTarget();
+        target.id = persona.name;
+        target.name = persona.name;
+        target.currentRole = true;
+        target.appearance = persona.appearance;
+        target.imageTags.addAll(persona.imageTags);
+        target.negativeTags.addAll(persona.imageNegativeTags);
+        target.canonicalTag = target.imageTags.isEmpty() ? persona.name : target.imageTags.get(0);
+        if (target.imageTags.isEmpty()) target.imageTags.add(target.canonicalTag);
+        return target;
+    }
+
+    private boolean matchesCurrentPersona(String name) {
+        String value = normalizedName(name);
+        if (value.isEmpty()) return false;
+        RoleplayPersona persona = service.persona();
+        if (value.equals(normalizedName(persona.name))) return true;
+        for (String alias : persona.aliases) {
+            if (value.equals(normalizedName(alias))) return true;
+        }
+        return false;
+    }
+
+    private String compilerPrompt(List<RoleplayDrawTarget> targets,RoleplayDrawBrief brief) {
         StringBuilder builder = new StringBuilder();
         builder.append("你是生图 prompt 编译器，只输出 JSON，不要解释，不要聊天。\n")
-                .append("当前角色：").append(persona.name).append("\n")
-                .append(persona.imageTagsText())
-                .append(persona.imageNegativeTagsText())
-                .append("角色外貌：").append(persona.appearance).append("\n");
-        if (!knowledge.isEmpty()) builder.append(knowledge);
+                .append("本次画面的目标角色如下；只能画这些角色，不要把当前角色自动加入画面：\n");
+        for (RoleplayDrawTarget target : targets) {
+            builder.append("- ").append(target.name)
+                    .append(" canonical=").append(target.canonicalTag).append("\n")
+                    .append("  标准标签：").append(target.tagText()).append("\n");
+            if (!target.appearance.isEmpty()) {
+                builder.append("  外貌：").append(target.appearance).append("\n");
+            }
+            if (!target.negativeText().isEmpty()) {
+                builder.append("  禁止标签：").append(target.negativeText()).append("\n");
+            }
+        }
         builder.append("画面 brief：").append(brief.toJson().toJSONString()).append("\n");
         builder.append("编译规则：\n")
-                .append("- 只画当前角色本人；除非 brief.characters 明确列出其他角色，否则禁止加入其他角色。\n")
-                .append("- 只允许使用当前角色的发色、瞳色、光环、服装、配饰和武器；禁止使用凯伊/柯伊/Kei 或其他学生的外貌。\n")
-                .append("- 必须使用角色 canonical tags；如果 brief 和 canonical tag 冲突，以 canonical tag 为准。\n")
-                .append("- 必须明确发色、瞳色、光环颜色、服装、配饰和武器；不能只写角色名。\n")
+                .append("- 画面主体必须与 brief.characters/subject 一致；brief 没写当前角色时，不要把当前角色画进去。\n")
+                .append("- 每个目标角色只允许使用自己的 canonical tag 和外貌；禁止把其他角色外貌套到目标角色身上。\n")
+                .append("- 必须明确每个角色的发色、瞳色、光环颜色、服装、配饰和武器；不能只写角色名。\n")
+                .append("- 必须使用目标角色 canonical tags；如果 brief 和 canonical tag 冲突，以 canonical tag 为准。\n")
                 .append("- 不要写 masterpiece、best quality、highres、highly detailed、anime illustration 等质量词，插件会自动补。\n")
                 .append("- 不要写 twins、clone、duplicate character、multiple views、split screen、extra person。\n")
                 .append("- 单人使用 1girl，双人使用 2girls，人数标签只出现一次。\n")
@@ -109,24 +177,22 @@ public class RoleplayDrawPromptService {
         return builder.toString();
     }
 
-    private RoleplayDrawPromptResult fallback(RoleplayPersona persona,RoleplayDrawBrief brief,
+    private RoleplayDrawPromptResult fallback(List<RoleplayDrawTarget> targets,
+                                              RoleplayDrawBrief brief,
                                               String size,String camera,String reason) {
         StringBuilder positive = new StringBuilder();
-        for (String tag : persona.imageTags) {
-            if (positive.length() > 0) positive.append(", ");
-            positive.append(tag);
+        StringBuilder negative = new StringBuilder();
+        for (RoleplayDrawTarget target : targets) {
+            for (String tag : target.imageTags) {
+                append(positive,tag);
+            }
+            for (String tag : target.negativeTags) {
+                append(negative,tag);
+            }
         }
         String briefText = brief.promptText();
-        if (!briefText.isEmpty()) {
-            if (positive.length() > 0) positive.append(", ");
-            positive.append(briefText);
-        }
-        StringBuilder negative = new StringBuilder();
-        for (String tag : persona.imageNegativeTags) {
-            if (negative.length() > 0) negative.append(", ");
-            negative.append(tag);
-        }
-        RoleplayDrawPromptResult result = RoleplayDrawPromptValidator.validate(persona,brief,
+        if (!briefText.isEmpty()) append(positive,briefText);
+        RoleplayDrawPromptResult result = RoleplayDrawPromptValidator.validate(targets,brief,
                 positive.toString(),negative.toString(),
                 service.config().drawPromptMaxChars,service.config().drawPromptNegativeMaxChars);
         if (result.status) {
@@ -136,6 +202,20 @@ public class RoleplayDrawPromptService {
                     +" prompt="+service.shortText(result.prompt,180));
         }
         return result;
+    }
+
+    private void append(StringBuilder builder,String value) {
+        String text = safe(value);
+        if (text.isEmpty()) return;
+        if (builder.length() > 0) builder.append(", ");
+        builder.append(text);
+    }
+
+    private String normalizedName(String value) {
+        String text = safe(value).toLowerCase(Locale.ROOT);
+        int index = text.indexOf('(');
+        if (index > 0) text = text.substring(0,index);
+        return text.replace('_',' ').replaceAll("\\s+"," ").trim();
     }
 
     private String safe(String value) {

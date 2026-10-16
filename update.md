@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.56.0.0350 | 2026-10-17 | `MBB-Roleplay` 修复生图目标角色解析：draw brief 的 `characters/subject` 现在会解析成目标角色，用户让桃井画柚子时目标就是柚子，不会自动把桃井画进画面；编译器按目标角色注入 canonical tag 和外貌，只有目标是当前角色时才注入当前角色标签。draw 技能增加额外输出上下文，明确角色层只写 brief、目标角色不能写错。`drawPromptCompilerEnable` 默认开启，编译调用会输出 `[角色] 生图prompt` 日志 |
 | V0.5.55.0.0347 | 2026-10-17 | `MBB-Roleplay` 生图 prompt 管线与角色身份修复：角色层只输出结构化 `brief`，新增 `RoleplayDrawPromptService` 用独立上下文注入当前角色 `imageTags`、`imageNegativeTags`、外貌和当前角色知识库条目，再由 `RoleplayDrawPromptValidator` 做本地质检，把凯伊/柯伊等冲突角色和冲突外貌词移到负向 prompt；爱丽丝 persona 增加标准 booru tag 和 `kei (blue archive)` 等禁止标签；`RoleplayKnowledgeService` 生图资料只取当前角色自己的学生条目。修复 `RoleplayReplyFeedbackService.loadTotals()` 的 SQL 缺少收尾反引号导致插件启动时报 `unrecognized token` 的问题。`MBB-ComfyUI` 的 `generate` 支持可选 `negativePrompt`，会追加到全局负向词后 |
 | V0.5.54.0.0643 | 2026-10-16 | `MBB-AntiSpam` 机器人消息豁免：新增 `ignoreBots`（默认开启）与 `botUsers`（同类机器人 QQ 名单，多个用英文逗号分隔），机器人消息整体跳过——不统计、不提醒、不处置、不写事件表。修复同群部署多个机器人时，一条命令的相同回复被判定为真人集体刷屏的问题；机器人自己上报的消息同样跳过；真人刷屏照常检测，`ignoreBots: false` 可回到原行为 |
 | V0.5.53.0.2301 | 2026-10-16 | `MBB-Roleplay` 继续拆分情绪与命令：新增 `RoleplayRelationService` 负责好感/信任/厌烦的日限幅、自然回落和身份倍率，新增 `RoleplayMoodService` 负责默认心情、自然衰减和标签刷新，`RoleplayEmotionService` 从约 995 行降到约 827 行；`RoleplayCommand` 按命令组拆为 `RoleplayMemoryCommandHandler`、`RoleplayEmotionCommandHandler`、`RoleplayModerationCommandHandler`、`RoleplayContentCommandHandler`、`RoleplayFeedbackCommandHandler`、`RoleplayMemberCommandHandler`、`RoleplayBotCommandHandler`，主命令类从 1282 行降到约 425 行。行为不变，命令分发和权限判断保持原实现 |
