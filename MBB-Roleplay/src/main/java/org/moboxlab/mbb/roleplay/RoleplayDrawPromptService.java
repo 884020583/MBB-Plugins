@@ -35,6 +35,10 @@ public class RoleplayDrawPromptService {
         }
         String size = safe(brief.size).isEmpty() ? safe(requestedSize) : brief.size;
         String camera = safe(brief.camera).isEmpty() ? safe(requestedCamera) : brief.camera;
+        if (targets.size() > 1 && "photo".equalsIgnoreCase(camera)) {
+            camera = "";
+            service.plugin().getLogger().sendInfo("[生图] 多目标场景取消 camera=photo，避免被编译成第一视角");
+        }
         if (!config.drawPromptCompilerEnable) {
             return fallback(targets,brief,size,camera,"compiler-disabled");
         }
@@ -165,11 +169,13 @@ public class RoleplayDrawPromptService {
         builder.append("编译规则：\n")
                 .append("- 画面主体必须与 brief.characters/subject 一致；brief 没写当前角色时，不要把当前角色画进去。\n")
                 .append("- 每个目标角色只允许使用自己的 canonical tag 和外貌；禁止把其他角色外貌套到目标角色身上。\n")
+                .append("- 严格按 brief 的 action/scene/outfit 画，不要因为角色职业、习惯或梗自动添加画笔、游戏手柄、书本等未要求元素。\n")
                 .append("- 必须明确每个角色的发色、瞳色、光环颜色、服装、配饰和武器；不能只写角色名。\n")
                 .append("- 必须使用目标角色 canonical tags；如果 brief 和 canonical tag 冲突，以 canonical tag 为准。\n")
                 .append("- 不要写 masterpiece、best quality、highres、highly detailed、anime illustration 等质量词，插件会自动补。\n")
                 .append("- 不要写 twins、clone、duplicate character、multiple views、split screen、extra person。\n")
                 .append("- 单人使用 1girl，双人使用 2girls，人数标签只出现一次。\n")
+                .append("- 多人普通同框不要使用 first person view；只有用户明确要求当前角色第一视角拍照时才使用 photo。\n")
                 .append("- negativePrompt 只放角色专属负向词和身份冲突词；不要重复插件全局负向词。\n")
                 .append("- prompt 使用逗号分隔的英文 booru 风格 tag，控制在 ")
                 .append(service.config().drawPromptMaxChars).append(" 字符以内。\n")

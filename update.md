@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.58.0.0411 | 2026-10-17 | `MBB-Roleplay` 修正生图镜头和场景约束：多人普通同框不再使用 `camera=photo`，避免被编译成第一视角；编译器要求严格按 brief 的 action/scene/outfit 画，不能因为角色职业、习惯或梗自动添加画笔、游戏手柄等未要求元素。 |
 | V0.5.57.0.0410 | 2026-10-17 | `MBB-Roleplay` 生图 prompt 二次修复：知识库条目支持 `visualTags`，生图编译器按目标角色注入标准外貌 tag；编译器输出的负向词不再直接信任，目标角色名、`1girl/solo` 等计数词会被清理，双人画面固定加 `1girl,solo` 负向词；本地质检会移除与目标角色发色、瞳色、光环颜色冲突的正向 tag，并移除目标角色名。爱丽丝/绿/桃井/柚子知识条目补充常用英文别名，修复“桃井画柚子却画成桃井”和“爱丽丝被写成白发”的问题 |
 | V0.5.56.0.0350 | 2026-10-17 | `MBB-Roleplay` 修复生图目标角色解析：draw brief 的 `characters/subject` 现在会解析成目标角色，用户让桃井画柚子时目标就是柚子，不会自动把桃井画进画面；编译器按目标角色注入 canonical tag 和外貌，只有目标是当前角色时才注入当前角色标签。draw 技能增加额外输出上下文，明确角色层只写 brief、目标角色不能写错。`drawPromptCompilerEnable` 默认开启，编译调用会输出 `[角色] 生图prompt` 日志 |
 | V0.5.55.0.0347 | 2026-10-17 | `MBB-Roleplay` 生图 prompt 管线与角色身份修复：角色层只输出结构化 `brief`，新增 `RoleplayDrawPromptService` 用独立上下文注入当前角色 `imageTags`、`imageNegativeTags`、外貌和当前角色知识库条目，再由 `RoleplayDrawPromptValidator` 做本地质检，把凯伊/柯伊等冲突角色和冲突外貌词移到负向 prompt；爱丽丝 persona 增加标准 booru tag 和 `kei (blue archive)` 等禁止标签；`RoleplayKnowledgeService` 生图资料只取当前角色自己的学生条目。修复 `RoleplayReplyFeedbackService.loadTotals()` 的 SQL 缺少收尾反引号导致插件启动时报 `unrecognized token` 的问题。`MBB-ComfyUI` 的 `generate` 支持可选 `negativePrompt`，会追加到全局负向词后 |
