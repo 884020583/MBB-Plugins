@@ -39,6 +39,10 @@ public class RoleplayDrawPromptService {
             camera = "";
             service.plugin().getLogger().sendInfo("[生图] 多目标场景取消 camera=photo，避免被编译成第一视角");
         }
+        if ("photo".equalsIgnoreCase(camera) && isThirdPersonBrief(brief)) {
+            camera = "";
+            service.plugin().getLogger().sendInfo("[生图] 第三人称/偷拍构图取消 camera=photo，避免被编译成第一视角");
+        }
         if (!config.drawPromptCompilerEnable) {
             return fallback(targets,brief,size,camera,"compiler-disabled");
         }
@@ -179,6 +183,7 @@ public class RoleplayDrawPromptService {
                 .append("- negativePrompt 只放角色专属负向词和身份冲突词；不要重复插件全局负向词。\n")
                 .append("- prompt 使用逗号分隔的英文 booru 风格 tag，控制在 ")
                 .append(service.config().drawPromptMaxChars).append(" 字符以内。\n")
+                .append("- 最终 prompt 只能保留英文 tag；brief 里的中文元素必须翻译成英文 booru tag，不能原样输出中文。\n")
                 .append("输出格式：{\"prompt\":\"...\",\"negativePrompt\":\"...\",")
                 .append("\"size\":\"square|landscape|portrait|avatar\",\"camera\":\"selfie|photo|\"}");
         return builder.toString();
@@ -223,6 +228,15 @@ public class RoleplayDrawPromptService {
         int index = text.indexOf('(');
         if (index > 0) text = text.substring(0,index);
         return text.replace('_',' ').replaceAll("\\s+"," ").trim();
+    }
+
+    private boolean isThirdPersonBrief(RoleplayDrawBrief brief) {
+        String text = safe(brief.subject)+" "+safe(brief.action)+" "+safe(brief.scene)
+                +" "+safe(brief.composition)+" "+String.join(" ",brief.mustInclude);
+        return text.contains("偷拍") || text.contains("远距离") || text.contains("门边")
+                || text.contains("隔板") || text.contains("旁观") || text.contains("第三人称")
+                || text.contains("监控") || text.contains("偷看") || text.contains("背影")
+                || text.contains("远景") || text.contains("中景") || text.contains("全身");
     }
 
     private String safe(String value) {

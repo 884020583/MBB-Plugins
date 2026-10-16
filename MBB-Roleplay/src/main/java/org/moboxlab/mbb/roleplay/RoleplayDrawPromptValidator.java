@@ -65,6 +65,10 @@ public class RoleplayDrawPromptValidator {
         int removed = 0;
         List<String> kept = new ArrayList<>();
         for (String tag : positive) {
+            if (containsCjk(tag)) {
+                removed++;
+                continue;
+            }
             if (matchesAny(tag,targetNames) || isCountTag(tag)) {
                 removed++;
                 continue;
@@ -92,7 +96,9 @@ public class RoleplayDrawPromptValidator {
         String positiveText = joinLimited(finalPositive,maxPromptChars);
         LinkedHashSet<String> finalNegative = new LinkedHashSet<>();
         for (String tag : negative) addTag(finalNegative,tag);
-        for (String tag : forbidden) addTag(finalNegative,tag);
+        for (String tag : forbidden) {
+            if (!containsCjk(tag)) addTag(finalNegative,tag);
+        }
         if (characterCount >= 2) {
             addTag(finalNegative,"1girl");
             addTag(finalNegative,"solo");
@@ -219,5 +225,18 @@ public class RoleplayDrawPromptValidator {
     private static String normalize(String value) {
         return value == null ? "" : value.trim().toLowerCase(Locale.ROOT)
                 .replace('_',' ').replaceAll("\\s+"," ");
+    }
+
+    private static boolean containsCjk(String value) {
+        if (value == null) return false;
+        for (int i = 0; i < value.length(); i++) {
+            Character.UnicodeBlock block = Character.UnicodeBlock.of(value.charAt(i));
+            if (block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS
+                    || block == Character.UnicodeBlock.CJK_UNIFIED_IDEOGRAPHS_EXTENSION_A
+                    || block == Character.UnicodeBlock.CJK_COMPATIBILITY_IDEOGRAPHS) {
+                return true;
+            }
+        }
+        return false;
     }
 }

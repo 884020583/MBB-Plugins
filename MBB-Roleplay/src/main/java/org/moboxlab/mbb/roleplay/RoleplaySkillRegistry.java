@@ -419,7 +419,7 @@ public class RoleplaySkillRegistry {
                     +"建议 size=landscape；如果画面里出现角色本人，仍然只能出现一次。"
                     +"camera 只允许 selfie 或 photo；普通“画一张/生图”不要传 camera。"
                     +"普通“画一张照片/拍一张照片”不要传 camera=photo；只有“拍照看看你的某样东西”这种第一视角需求才传 photo。"
-                    +"多人同框的普通场景不要传 camera。"
+                    +"多人同框、偷拍、远距离、门边、隔板后、旁观、第三人称构图都不要传 camera。"
                     : "当前未开放相机模式，用户要求自拍或拍照时不要传 camera，也不要假装已经拍照；"
                     +"只在用户明确要求普通生图时调用 draw。";
             return "draw 表示调用 ComfyUI 生图"
