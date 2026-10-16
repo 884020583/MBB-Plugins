@@ -82,6 +82,7 @@ public class RoleplayService {
     private final RoleplayRateLimitService rateLimitService;
     private final RoleplayMemoryQueryService memoryQueryService;
     private final RoleplayDrawNotifyService drawNotifyService;
+    private final RoleplayDrawPromptService drawPromptService;
     private final RoleplayGroupStatusService groupStatusService;
     private final RoleplayMessagePreprocessor messagePreprocessor;
     private final RoleplaySchemaService schemaService;
@@ -291,6 +292,7 @@ public class RoleplayService {
         this.rateLimitService = new RoleplayRateLimitService(this);
         this.memoryQueryService = new RoleplayMemoryQueryService(this);
         this.drawNotifyService = new RoleplayDrawNotifyService(this);
+        this.drawPromptService = new RoleplayDrawPromptService(this);
         this.groupStatusService = new RoleplayGroupStatusService(this);
         this.messagePreprocessor = new RoleplayMessagePreprocessor(this);
         this.schemaService = new RoleplaySchemaService(this);
@@ -634,6 +636,10 @@ public class RoleplayService {
 
     public RoleplayMemberService getMemberService() {
         return memberService;
+    }
+
+    public RoleplayDrawPromptService getDrawPromptService() {
+        return drawPromptService;
     }
 
 

@@ -40,6 +40,8 @@ public class RoleplayPersona {
     public List<String> memes = new ArrayList<>();
     public List<String> interests = new ArrayList<>();
     public List<String> dislikes = new ArrayList<>();
+    public List<String> imageTags = new ArrayList<>();
+    public List<String> imageNegativeTags = new ArrayList<>();
     public List<String> relationships = new ArrayList<>();
     public List<String> otherStudents = new ArrayList<>();
     public List<StudentProfile> studentProfiles = new ArrayList<>();
@@ -72,6 +74,8 @@ public class RoleplayPersona {
             }
             persona.interests = readList(json.getJSONArray("interests"));
             persona.dislikes = readList(json.getJSONArray("dislikes"));
+            persona.imageTags = readList(json.getJSONArray("imageTags"));
+            persona.imageNegativeTags = readList(json.getJSONArray("imageNegativeTags"));
             persona.relationships = readList(json.getJSONArray("relationships"));
             persona.otherStudents = readList(json.getJSONArray("otherStudents"));
             persona.terminology = readList(json.getJSONArray("terminology"));
@@ -127,6 +131,16 @@ public class RoleplayPersona {
     /** 角色自己的外貌 */
     public String appearanceText() {
         return appearance.isEmpty() ? "" : "自己的外貌："+appearance+"\n";
+    }
+
+    /** 生图用的标准 booru 角色 tag 与外貌锚点 */
+    public String imageTagsText() {
+        return imageTags.isEmpty() ? "" : "生图标准标签："+String.join(", ",imageTags)+"\n";
+    }
+
+    /** 生图时明确禁止出现的其他角色或冲突外貌 */
+    public String imageNegativeTagsText() {
+        return imageNegativeTags.isEmpty() ? "" : "生图禁止标签："+String.join(", ",imageNegativeTags)+"\n";
     }
 
     /** 学生名录，只有一句话印象，完整外貌由 studentDetailText 按需提供 */

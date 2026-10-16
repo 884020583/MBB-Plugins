@@ -175,7 +175,7 @@ public class RoleplayReplyFeedbackService {
 
     private void loadTotals() {
         totals.clear();
-        List<JSONObject> rows = storage().query("SELECT `groupID`,`successCount`,`ignoreCount` FROM `"+TABLE);
+        List<JSONObject> rows = storage().query("SELECT `groupID`,`successCount`,`ignoreCount` FROM `"+TABLE+"`");
         if (rows == null) return;
         for (JSONObject row : rows) {
             long groupID = row.getLongValue("groupID");

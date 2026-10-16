@@ -153,6 +153,14 @@ replySplitPunctuation: "。！？!?；;，、：,:～~…"
 replyMaxSegments: 2
 replyLinkFilterEnable: true
 cameraEnable: true
+drawPromptCompilerEnable: true
+drawPromptProfile: ""
+drawPromptMaxTokens: 1800
+drawPromptReasoningEffort: "none"
+drawPromptTimeoutSecond: 120
+drawPromptMaxChars: 1600
+drawPromptNegativeMaxChars: 800
+drawPromptKnowledgeMaxChars: 1200
 maxLongMemories: 150
 topicFatigueEnable: true
 topicFatigueWindowMinute: 30
@@ -199,6 +207,8 @@ quietReplyEnable: true
 `replyLinkFilterEnable` 默认 `true`。开启后，角色最终发送的文本会在发送前过滤掉 `http(s)://`、`www.` 和常见裸域名链接，避免模型凭空编造网址。过滤只作用于角色文本回复，不影响图片、文件和其他技能消息。
 
 `cameraEnable` 默认 `true`。设为 `false` 后只关闭 `draw` 技能里的手机自拍和拍照模式，角色会忽略 `camera=selfie/photo`，普通生图仍可继续使用。改完执行 `/role reload` 或重启主程序后生效。
+
+`drawPromptCompilerEnable` 默认 `true`。开启后角色层只生成画面 brief，`RoleplayDrawPromptService` 用独立上下文注入当前角色的 `imageTags`、`imageNegativeTags`、外貌和当前角色知识库条目，再交给 `MBB-ComfyUI`。`drawPromptProfile` 留空时使用 `aiProfile`；编译默认使用 `reasoningEffort: none`，避免把预算耗在思考上。`drawPromptMaxChars` 和 `drawPromptNegativeMaxChars` 分别限制最终正向、角色专属负向 prompt；`drawPromptKnowledgeMaxChars` 只注入当前角色自己的学生条目，不会把凯伊等其他角色外貌带进生图上下文。
 
 `topicFatigueEnable` 默认 `true`。插件会按群记录话题疲劳：同一话题在 `topicFatigueWindowMinute` 分钟内出现次数达到 `topicFatigueMinCount`，且角色自己参与达到 `topicFatigueSelfCount` 时，路由层会降权或跳过主动回复；直接点名、引用回复或明确提问仍可打破疲劳。记录保留 `topicFatigueKeepHours` 小时。
 

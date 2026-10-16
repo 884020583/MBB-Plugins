@@ -413,9 +413,9 @@ public class RoleplaySkillRegistry {
             boolean busy = status.getBooleanValue("busy");
             String cameraInstruction = service.config().cameraEnable
                     ? "当用户说“自拍”“拍你”“拍一张你的照片”时，传 camera=selfie，"
-                    +"prompt 写角色举着手机自拍、看镜头、自然随手拍的感觉，建议 size=portrait。"
+                    +"brief.action/scene/composition 写角色举着手机自拍、看镜头、自然随手拍的感觉，建议 size=portrait。"
                     +"当用户说“拍照看看你的布丁”“拍一下桌子/房间/正在做的事”时，传 camera=photo，"
-                    +"prompt 写角色第一视角实际能看到的东西，不要写手机、相机、镜头、手持设备或自拍等词，"
+                    +"brief.action/scene/composition 写角色第一视角实际能看到的东西，不要写手机、相机、镜头、手持设备或自拍等词，"
                     +"建议 size=landscape；如果画面里出现角色本人，仍然只能出现一次。"
                     +"camera 只允许 selfie 或 photo；普通“画一张/生图”不要传 camera。"
                     : "当前未开放相机模式，用户要求自拍或拍照时不要传 camera，也不要假装已经拍照；"
@@ -425,30 +425,29 @@ public class RoleplaySkillRegistry {
                     +(service.config().cameraEnable
                     ? "。只有用户明确要求生图或拍照时才调用；"
                     : "。只有用户明确要求普通生图时才调用；")
-                    +"如果用户只给出主体，没给背景、动作、风格、构图或尺寸，可以自己补全这些细节并写入 prompt，"
+                    +"角色层只输出画面 brief，不直接写最终 booru prompt；最终 prompt 会由独立编译层注入角色 canonical tag 和负向词。"
+                    +"如果用户只给出主体，没给背景、动作、构图或尺寸，可以自己补全 brief，"
                     +"不要每一项都追问；只有主体不明确、可能违规或用户要求变化时再追问。"
                     +cameraInstruction
-                    +"prompt 要写得具体细腻：主体 + 标准角色 tag + 外貌锚点 + 服装装备 + 动作 + 表情 + "
-                    +"背景 + 构图镜头 + 风格 + 光线。"
-                    +"如果角色设定里提供了作品名、标准英文名、别名或外貌锚点，必须优先使用这些信息；"
-                    +"中文全名可以保留，但不能只写中文名。"
-                    +"只写角色名不够，必须补充发色、瞳色、光环、发型、服装和标志性配饰。"
-                    +"每个角色在画面中只能出现一次；如果画双人，必须明确只有两名不同角色，"
-                    +"不要使用 twins、clone、duplicate character、multiple views、split screen 等容易复制的标签，"
-                    +"不要分身、克隆、多视角、分屏或重复同一角色。"
-                    +"人数标签只写一次，1girl 或 2girls，不要同时写 two girls 和 2girls。"
-                    +"不要自己写 masterpiece、best quality、highres、highly detailed 等质量词，插件会自动补。"
-                    +"prompt 使用逗号分隔的英文 booru 风格标签为主，必要时保留中文全名；"
-                    +"控制在 300 到 800 字符以内，不要写成自然语言段落，不要重复。"
+                    +"brief 字段：subject、characters、action、expression、outfit、scene、composition、camera、size、mustInclude、mustExclude。"
+                    +"subject 写当前角色本人；characters 只在明确画双人时填写，且必须写清每个角色的标准英文名。"
+                    +"action/expression/outfit/scene/composition 用简短中文描述画面，不要写自然语言长段。"
+                    +"mustInclude 放本画面必须出现的元素；mustExclude 放本画面禁止出现的元素。"
+                    +"画当前角色本人时，不要写凯伊、柯伊、Kei 或任何其他学生的外貌特征。"
+                    +"不要写发色、瞳色、光环、服装和武器的具体 tag，编译层会从角色设定里补全。"
+                    +"不要写 masterpiece、best quality、highres、highly detailed 等质量词。"
+                    +"不要控制模型、steps、cfg、sampler、seed。"
                     +"当前群生图冷却剩余 "+remaining+" 秒，"
                     +"当前群任务中："+(busy ? "是" : "否")+"。冷却中或有任务时不要调用 draw，"
                     +"直接用角色语气说明还需要等多久。尺寸上限 "
                     +status.getIntValue("maxWidth")+"x"+status.getIntValue("maxHeight")
                     +"，默认 "+status.getIntValue("defaultWidth")+"x"+status.getIntValue("defaultHeight")
                     +"，可用 size：square / landscape / portrait / avatar。"
-                    +"调用格式：{\"type\":\"draw\",\"args\":{\"prompt\":\"...\","
-                    +"\"size\":\"square\",\"camera\":\"selfie\"}}；"
-                    +"角色只提供 prompt、尺寸和可选的 camera，不要控制模型、steps、cfg、sampler、seed。";
+                    +"调用格式：{\"type\":\"draw\",\"args\":{\"brief\":{"
+                    +"\"subject\":\"当前角色\",\"characters\":[],\"action\":\"...\","
+                    +"\"expression\":\"...\",\"outfit\":\"...\",\"scene\":\"...\","
+                    +"\"composition\":\"...\",\"mustInclude\":[],\"mustExclude\":[]},"
+                    +"\"size\":\"square\",\"camera\":\"selfie\"}}；";
         }
 
         @Override
@@ -456,8 +455,23 @@ public class RoleplaySkillRegistry {
             org.moboxlab.moboxbot.API.PluginService comfy =
                     service.plugin().getServer().getPluginManager().getService("MBB-ComfyUI");
             if (comfy == null) return RoleplaySkillResult.failed(id(),"MBB-ComfyUI 未启用");
+            JSONObject args = context.args == null ? new JSONObject(true) : context.args;
+            RoleplayDrawBrief brief = RoleplayDrawBrief.fromJson(args.getJSONObject("brief"));
+            if (brief.isEmpty() && !service.safe(args.getString("prompt")).isEmpty()) {
+                brief = RoleplayDrawBrief.fromLegacyPrompt(args.getString("prompt"));
+            }
+            RoleplayDrawPromptResult compiled = service.getDrawPromptService().compile(
+                    context.groupID,context.userID,brief,
+                    args.getString("size"),args.getString("camera"));
+            if (compiled == null || !compiled.status) {
+                return RoleplaySkillResult.failed(id(),
+                        compiled == null ? "生图 prompt 编译失败" : compiled.message);
+            }
             JSONObject params = new JSONObject(true);
-            if (context.args != null) params.putAll(context.args);
+            params.put("prompt",compiled.prompt);
+            params.put("negativePrompt",compiled.negativePrompt);
+            if (!service.safe(compiled.size).isEmpty()) params.put("size",compiled.size);
+            if (!service.safe(compiled.camera).isEmpty()) params.put("camera",compiled.camera);
             if (!service.config().cameraEnable) params.remove("camera");
             params.put("groupID",context.groupID);
             params.put("userID",context.userID);

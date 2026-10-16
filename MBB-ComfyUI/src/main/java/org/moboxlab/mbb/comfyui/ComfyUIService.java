@@ -47,17 +47,20 @@ public class ComfyUIService implements PluginService {
         private final long userID;
         private final long messageID;
         private final String prompt;
+        private final String negativePrompt;
         private final int width;
         private final int height;
         private final String cameraMode;
 
         private ComfyUIJob(long taskID,long groupID,long userID,long messageID,
-                           String prompt,int width,int height,String cameraMode) {
+                           String prompt,String negativePrompt,
+                           int width,int height,String cameraMode) {
             this.taskID = taskID;
             this.groupID = groupID;
             this.userID = userID;
             this.messageID = messageID;
             this.prompt = prompt;
+            this.negativePrompt = negativePrompt;
             this.width = width;
             this.height = height;
             this.cameraMode = cameraMode;
@@ -192,6 +195,7 @@ public class ComfyUIService implements PluginService {
         if (groupID <= 0) return error("生图任务缺少群号！","params");
         if (userID <= 0) return error("生图任务缺少用户号！","params");
         String prompt = safe(params.getString("prompt")).trim();
+        String negativePrompt = sanitizeNegativePrompt(params.getString("negativePrompt"));
         if (prompt.length() < config.promptMinChars) {
             return error("生图需求还不够明确，请先补充主体和风格。","prompt");
         }
@@ -210,7 +214,7 @@ public class ComfyUIService implements PluginService {
         }
         long taskID = sequence.incrementAndGet();
         ComfyUIJob job = new ComfyUIJob(taskID,groupID,userID,messageID,
-                prompt,size.width,size.height,cameraMode);
+                prompt,negativePrompt,size.width,size.height,cameraMode);
         if (!busyGroups.add(groupID)) {
             return error("当前群已经有生图任务在执行。","busy");
         }
@@ -334,7 +338,8 @@ public class ComfyUIService implements PluginService {
             metadata.put("effectivePrompt",buildPositivePrompt(job.prompt,job.cameraMode));
             metadata.put("promptPrefix",config.promptPrefix);
             metadata.put("promptSuffix",config.promptSuffix);
-            metadata.put("negativePrompt",config.negativePrompt);
+            metadata.put("negativePrompt",effectiveNegativePrompt(job));
+            metadata.put("characterNegativePrompt",job.negativePrompt);
             metadata.put("width",job.width);
             metadata.put("height",job.height);
             metadata.put("checkpoint",config.checkpoint);
@@ -381,7 +386,7 @@ public class ComfyUIService implements PluginService {
                 "text",buildPositivePrompt(job.prompt,job.cameraMode),
                 "clip",link(1,1))));
         workflow.put("3",node("CLIPTextEncode",inputs(
-                "text",config.negativePrompt,
+                "text",effectiveNegativePrompt(job),
                 "clip",link(1,1))));
         workflow.put("4",node("EmptyLatentImage",inputs(
                 "width",job.width,
@@ -414,6 +419,31 @@ public class ComfyUIService implements PluginService {
         appendPrompt(builder,sanitizePrompt(prompt));
         appendPrompt(builder,cameraPromptSuffix(cameraMode));
         appendPrompt(builder,config.promptSuffix);
+        return builder.toString();
+    }
+
+    private String effectiveNegativePrompt(ComfyUIJob job) {
+        String base = safe(config.negativePrompt).trim();
+        String extra = job == null ? "" : safe(job.negativePrompt).trim();
+        if (base.isEmpty()) return extra;
+        if (extra.isEmpty()) return base;
+        return base+", "+extra;
+    }
+
+    private String sanitizeNegativePrompt(String prompt) {
+        String value = safe(prompt);
+        StringBuilder builder = new StringBuilder();
+        Set<String> seen = new HashSet<>();
+        for (String part : value.split(",")) {
+            String text = part == null ? "" : part.trim();
+            if (text.isEmpty()) continue;
+            String lower = text.toLowerCase(Locale.ROOT);
+            if (seen.contains(lower)) continue;
+            seen.add(lower);
+            if (builder.length() > 0) builder.append(", ");
+            builder.append(text);
+        }
+        if (builder.length() > 1200) return builder.substring(0,1200);
         return builder.toString();
     }
 

@@ -176,6 +176,16 @@ public class RoleplayConfig {
     public int replyMaxSegments = 2;
     public boolean replyLinkFilterEnable = true;
     public boolean cameraEnable = true;
+    /** 生图是否启用独立 prompt 编译层 */
+    public boolean drawPromptCompilerEnable = true;
+    /** 生图 prompt 编译使用的模型配置，留空使用 aiProfile */
+    public String drawPromptProfile = "";
+    public int drawPromptMaxTokens = 1800;
+    public String drawPromptReasoningEffort = "none";
+    public int drawPromptTimeoutSecond = 120;
+    public int drawPromptMaxChars = 1600;
+    public int drawPromptNegativeMaxChars = 800;
+    public int drawPromptKnowledgeMaxChars = 1200;
     public int recentReplyCheckCount = 8;
     public boolean repeatSuppressEnable = false;
     public double repeatSimilarityThreshold = 0.72;
@@ -456,6 +466,18 @@ public class RoleplayConfig {
         config.replyMaxSegments = plugin.getConfig().getInt("replyMaxSegments",2);
         config.replyLinkFilterEnable = plugin.getConfig().getBoolean("replyLinkFilterEnable",true);
         config.cameraEnable = plugin.getConfig().getBoolean("cameraEnable",true);
+        config.drawPromptCompilerEnable =
+                plugin.getConfig().getBoolean("drawPromptCompilerEnable",true);
+        config.drawPromptProfile = plugin.getConfig().getString("drawPromptProfile","");
+        config.drawPromptMaxTokens = plugin.getConfig().getInt("drawPromptMaxTokens",1800);
+        config.drawPromptReasoningEffort = normalizeEffort(
+                plugin.getConfig().getString("drawPromptReasoningEffort","none"));
+        config.drawPromptTimeoutSecond = plugin.getConfig().getInt("drawPromptTimeoutSecond",120);
+        config.drawPromptMaxChars = plugin.getConfig().getInt("drawPromptMaxChars",1600);
+        config.drawPromptNegativeMaxChars =
+                plugin.getConfig().getInt("drawPromptNegativeMaxChars",800);
+        config.drawPromptKnowledgeMaxChars =
+                plugin.getConfig().getInt("drawPromptKnowledgeMaxChars",1200);
         config.recentReplyCheckCount = plugin.getConfig().getInt("recentReplyCheckCount",8);
         config.repeatSuppressEnable = plugin.getConfig().getBoolean("repeatSuppressEnable",false);
         try {
@@ -726,6 +748,17 @@ public class RoleplayConfig {
         if (config.dailyReviewTimeoutSecond > 600) config.dailyReviewTimeoutSecond = 600;
         if (config.replyMaxTokens < 200) config.replyMaxTokens = 200;
         if (config.replyMaxTokens > 8000) config.replyMaxTokens = 8000;
+        if (config.drawPromptProfile == null) config.drawPromptProfile = "";
+        if (config.drawPromptMaxTokens < 300) config.drawPromptMaxTokens = 300;
+        if (config.drawPromptMaxTokens > 8000) config.drawPromptMaxTokens = 8000;
+        if (config.drawPromptTimeoutSecond < 30) config.drawPromptTimeoutSecond = 30;
+        if (config.drawPromptTimeoutSecond > 600) config.drawPromptTimeoutSecond = 600;
+        if (config.drawPromptMaxChars < 300) config.drawPromptMaxChars = 300;
+        if (config.drawPromptMaxChars > 4000) config.drawPromptMaxChars = 4000;
+        if (config.drawPromptNegativeMaxChars < 100) config.drawPromptNegativeMaxChars = 100;
+        if (config.drawPromptNegativeMaxChars > 2000) config.drawPromptNegativeMaxChars = 2000;
+        if (config.drawPromptKnowledgeMaxChars < 400) config.drawPromptKnowledgeMaxChars = 400;
+        if (config.drawPromptKnowledgeMaxChars > 4000) config.drawPromptKnowledgeMaxChars = 4000;
         if (config.replyImageMaxTokens < 400) config.replyImageMaxTokens = 400;
         if (config.replyImageMaxTokens > 16000) config.replyImageMaxTokens = 16000;
         if (config.replySegmentMaxChars < 8) config.replySegmentMaxChars = 8;

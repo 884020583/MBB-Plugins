@@ -6,7 +6,7 @@ MoBoxBot 的 ComfyUI 生图插件，通过插件服务向 `MBB-Roleplay` 提供 
 
 - 连接局域网 ComfyUI，默认 `http://192.168.10.10:8188`
 - 每个群独立 60 秒生图冷却
-- 角色只需要提供 `prompt`、尺寸和可选的相机模式
+- 角色只需要提供 `prompt`、可选的 `negativePrompt`、尺寸和可选的相机模式
 - 支持角色视角：`camera=selfie` 生成自拍视角，`camera=photo` 生成第一视角随手拍
 - 默认使用 `NoobAI-XL-v1.1.safetensors`
 - 默认直接生成目标尺寸，不做放大和缩放
@@ -62,12 +62,15 @@ MBB-ComfyUI
   "userID": 789012,
   "messageID": 1234,
   "prompt": "一个金发双马尾少女在游戏机前笑",
+  "negativePrompt": "kei (blue archive), white hair, red eyes, pink halo",
   "size": "square",
   "camera": "selfie"
 }
 ```
 
 `camera` 可省略；传 `selfie` 时会补充手机前置镜头、举着手机和自然随手拍视角，传 `photo` 时会补充 `first person view / point of view`，不会强调手机、相机或手持设备。相机模式只影响提示词拼装和默认尺寸建议，不改变排队、冷却、图片备份与完成回调。
+
+`negativePrompt` 可省略，传入时会追加到插件全局 `negativePrompt` 后面，适合角色专属身份冲突词或画面禁用元素。
 
 尺寸也可以直接传：
 

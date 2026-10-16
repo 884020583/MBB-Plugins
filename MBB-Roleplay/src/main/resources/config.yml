@@ -285,6 +285,22 @@ replyMaxSegments: 2
 replyLinkFilterEnable: true
 #是否允许 draw 技能模拟角色手机自拍和拍照
 cameraEnable: true
+#生图是否启用独立 prompt 编译层：角色层只给画面 brief，编译器再注入角色 canonical tag 和负向词
+drawPromptCompilerEnable: true
+#生图 prompt 编译使用的模型配置名，留空使用 aiProfile
+drawPromptProfile: ""
+#生图 prompt 编译输出 Token 上限
+drawPromptMaxTokens: 1800
+#生图 prompt 编译思考强度：none / low / medium / high
+drawPromptReasoningEffort: "none"
+#生图 prompt 编译请求超时秒数
+drawPromptTimeoutSecond: 120
+#最终正向 prompt 最大字符数
+drawPromptMaxChars: 1600
+#最终角色专属负向 prompt 最大字符数
+drawPromptNegativeMaxChars: 800
+#当前角色知识库外貌参考注入的最大字符数，只取当前角色自己的学生条目
+drawPromptKnowledgeMaxChars: 1200
 #重复检测时参考最近多少条角色回复
 recentReplyCheckCount: 8
 #是否启用代码层重复回复兜底检测；关闭后只在提示词中约束

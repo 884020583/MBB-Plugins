@@ -127,6 +127,54 @@ public class RoleplayKnowledgeService {
         return builder.toString();
     }
 
+    /**
+     * 生图编译器专用：只取当前角色自己的学生条目，避免把凯伊等同源角色外貌一起注入。
+     */
+    public String currentCharacterAppearanceText(RoleplayPersona persona,int maxChars) {
+        RoleplayKnowledgeLibrary library = studentsLibrary();
+        if (library == null || persona == null) return "";
+        RoleplayKnowledgeEntry entry = findCurrentCharacterEntry(library,persona);
+        if (entry == null) return "";
+        int budget = maxChars < 400 ? 400 : maxChars;
+        StringBuilder builder = new StringBuilder("当前角色生图外貌参考：\n");
+        appendAppearanceSection(builder,entry,"外貌",budget);
+        appendAppearanceSection(builder,entry,"变体",budget);
+        return builder.length() <= "当前角色生图外貌参考：\n".length() ? "" : builder.toString();
+    }
+
+    private RoleplayKnowledgeEntry findCurrentCharacterEntry(RoleplayKnowledgeLibrary library,
+                                                             RoleplayPersona persona) {
+        for (RoleplayKnowledgeEntry entry : library.entries) {
+            if (entry == null) continue;
+            if (matchesPersonaEntry(entry,persona)) return entry;
+        }
+        return null;
+    }
+
+    private boolean matchesPersonaEntry(RoleplayKnowledgeEntry entry,RoleplayPersona persona) {
+        if (sameText(entry.name,persona.name)) return true;
+        for (String alias : persona.aliases) {
+            if (sameText(entry.name,alias)) return true;
+            for (String entryAlias : entry.aliases) {
+                if (sameText(entryAlias,alias)) return true;
+            }
+        }
+        return false;
+    }
+
+    private void appendAppearanceSection(StringBuilder builder,RoleplayKnowledgeEntry entry,
+                                         String title,int budget) {
+        String text = sectionText(entry,title);
+        if (text.isEmpty()) return;
+        String line = "- "+title+"："+shortText(text,Math.max(120,budget / 2))+"\n";
+        if (builder.length()+line.length() > budget) return;
+        builder.append(line);
+    }
+
+    private boolean sameText(String left,String right) {
+        return left != null && right != null && left.trim().equalsIgnoreCase(right.trim());
+    }
+
     private String sectionText(RoleplayKnowledgeEntry entry,String title) {
         if (entry == null || entry.sections == null) return "";
         for (RoleplayKnowledgeEntry.Section section : entry.sections) {
