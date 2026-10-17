@@ -106,6 +106,7 @@ public class RoleplayMemberCommandHandler {
             sender.sendMessage("记忆："
                     +"\n/role memory [页码|merge|backup|backups|restore <文件名>]"
                     +"\n/role memory timeline [页码]"
+                    +"\n/role memory conflicts [条数]"
                     +"\n/role gmemory [页码|backup|merge|group ...]"
                     +"\n/role forget"
                     +"\n/role review [now]");

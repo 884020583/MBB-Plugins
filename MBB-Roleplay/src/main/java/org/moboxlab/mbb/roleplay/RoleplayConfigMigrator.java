@@ -205,6 +205,8 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("memoryRelevanceSort","true","长期记忆与永久记忆是否按当前对话相关性排序后注入"),
             new ConfigEntry("memoryRelevancePoolSize","600","相关性排序前先加载多少条长期记忆作为候选池"),
             new ConfigEntry("memoryRelevanceMaxChars","5000","长期记忆按相关性注入的字符上限"),
+            new ConfigEntry("memoryConflictResolveEnable","true","是否在写入长期记忆时检测并归档冲突旧记忆"),
+            new ConfigEntry("memoryConflictMinOverlap","2","冲突判定所需的最小 bigram 重合数"),
             new ConfigEntry("globalMemoryRelevanceMaxChars","4000","永久记忆按相关性注入的字符上限"),
             new ConfigEntry("replyMaxTokens","1200","单次角色回复最大 Token"),
             new ConfigEntry("replyImageMaxTokens","4000","带图片上下文时单次角色回复最大 Token"),

@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.67.0.0905 | 2026-10-17 | `MBB-Roleplay` 新增记忆冲突整理：长期记忆增加 `memoryStatus` 与 `supersededBy`，写入新记忆时检测同群同类型同用户下的相反极性内容，命中后把旧记忆归档而不是删除；查询、合并、时间线和记忆计数只使用 active 记忆；备份/恢复保留归档状态；新增 `/role memory conflicts [条数]` 查看冲突归档。新增 `memoryConflictResolveEnable`、`memoryConflictMinOverlap` 配置。 |
 | V0.5.66.0.0902 | 2026-10-17 | `MBB-Roleplay` 新增会话线程与回合管理：`RoleplayThreadService` 按群维护活跃线程、参与者、上一位发言者、角色是否参与和是否等待角色回应；线程提示进入路由与回复提示词，帮助判断当前消息是延续旧线程、新线程还是群友之间对话。新增 `threadEnable`、`threadWindowSecond` 配置。 |
 | V0.5.65.0.0847 | 2026-10-17 | `MBB-Roleplay` 与 `MBB-ComfyUI` 生图精细度增强：编译器要求背景必须包含具体环境、物件、光线、景深和氛围，禁止 simple background / solid background / flat color；ComfyUI 新增 `detailBoostEnable`、`detailPositive`、`detailNegative`，默认追加环境细节、景深、体积光、服装材质、织物纹理和锐度 tag，并把纯色背景、平涂、低细节和模糊压到负向词。 |
 | V0.5.64.0.0841 | 2026-10-17 | `MBB-Roleplay` 第 4 批反馈与复核：引用角色消息、戳一戳、表情回应作为隐式反馈标记主动发言被接住；新增 `RoleplayReplyReviewService`，发送前复核回复是否像角色、是否有 AI 味、总结腔、说教或重复，低于 `replyReviewMinScore` 时使用模型改写；新增 `replyReviewEnable`、`replyReviewProfile`、`replyReviewMaxTokens`、`replyReviewReasoningEffort`、`replyReviewTimeoutSecond`、`replyReviewMinScore` 配置。 |

@@ -306,8 +306,91 @@ public class RoleplayMemoryUpdateService {
         }
         service.storage().insert("INSERT INTO `"+RoleplayService.MEMORY_TABLE+"` (`groupID`,`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime`) VALUES (?,?,?,?,?,?,?)",
                 groupID,type,subjectID,content,importance,eventTime,System.currentTimeMillis());
+        resolveConflicts(groupID,type,subjectID,content,eventTime);
         mergeLongMemoryIfNeeded(groupID);
         return true;
+    }
+
+    private void resolveConflicts(long groupID,String type,long subjectID,String content,long eventTime) {
+        if (!service.config().memoryConflictResolveEnable) return;
+        List<JSONObject> rows = service.storage().query(
+                "SELECT `ID`,`content`,`eventTime` FROM `"+RoleplayService.MEMORY_TABLE+"` "
+                        + "WHERE `groupID`=? AND `memoryType`=? AND `subjectID`=? "
+                        + "AND `memoryStatus`='active' ORDER BY `ID` DESC LIMIT 20",
+                groupID,type,subjectID);
+        if (rows == null || rows.isEmpty()) return;
+        JSONObject newest = service.storage().queryOne(
+                "SELECT MAX(`ID`) AS `id` FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=?",
+                groupID);
+        long newId = newest == null ? 0L : newest.getLongValue("id");
+        for (JSONObject row : rows) {
+            long oldId = row.getLongValue("ID");
+            if (oldId == newId) continue;
+            String oldContent = service.safe(row.getString("content"));
+            if (!conflicts(oldContent,content)) continue;
+            service.storage().update("UPDATE `"+RoleplayService.MEMORY_TABLE+"` "
+                            + "SET `memoryStatus`='archived',`supersededBy`=?,`updateTime`=? WHERE `ID`=?",
+                    newId,System.currentTimeMillis(),oldId);
+            service.plugin().getLogger().sendInfo("[记忆] 群"+groupID+" 冲突记忆归档 "
+                    +oldId+" -> "+newId+" 类型="+type);
+        }
+    }
+
+    private boolean conflicts(String oldContent,String newContent) {
+        String oldText = SpeechCorpusEntry.normalize(oldContent);
+        String newText = SpeechCorpusEntry.normalize(newContent);
+        if (oldText.isEmpty() || newText.isEmpty()) return false;
+        Set<String> oldPolarity = polarity(oldText);
+        Set<String> newPolarity = polarity(newText);
+        boolean opposite = false;
+        for (String left : oldPolarity) {
+            for (String right : newPolarity) {
+                if (isOpposite(left,right)) {
+                    opposite = true;
+                    break;
+                }
+            }
+        }
+        if (!opposite) return false;
+        Set<String> oldBigrams = SpeechCorpusEntry.bigrams(oldText);
+        Set<String> newBigrams = SpeechCorpusEntry.bigrams(newText);
+        int overlap = 0;
+        for (String item : oldBigrams) {
+            if (newBigrams.contains(item)) overlap++;
+        }
+        return overlap >= service.config().memoryConflictMinOverlap;
+    }
+
+    private Set<String> polarity(String text) {
+        Set<String> result = new LinkedHashSet<>();
+        addPolarity(result,text,"不喜欢","喜欢");
+        addPolarity(result,text,"不是","是");
+        addPolarity(result,text,"没有","有");
+        addPolarity(result,text,"不会","会");
+        addPolarity(result,text,"不能","能");
+        addPolarity(result,text,"不想","想");
+        return result;
+    }
+
+    private void addPolarity(Set<String> result,String text,String negative,String positive) {
+        if (text.contains(negative)) result.add(negative);
+        else if (text.contains(positive)) result.add(positive);
+    }
+
+    private boolean isOpposite(String left,String right) {
+        if (left.equals(right)) return false;
+        return ("喜欢".equals(left) && "不喜欢".equals(right))
+                || ("不喜欢".equals(left) && "喜欢".equals(right))
+                || ("是".equals(left) && "不是".equals(right))
+                || ("不是".equals(left) && "是".equals(right))
+                || ("有".equals(left) && "没有".equals(right))
+                || ("没有".equals(left) && "有".equals(right))
+                || ("会".equals(left) && "不会".equals(right))
+                || ("不会".equals(left) && "会".equals(right))
+                || ("能".equals(left) && "不能".equals(right))
+                || ("不能".equals(left) && "能".equals(right))
+                || ("想".equals(left) && "不想".equals(right))
+                || ("不想".equals(left) && "想".equals(right));
     }
 
     void mergeLongMemoryIfNeeded(long groupID) {
@@ -483,7 +566,7 @@ public class RoleplayMemoryUpdateService {
 
     private long maxLongMemoryId(long groupID) {
         JSONObject row = service.storage().queryOne(
-                "SELECT MAX(`ID`) AS `maxID` FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=?",groupID);
+                "SELECT MAX(`ID`) AS `maxID` FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=? AND `memoryStatus`='active'",groupID);
         return row == null ? 0L : row.getLongValue("maxID");
     }
 
@@ -491,7 +574,7 @@ public class RoleplayMemoryUpdateService {
         List<JSONObject> result = new ArrayList<>();
         List<JSONObject> rows = service.storage().query(
                 "SELECT `ID`,`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime` "
-                        + "FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=? AND `ID`<=? ORDER BY `ID` ASC",
+                        + "FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=? AND `ID`<=? AND `memoryStatus`='active' ORDER BY `ID` ASC",
                 groupID,maxId);
         if (rows == null) return result;
         for (JSONObject row : rows) {

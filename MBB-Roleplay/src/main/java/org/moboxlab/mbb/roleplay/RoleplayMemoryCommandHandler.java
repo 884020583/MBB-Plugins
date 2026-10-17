@@ -107,6 +107,25 @@ public class RoleplayMemoryCommandHandler {
             sender.sendMessage(builder.toString());
             return;
         }
+        if (args.length > 2 && "conflicts".equalsIgnoreCase(args[2])) {
+            int limit = args.length > 3 ? command.parsePage(args,3) : 12;
+            if (limit > 20) limit = 20;
+            JSONArray archived = command.service().memoryQueryService().archived(groupID,limit);
+            if (archived.isEmpty()) {
+                sender.sendMessage("当前群没有被冲突归档的长期记忆。");
+                return;
+            }
+            StringBuilder builder = new StringBuilder("已归档冲突记忆：");
+            for (Object object : archived) {
+                JSONObject item = (JSONObject)object;
+                builder.append("\n#").append(item.getLongValue("id"))
+                        .append(" [").append(item.getString("type")).append("] ")
+                        .append(item.getString("content"))
+                        .append(" -> 新记忆#").append(item.getLongValue("supersededBy"));
+            }
+            sender.sendMessage(builder.toString());
+            return;
+        }
         int page = 1;
         if (args.length > 2) {
             try {

@@ -299,6 +299,10 @@ memoryRelevanceSort: true
 memoryRelevancePoolSize: 600
 #长期记忆按相关性注入的字符上限
 memoryRelevanceMaxChars: 5000
+#是否在写入长期记忆时检测并归档冲突旧记忆
+memoryConflictResolveEnable: true
+#冲突判定所需的最小 bigram 重合数
+memoryConflictMinOverlap: 2
 #永久记忆按相关性注入的字符上限
 globalMemoryRelevanceMaxChars: 4000
 #单次角色回复最大 Token

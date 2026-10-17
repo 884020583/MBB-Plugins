@@ -158,7 +158,7 @@ public class RoleplayMemoryBackupService {
     private JSONArray exportLongTerm() {
         JSONArray result = new JSONArray();
         List<JSONObject> rows = service.storage().query(
-                "SELECT `groupID`,`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime` "
+                "SELECT `groupID`,`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`memoryStatus`,`supersededBy`,`updateTime` "
                         + "FROM `"+RoleplayService.MEMORY_TABLE+"` ORDER BY `groupID` ASC,`ID` ASC");
         if (rows == null) return result;
         for (JSONObject row : rows) {
@@ -169,6 +169,8 @@ public class RoleplayMemoryBackupService {
             item.put("content",row.getString("content"));
             item.put("importance",row.getIntValue("importance"));
             item.put("eventTime",row.getLongValue("eventTime"));
+            item.put("memoryStatus",row.getString("memoryStatus"));
+            item.put("supersededBy",row.getLongValue("supersededBy"));
             item.put("updateTime",row.getLongValue("updateTime"));
             result.add(item);
         }
@@ -204,12 +206,15 @@ public class RoleplayMemoryBackupService {
             String content = service.safe(item.getString("content")).trim();
             if (groupID <= 0 || content.isEmpty()) continue;
             service.storage().insert("INSERT INTO `"+RoleplayService.MEMORY_TABLE+"` "
-                            + "(`groupID`,`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime`) "
-                            + "VALUES (?,?,?,?,?,?,?)",
+                            + "(`groupID`,`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`memoryStatus`,`supersededBy`,`updateTime`) "
+                            + "VALUES (?,?,?,?,?,?,?,?,?)",
                     groupID,service.safe(item.getString("type")),item.getLongValue("subjectID"),
                     content,item.getIntValue("importance"),
                     item.getLongValue("eventTime") > 0 ? item.getLongValue("eventTime")
                             : item.getLongValue("updateTime"),
+                    service.safe(item.getString("memoryStatus")).isEmpty()
+                            ? "active" : item.getString("memoryStatus"),
+                    item.getLongValue("supersededBy"),
                     item.getLongValue("updateTime"));
             saved++;
         }

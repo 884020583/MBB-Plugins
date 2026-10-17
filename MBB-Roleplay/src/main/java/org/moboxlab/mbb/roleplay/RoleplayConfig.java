@@ -111,6 +111,8 @@ public class RoleplayConfig {
     public boolean memoryRelevanceSort = true;
     public int memoryRelevancePoolSize = 600;
     public int memoryRelevanceMaxChars = 5000;
+    public boolean memoryConflictResolveEnable = true;
+    public int memoryConflictMinOverlap = 2;
     public int globalMemoryRelevanceMaxChars = 4000;
     public boolean stickerAttachEnable = true;
     public int stickerAttachWindowSecond = 5;
@@ -414,6 +416,10 @@ public class RoleplayConfig {
                 plugin.getConfig().getInt("memoryRelevancePoolSize",600);
         config.memoryRelevanceMaxChars =
                 plugin.getConfig().getInt("memoryRelevanceMaxChars",5000);
+        config.memoryConflictResolveEnable =
+                plugin.getConfig().getBoolean("memoryConflictResolveEnable",true);
+        config.memoryConflictMinOverlap =
+                plugin.getConfig().getInt("memoryConflictMinOverlap",2);
         config.globalMemoryRelevanceMaxChars =
                 plugin.getConfig().getInt("globalMemoryRelevanceMaxChars",4000);
         config.stickerAttachEnable = plugin.getConfig().getBoolean("stickerAttachEnable",true);
@@ -612,6 +618,8 @@ public class RoleplayConfig {
         if (config.splitMessageSuppressMaxChars > 60) config.splitMessageSuppressMaxChars = 60;
         if (config.memoryRelevanceMaxChars < 200) config.memoryRelevanceMaxChars = 200;
         if (config.memoryRelevanceMaxChars > 8000) config.memoryRelevanceMaxChars = 8000;
+        if (config.memoryConflictMinOverlap < 1) config.memoryConflictMinOverlap = 1;
+        if (config.memoryConflictMinOverlap > 8) config.memoryConflictMinOverlap = 8;
         if (config.memoryRelevancePoolSize < 50) config.memoryRelevancePoolSize = 50;
         if (config.memoryRelevancePoolSize > 3000) config.memoryRelevancePoolSize = 3000;
         if (config.globalMemoryRelevanceMaxChars < 200) {

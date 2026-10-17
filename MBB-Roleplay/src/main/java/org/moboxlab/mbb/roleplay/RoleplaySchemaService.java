@@ -34,6 +34,8 @@ public class RoleplaySchemaService {
                 + "`content` TEXT NOT NULL DEFAULT '',"
                 + "`importance` INTEGER NOT NULL DEFAULT 1,"
                 + "`eventTime` INTEGER NOT NULL DEFAULT 0,"
+                + "`memoryStatus` TEXT NOT NULL DEFAULT 'active',"
+                + "`supersededBy` INTEGER NOT NULL DEFAULT 0,"
                 + "`updateTime` INTEGER NOT NULL DEFAULT 0"
                 + ")");
         service.storage().update("CREATE TABLE IF NOT EXISTS `"+RoleplayService.STATE_TABLE+"` ("
@@ -48,6 +50,8 @@ public class RoleplaySchemaService {
         ensureColumn(RoleplayService.STATE_TABLE,"lastMemoryID","INTEGER NOT NULL DEFAULT 0");
         ensureColumn(RoleplayService.STATE_TABLE,"lastMergeTime","INTEGER NOT NULL DEFAULT 0");
         ensureColumn(RoleplayService.MEMORY_TABLE,"eventTime","INTEGER NOT NULL DEFAULT 0");
+        ensureColumn(RoleplayService.MEMORY_TABLE,"memoryStatus","TEXT NOT NULL DEFAULT 'active'");
+        ensureColumn(RoleplayService.MEMORY_TABLE,"supersededBy","INTEGER NOT NULL DEFAULT 0");
         service.storage().update("CREATE TABLE IF NOT EXISTS `"+RoleplayService.GROUP_TABLE+"` ("
                 + "`ID` INTEGER PRIMARY KEY AUTOINCREMENT,"
                 + "`groupID` INTEGER NOT NULL DEFAULT 0 UNIQUE,"

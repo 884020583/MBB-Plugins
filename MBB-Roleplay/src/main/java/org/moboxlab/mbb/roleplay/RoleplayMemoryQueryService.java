@@ -121,13 +121,13 @@ public class RoleplayMemoryQueryService {
                     "SELECT `memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime` FROM `"+RoleplayService.MEMORY_TABLE+"` "
                             + "WHERE `groupID`=? AND (`subjectID`=0 OR `subjectID` NOT IN "
                             + "(SELECT `userID` FROM `plugin_mbb_roleplay_blacklist` "
-                            + "WHERE `groupID`=?)) "
+                            + "WHERE `groupID`=?)) AND `memoryStatus`='active' "
                             + "ORDER BY `importance` DESC,`updateTime` DESC LIMIT ?",
                     groupID,groupID,capped);
         } else {
             rows = service.storage().query(
                     "SELECT `memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime` FROM `"+RoleplayService.MEMORY_TABLE+"` "
-                            + "WHERE `groupID`=? ORDER BY `importance` DESC,`updateTime` DESC LIMIT ?",
+                            + "WHERE `groupID`=? AND `memoryStatus`='active' ORDER BY `importance` DESC,`updateTime` DESC LIMIT ?",
                     groupID,capped);
         }
         if (rows == null) return result;
@@ -153,7 +153,7 @@ public class RoleplayMemoryQueryService {
         long offset = (long)(page - 1) * pageSize;
         List<JSONObject> rows = service.storage().query(
                 "SELECT `memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime` "
-                        + "FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=? "
+                        + "FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=? AND `memoryStatus`='active' "
                         + "ORDER BY `eventTime` DESC,`ID` DESC LIMIT "+pageSize+" OFFSET "+offset,
                 groupID);
         if (rows == null) return result;
@@ -165,6 +165,29 @@ public class RoleplayMemoryQueryService {
             item.put("importance",row.getIntValue("importance"));
             item.put("eventTime",row.getLongValue("eventTime"));
             item.put("updateTime",row.getLongValue("updateTime"));
+            result.add(item);
+        }
+        return result;
+    }
+
+    JSONArray archived(long groupID,int limit) {
+        JSONArray result = new JSONArray();
+        if (groupID <= 0) return result;
+        if (limit < 1) limit = 1;
+        if (limit > 50) limit = 50;
+        List<JSONObject> rows = service.storage().query(
+                "SELECT `ID`,`memoryType`,`subjectID`,`content`,`eventTime`,`supersededBy`,`updateTime` "
+                        + "FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=? AND `memoryStatus`='archived' "
+                        + "ORDER BY `updateTime` DESC LIMIT "+limit,
+                groupID);
+        if (rows == null) return result;
+        for (JSONObject row : rows) {
+            JSONObject item = new JSONObject(true);
+            item.put("id",row.getLongValue("ID"));
+            item.put("type",row.getString("memoryType"));
+            item.put("content",row.getString("content"));
+            item.put("eventTime",row.getLongValue("eventTime"));
+            item.put("supersededBy",row.getLongValue("supersededBy"));
             result.add(item);
         }
         return result;
@@ -185,7 +208,7 @@ public class RoleplayMemoryQueryService {
     }
 
     int memoryCount(long groupID) {
-        List<JSONObject> rows = service.storage().query("SELECT COUNT(*) AS `count` FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=?",groupID);
+        List<JSONObject> rows = service.storage().query("SELECT COUNT(*) AS `count` FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=? AND `memoryStatus`='active'",groupID);
         return rows == null || rows.isEmpty() ? 0 : rows.get(0).getIntValue("count");
     }
 
