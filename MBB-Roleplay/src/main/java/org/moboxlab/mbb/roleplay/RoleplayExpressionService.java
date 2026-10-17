@@ -24,6 +24,9 @@ import java.util.regex.Pattern;
 public class RoleplayExpressionService {
     private static final String TABLE = "plugin_mbb_roleplay_expression";
     private static final Pattern TOKEN = Pattern.compile("[\\p{IsHan}a-zA-Z0-9_]{2,16}");
+    private static final Pattern CQ_AT = Pattern.compile("\\[CQ:at,[^]]*]");
+    private static final Pattern AT_NUMBER = Pattern.compile("@\\s*\\d{4,}");
+    private static final Pattern LONG_DIGITS = Pattern.compile("\\d{4,}");
     private static final Set<String> STOP = new HashSet<>(Arrays.asList(
             "这个","那个","什么","怎么","为什么","可以","应该","不是","没有","就是","然后","因为","所以",
             "真的","感觉","有点","一个","现在","今天","明天","昨天","我们","你们","他们","自己","哈哈",
@@ -61,6 +64,7 @@ public class RoleplayExpressionService {
                 + ")");
         storage().update("CREATE INDEX IF NOT EXISTS `idx_plugin_mbb_roleplay_expression_status` "
                 + "ON `"+TABLE+"` (`groupID`,`status`)");
+        cleanupNumericCandidates();
         reloadApproved();
     }
 
@@ -190,21 +194,31 @@ public class RoleplayExpressionService {
         if (content == null) return result;
         String text = content.trim();
         if (text.isEmpty() || text.contains("[图片") || text.contains("[表情") || text.contains("[语音")) return result;
+        text = CQ_AT.matcher(text).replaceAll(" ");
+        text = AT_NUMBER.matcher(text).replaceAll(" ");
+        text = LONG_DIGITS.matcher(text).replaceAll(" ");
         Matcher matcher = TOKEN.matcher(text);
         while (matcher.find() && result.size() < 12) {
             String token = matcher.group();
             if (token.length() < 2 || STOP.contains(token)) continue;
+            if (token.matches("\\d+")) continue;
             if (!result.contains(token)) result.add(token);
-            if (token.length() >= 4) {
-                for (int n = 3; n <= Math.min(6,token.length() - 1) && result.size() < 12; n++) {
-                    for (int i = 0; i + n <= token.length() && result.size() < 12; i += n) {
-                        String part = token.substring(i,i + n);
-                        if (!STOP.contains(part) && !result.contains(part)) result.add(part);
-                    }
-                }
-            }
         }
         return result;
+    }
+
+    private void cleanupNumericCandidates() {
+        List<JSONObject> rows = storage().query("SELECT `ID`,`content` FROM `"+TABLE+"`");
+        if (rows == null) return;
+        int removed = 0;
+        for (JSONObject row : rows) {
+            String content = safe(row.getString("content")).trim();
+            if (!content.matches("\\d+")) continue;
+            removed += storage().update("DELETE FROM `"+TABLE+"` WHERE `ID`=?",row.getLongValue("ID"));
+        }
+        if (removed > 0) {
+            plugin.getLogger().sendInfo("[表达] 清理纯数字候选 "+removed+" 条");
+        }
     }
 
     private void trimCandidates() {
