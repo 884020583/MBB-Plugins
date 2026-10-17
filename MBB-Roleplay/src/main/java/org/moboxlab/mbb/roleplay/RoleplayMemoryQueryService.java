@@ -32,7 +32,8 @@ public class RoleplayMemoryQueryService {
             StringBuilder plain = new StringBuilder();
             for (int i = 0; i < memories.size(); i++) {
                 JSONObject item = memories.getJSONObject(i);
-                plain.append("- [").append(service.safe(item.getString("type"))).append("] ")
+                plain.append("- [").append(service.formatMemoryTime(item.getLongValue("eventTime"))).append("] [")
+                        .append(service.safe(item.getString("type"))).append("] ")
                         .append(service.safe(item.getString("content"))).append("\n");
             }
             return plain.toString();
@@ -42,7 +43,8 @@ public class RoleplayMemoryQueryService {
         int used = 0;
         int count = 0;
         for (JSONObject item : ranked) {
-            String line = "- ["+service.safe(item.getString("type"))+"] "
+            String line = "- ["+service.formatMemoryTime(item.getLongValue("eventTime"))+"] ["
+                    +service.safe(item.getString("type"))+"] "
                     +service.safe(item.getString("content"))+"\n";
             if (count > 0 && used + line.length() > service.config().memoryRelevanceMaxChars) break;
             builder.append(line);
@@ -57,12 +59,14 @@ public class RoleplayMemoryQueryService {
     List<JSONObject> rankMemories(JSONArray memories,long userID,String query) {
         Set<String> queryBigrams = SpeechCorpusEntry.bigrams(
                 SpeechCorpusEntry.normalize(query == null ? "" : query));
+        String normalizedQuery = SpeechCorpusEntry.normalize(query == null ? "" : query);
         long now = System.currentTimeMillis();
         List<MemoryScore> scored = new ArrayList<>();
         for (int i = 0; i < memories.size(); i++) {
             JSONObject item = memories.getJSONObject(i);
             Set<String> bigrams = SpeechCorpusEntry.bigrams(
                     SpeechCorpusEntry.normalize(service.safe(item.getString("content"))));
+            String normalizedContent = SpeechCorpusEntry.normalize(service.safe(item.getString("content")));
             //重要度给足权重，避免一次无关的关键词命中就压过明显更重要的记忆
             double score = item.getIntValue("importance") * 0.8;
             if (!queryBigrams.isEmpty()) {
@@ -74,7 +78,12 @@ public class RoleplayMemoryQueryService {
                 score += (double) overlap / queryBigrams.size() * 8.0;
             }
             if (userID > 0 && item.getLongValue("subjectID") == userID) score += 2.0;
-            score += recencyBonus(item.getLongValue("updateTime"),now);
+            //混合检索：完整关键词命中比 bigram 更可信，事件时间优先于写入时间
+            if (normalizedQuery.length() >= 2 && normalizedContent.contains(normalizedQuery)) {
+                score += 4.0;
+            }
+            long eventTime = item.getLongValue("eventTime");
+            score += recencyBonus(eventTime > 0 ? eventTime : item.getLongValue("updateTime"),now);
             scored.add(new MemoryScore(item,score));
         }
         Collections.sort(scored,new Comparator<MemoryScore>() {
@@ -109,7 +118,7 @@ public class RoleplayMemoryQueryService {
         List<JSONObject> rows;
         if (excludeBlacklisted) {
             rows = service.storage().query(
-                    "SELECT `memoryType`,`subjectID`,`content`,`importance`,`updateTime` FROM `"+RoleplayService.MEMORY_TABLE+"` "
+                    "SELECT `memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime` FROM `"+RoleplayService.MEMORY_TABLE+"` "
                             + "WHERE `groupID`=? AND (`subjectID`=0 OR `subjectID` NOT IN "
                             + "(SELECT `userID` FROM `plugin_mbb_roleplay_blacklist` "
                             + "WHERE `groupID`=?)) "
@@ -117,7 +126,7 @@ public class RoleplayMemoryQueryService {
                     groupID,groupID,capped);
         } else {
             rows = service.storage().query(
-                    "SELECT `memoryType`,`subjectID`,`content`,`importance`,`updateTime` FROM `"+RoleplayService.MEMORY_TABLE+"` "
+                    "SELECT `memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime` FROM `"+RoleplayService.MEMORY_TABLE+"` "
                             + "WHERE `groupID`=? ORDER BY `importance` DESC,`updateTime` DESC LIMIT ?",
                     groupID,capped);
         }
@@ -128,6 +137,33 @@ public class RoleplayMemoryQueryService {
             item.put("subjectID",row.getLongValue("subjectID"));
             item.put("content",row.getString("content"));
             item.put("importance",row.getIntValue("importance"));
+            item.put("eventTime",row.getLongValue("eventTime"));
+            item.put("updateTime",row.getLongValue("updateTime"));
+            result.add(item);
+        }
+        return result;
+    }
+
+    JSONArray timeline(long groupID,int page,int pageSize) {
+        JSONArray result = new JSONArray();
+        if (groupID <= 0) return result;
+        if (page < 1) page = 1;
+        if (pageSize < 1) pageSize = 12;
+        if (pageSize > 50) pageSize = 50;
+        long offset = (long)(page - 1) * pageSize;
+        List<JSONObject> rows = service.storage().query(
+                "SELECT `memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime` "
+                        + "FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=? "
+                        + "ORDER BY `eventTime` DESC,`ID` DESC LIMIT "+pageSize+" OFFSET "+offset,
+                groupID);
+        if (rows == null) return result;
+        for (JSONObject row : rows) {
+            JSONObject item = new JSONObject(true);
+            item.put("type",row.getString("memoryType"));
+            item.put("subjectID",row.getLongValue("subjectID"));
+            item.put("content",row.getString("content"));
+            item.put("importance",row.getIntValue("importance"));
+            item.put("eventTime",row.getLongValue("eventTime"));
             item.put("updateTime",row.getLongValue("updateTime"));
             result.add(item);
         }

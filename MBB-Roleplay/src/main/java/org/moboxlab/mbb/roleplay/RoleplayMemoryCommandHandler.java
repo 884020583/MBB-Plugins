@@ -69,6 +69,44 @@ public class RoleplayMemoryCommandHandler {
                     : "当前群已有长期记忆整理任务在执行。");
             return;
         }
+        if (args.length > 2 && "timeline".equalsIgnoreCase(args[2])) {
+            int page = args.length > 3 ? command.parsePage(args,3) : 1;
+            int pageSize = 12;
+            int total = command.service().memoryCount(groupID);
+            int totalPages = Math.max(1,(total + pageSize - 1) / pageSize);
+            if (page > totalPages) page = totalPages;
+            JSONArray events = command.service().memoryQueryService().timeline(groupID,page,pageSize);
+            JSONArray rows = new JSONArray();
+            for (Object object : events) {
+                JSONObject item = (JSONObject)object;
+                JSONObject copy = new JSONObject(true);
+                copy.put("type",item.getString("type"));
+                copy.put("subjectID",item.getLongValue("subjectID"));
+                copy.put("importance",item.getIntValue("importance"));
+                copy.put("eventTime",item.getLongValue("eventTime"));
+                copy.put("content","["+command.service().formatMemoryTime(item.getLongValue("eventTime"))+"] "
+                        +item.getString("content"));
+                rows.add(copy);
+            }
+            JSONObject data = new JSONObject(true);
+            data.put("role",command.service().getRoleName());
+            data.put("groupID",groupID);
+            data.put("shortSummary","事件时间线：按事件发生时间倒序排列，第 "+page+" / "+totalPages+" 页");
+            data.put("memories",rows);
+            byte[] image = RoleplayMemoryImageRenderer.render(data,page,pageSize);
+            if (image != null) {
+                sender.sendImage(ImageUtil.toBase64Uri(image));
+                return;
+            }
+            StringBuilder builder = new StringBuilder("事件时间线（第 "+page+" / "+totalPages+" 页）：");
+            for (Object object : rows) {
+                JSONObject item = (JSONObject)object;
+                builder.append("\n- [").append(item.getString("type")).append("] ")
+                        .append(item.getString("content"));
+            }
+            sender.sendMessage(builder.toString());
+            return;
+        }
         int page = 1;
         if (args.length > 2) {
             try {

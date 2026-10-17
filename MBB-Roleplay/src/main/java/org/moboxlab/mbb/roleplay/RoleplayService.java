@@ -551,6 +551,10 @@ public class RoleplayService {
         return rateLimitService;
     }
 
+    RoleplayMemoryQueryService memoryQueryService() {
+        return memoryQueryService;
+    }
+
     RoleplayBatchScheduler batchScheduler() {
         return batchScheduler;
     }

@@ -4,15 +4,21 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import org.moboxlab.moboxbot.API.PluginService;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
+import java.util.TimeZone;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.function.Consumer;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * 记忆更新与合并
@@ -21,6 +27,7 @@ import java.util.function.Consumer;
  * 运行态 Map 仍由 RoleplayService 持有，保证并发状态只有一个来源。
  */
 public class RoleplayMemoryUpdateService {
+    private static final Pattern EVENT_TIME = Pattern.compile("\\[(\\d{4}-\\d{2}-\\d{2} \\d{2}:\\d{2})\\]");
     private final RoleplayService service;
 
     public RoleplayMemoryUpdateService(RoleplayService service) {
@@ -285,19 +292,20 @@ public class RoleplayMemoryUpdateService {
         if (type.isEmpty() || content.isEmpty()) return false;
         long subjectID = json.getLongValue("subjectID");
         int importance = json.getIntValue("importance");
+        long eventTime = eventTime(json.getLongValue("eventTime"),content,System.currentTimeMillis());
         if (importance < 1) importance = 1;
         if (importance > 5) importance = 5;
         JSONObject exists = service.storage().queryOne(
                 "SELECT `ID` FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=? AND `memoryType`=? AND `subjectID`=? AND `content`=?",
                 groupID,type,subjectID,content);
         if (exists != null) {
-            service.storage().update("UPDATE `"+RoleplayService.MEMORY_TABLE+"` SET `importance`=MAX(`importance`,?),`updateTime`=? WHERE `ID`=?",
-                    importance,System.currentTimeMillis(),exists.getLongValue("ID"));
+            service.storage().update("UPDATE `"+RoleplayService.MEMORY_TABLE+"` SET `importance`=MAX(`importance`,?),`eventTime`=?,`updateTime`=? WHERE `ID`=?",
+                    importance,eventTime,System.currentTimeMillis(),exists.getLongValue("ID"));
             mergeLongMemoryIfNeeded(groupID);
             return true;
         }
-        service.storage().insert("INSERT INTO `"+RoleplayService.MEMORY_TABLE+"` (`groupID`,`memoryType`,`subjectID`,`content`,`importance`,`updateTime`) VALUES (?,?,?,?,?,?)",
-                groupID,type,subjectID,content,importance,System.currentTimeMillis());
+        service.storage().insert("INSERT INTO `"+RoleplayService.MEMORY_TABLE+"` (`groupID`,`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime`) VALUES (?,?,?,?,?,?,?)",
+                groupID,type,subjectID,content,importance,eventTime,System.currentTimeMillis());
         mergeLongMemoryIfNeeded(groupID);
         return true;
     }
@@ -482,7 +490,7 @@ public class RoleplayMemoryUpdateService {
     private List<JSONObject> exportLongMemoriesUpTo(long groupID,long maxId) {
         List<JSONObject> result = new ArrayList<>();
         List<JSONObject> rows = service.storage().query(
-                "SELECT `ID`,`memoryType`,`subjectID`,`content`,`importance`,`updateTime` "
+                "SELECT `ID`,`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime` "
                         + "FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=? AND `ID`<=? ORDER BY `ID` ASC",
                 groupID,maxId);
         if (rows == null) return result;
@@ -493,6 +501,7 @@ public class RoleplayMemoryUpdateService {
             item.put("subjectID",row.getLongValue("subjectID"));
             item.put("content",row.getString("content"));
             item.put("importance",row.getIntValue("importance"));
+            item.put("eventTime",row.getLongValue("eventTime"));
             item.put("updateTime",row.getLongValue("updateTime"));
             result.add(item);
         }
@@ -519,13 +528,30 @@ public class RoleplayMemoryUpdateService {
             if (importance > 5) importance = 5;
             long updateTime = item.getLongValue("updateTime");
             if (updateTime <= 0) updateTime = now;
+            long eventTime = eventTime(item.getLongValue("eventTime"),content,updateTime);
             service.storage().insert("INSERT INTO `"+RoleplayService.MEMORY_TABLE+"` "
-                            + "(`groupID`,`memoryType`,`subjectID`,`content`,`importance`,`updateTime`) "
-                            + "VALUES (?,?,?,?,?,?)",
-                    groupID,type,item.getLongValue("subjectID"),content,importance,updateTime);
+                            + "(`groupID`,`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime`) "
+                            + "VALUES (?,?,?,?,?,?,?)",
+                    groupID,type,item.getLongValue("subjectID"),content,importance,eventTime,updateTime);
             saved++;
         }
         return saved;
+    }
+
+    private long eventTime(long value,String content,long fallback) {
+        if (value > 0) return value;
+        Matcher matcher = EVENT_TIME.matcher(service.safe(content));
+        if (!matcher.find()) return fallback;
+        try {
+            String zoneName = service.config().timeZone == null || service.config().timeZone.trim().isEmpty()
+                    ? "Asia/Shanghai" : service.config().timeZone.trim();
+            SimpleDateFormat format = new SimpleDateFormat("yyyy-MM-dd HH:mm",Locale.CHINA);
+            format.setTimeZone(TimeZone.getTimeZone(zoneName));
+            Date date = format.parse(matcher.group(1));
+            return date == null ? fallback : date.getTime();
+        } catch (Exception e) {
+            return fallback;
+        }
     }
 
     private List<JSONObject> mergeLongMemoryBatch(PluginService ai,long groupID,
