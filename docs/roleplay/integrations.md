@@ -47,6 +47,12 @@ flowchart LR
 
 编译器只取目标角色自己的学生条目，不会把其他角色或同源角色的外貌一起注入。用户让角色画别人时，目标角色就是别人，不会自动把当前角色画进画面。编译完成后 `RoleplayDrawPromptValidator` 会做本地质检：把其他角色和冲突外貌词从正向 prompt 移到负向 prompt，强制目标角色 canonical tag 和人数标签。最终交给 `MBB-ComfyUI` 的是 `prompt + negativePrompt + size + camera`，其中 `negativePrompt` 会追加到 ComfyUI 全局负向词后面。
 
+`MBB-ComfyUI` 生成完成后，如果 `identityCheckEnable` 为 `true`，会调用 `MBB-Vision` 对图片做一次身份/外貌校验：命中 `forbiddenTags` 时在控制台输出“身份校验疑似不符”，校验只记录日志，不阻断图片发送。
+
+## 回复复核与隐式反馈
+
+主动发言反馈除了“窗口内有人接话”，还会把引用角色消息、戳一戳、表情回应作为隐式反馈。发送前 `RoleplayReplyReviewService` 会对回复候选做一次复核，低于 `replyReviewMinScore` 且模型给出改写时使用改写文本。
+
 ## 戳一戳与引用
 
 被人戳一戳时，插件走和群消息同一条处理链路，只是把当前消息换成「有人戳了你」。

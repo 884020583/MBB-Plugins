@@ -28,6 +28,9 @@
 | `/role expression clear` | `BOT_ADMIN` | 清空当前群表达候选 |
 | `/role review [now]` | `BOT_ADMIN` | 手动触发当前群每日复盘 |
 | `/role attention [reset]` | `BOT_ADMIN` | 查看或重置当前群注意力 |
+| `/role trace [条数]` | `BOT_ADMIN` | 查看当前群最近的对话 trace，包含路由指向、技能、原因、回复和 token |
+| `/role eval list` | `BOT_ADMIN` | 查看内置评测用例 |
+| `/role eval run <id\|all>` | `BOT_ADMIN` | 运行指定评测用例或全部评测 |
 
 `/role quiet add` 和 `/role quiet remove` 允许普通群员自助使用；`/role` 的其他子命令仍然需要 `BOT_ADMIN`。
 
@@ -51,6 +54,7 @@
 | `/role memory backup` | `BOT_ADMIN` | 备份全部群的短期、长期、永久记忆 |
 | `/role memory backups` | `BOT_ADMIN` | 查看备份文件名列表 |
 | `/role memory restore <文件名>` | `OWNER` | 从备份文件恢复全部记忆 |
+| `/role memory timeline [页码]` | `BOT_ADMIN` | 按事件时间倒序查看长期记忆时间线 |
 | `/role forget` | `BOT_ADMIN` | 清空当前群记忆、聊天上下文并轮换 AI 会话 |
 | `/role persona [文件名]` | `BOT_ADMIN` | 查看或切换角色设定文件 |
 | `/role persona reset <文件名>` | `BOT_ADMIN` | 用内置版本覆盖指定角色设定文件 |

@@ -161,6 +161,19 @@ drawPromptTimeoutSecond: 120
 drawPromptMaxChars: 1600
 drawPromptNegativeMaxChars: 800
 drawPromptKnowledgeMaxChars: 1200
+replyReviewEnable: true
+replyReviewProfile: ""
+replyReviewMaxTokens: 1200
+replyReviewReasoningEffort: "none"
+replyReviewTimeoutSecond: 60
+replyReviewMinScore: 70
+traceEnable: true
+traceKeepHours: 72
+traceMaxRows: 2000
+evalEnable: true
+evalProfile: ""
+evalMaxTokens: 1200
+evalTimeoutSecond: 60
 maxLongMemories: 150
 topicFatigueEnable: true
 topicFatigueWindowMinute: 30
@@ -209,6 +222,10 @@ quietReplyEnable: true
 `cameraEnable` 默认 `true`。设为 `false` 后只关闭 `draw` 技能里的手机自拍和拍照模式，角色会忽略 `camera=selfie/photo`，普通生图仍可继续使用。改完执行 `/role reload` 或重启主程序后生效。
 
 `drawPromptCompilerEnable` 默认 `true`。开启后角色层只生成画面 brief，`RoleplayDrawPromptService` 用独立上下文按 `brief.characters/subject` 解析目标角色，注入对应角色的 `imageTags`、`imageNegativeTags`、外貌和知识库条目，再交给 `MBB-ComfyUI`。画别人时不会自动把当前角色加入画面。`drawPromptProfile` 留空时使用 `aiProfile`；编译默认使用 `reasoningEffort: none`，避免把预算耗在思考上。`drawPromptMaxChars` 和 `drawPromptNegativeMaxChars` 分别限制最终正向、角色专属负向 prompt；`drawPromptKnowledgeMaxChars` 只注入目标角色自己的学生条目，不会把凯伊等其他角色外貌带进生图上下文。
+
+`replyReviewEnable` 默认 `true`。角色回复在发送前会经过 `RoleplayReplyReviewService` 复核：检查是否像角色、是否有 AI 味、总结腔、说教、重复或过长；分数低于 `replyReviewMinScore` 且模型给出 `rewrite` 时使用改写文本。`replyReviewProfile` 留空时使用 `aiProfile`。
+
+`traceEnable` 默认 `true`，按群记录路由与回复 trace，保留 `traceKeepHours` 小时，最多 `traceMaxRows` 行；`/role trace` 查看。`evalEnable` 默认 `true`，`/role eval` 运行内置或 `evals/roleplay-evals.json` 自定义评测集，`evalProfile` 留空时使用 `aiProfile`。
 
 `topicFatigueEnable` 默认 `true`。插件会按群记录话题疲劳：同一话题在 `topicFatigueWindowMinute` 分钟内出现次数达到 `topicFatigueMinCount`，且角色自己参与达到 `topicFatigueSelfCount` 时，路由层会降权或跳过主动回复；直接点名、引用回复或明确提问仍可打破疲劳。记录保留 `topicFatigueKeepHours` 小时。
 
