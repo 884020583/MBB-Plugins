@@ -86,6 +86,8 @@ public class RoleplayDrawPromptService {
             else result.size = size;
             if (!compiledCamera.isEmpty()) result.camera = compiledCamera;
             else result.camera = camera;
+            result.expectedTags = joinTargetTags(targets,false);
+            result.forbiddenTags = joinTargetTags(targets,true);
             service.plugin().getLogger().sendInfo("[生图] brief="+service.shortText(brief.promptText(),240));
             service.plugin().getLogger().sendInfo("[生图] compiler="+service.shortText(result.prompt,240)
                     +" validation="+result.validation);
@@ -159,15 +161,7 @@ public class RoleplayDrawPromptService {
         builder.append("你是生图 prompt 编译器，只输出 JSON，不要解释，不要聊天。\n")
                 .append("本次画面的目标角色如下；只能画这些角色，不要把当前角色自动加入画面：\n");
         for (RoleplayDrawTarget target : targets) {
-            builder.append("- ").append(target.name)
-                    .append(" canonical=").append(target.canonicalTag).append("\n")
-                    .append("  标准标签：").append(target.tagText()).append("\n");
-            if (!target.appearance.isEmpty()) {
-                builder.append("  外貌：").append(target.appearance).append("\n");
-            }
-            if (!target.negativeText().isEmpty()) {
-                builder.append("  禁止标签：").append(target.negativeText()).append("\n");
-            }
+            builder.append("- ").append(target.name).append(" ").append(target.cardText()).append("\n");
         }
         builder.append("画面 brief：").append(brief.toJson().toJSONString()).append("\n");
         builder.append("编译规则：\n")
@@ -210,6 +204,8 @@ public class RoleplayDrawPromptService {
         if (result.status) {
             result.size = size;
             result.camera = camera;
+            result.expectedTags = joinTargetTags(targets,false);
+            result.forbiddenTags = joinTargetTags(targets,true);
             service.plugin().getLogger().sendWarn("[生图] 使用兜底编译 reason="+reason
                     +" prompt="+service.shortText(result.prompt,180));
         }
@@ -221,6 +217,16 @@ public class RoleplayDrawPromptService {
         if (text.isEmpty()) return;
         if (builder.length() > 0) builder.append(", ");
         builder.append(text);
+    }
+
+    private String joinTargetTags(List<RoleplayDrawTarget> targets,boolean negative) {
+        StringBuilder builder = new StringBuilder();
+        for (RoleplayDrawTarget target : targets) {
+            if (target == null) continue;
+            List<String> values = negative ? target.negativeTags : target.imageTags;
+            for (String value : values) append(builder,value);
+        }
+        return builder.toString();
     }
 
     private String normalizedName(String value) {

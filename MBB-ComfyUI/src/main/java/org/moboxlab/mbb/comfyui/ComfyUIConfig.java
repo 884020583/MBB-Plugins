@@ -33,6 +33,8 @@ public class ComfyUIConfig {
     public int promptMinChars = 4;
     public int promptMaxChars = 2000;
     public String outputDirectory = "images";
+    public boolean identityCheckEnable = true;
+    public String identityCheckProfile = "";
 
     public static ComfyUIConfig load(Plugin plugin) {
         ComfyUIConfig config = new ComfyUIConfig();
@@ -66,6 +68,8 @@ public class ComfyUIConfig {
         config.promptMinChars = plugin.getConfig().getInt("promptMinChars",4);
         config.promptMaxChars = plugin.getConfig().getInt("promptMaxChars",2000);
         config.outputDirectory = plugin.getConfig().getString("outputDirectory","images");
+        config.identityCheckEnable = plugin.getConfig().getBoolean("identityCheckEnable",true);
+        config.identityCheckProfile = plugin.getConfig().getString("identityCheckProfile","");
         if (config.baseUrl == null || config.baseUrl.trim().isEmpty()) {
             config.baseUrl = "http://192.168.10.10:8188";
         }
@@ -80,6 +84,7 @@ public class ComfyUIConfig {
         if (config.outputDirectory == null || config.outputDirectory.trim().isEmpty()) {
             config.outputDirectory = "images";
         }
+        if (config.identityCheckProfile == null) config.identityCheckProfile = "";
         if (config.promptPrefix == null) config.promptPrefix = "";
         if (config.promptSuffix == null) config.promptSuffix = "";
         if (config.cooldownSecond < 0) config.cooldownSecond = 0;

@@ -474,6 +474,12 @@ public class RoleplaySkillRegistry {
             JSONObject params = new JSONObject(true);
             params.put("prompt",compiled.prompt);
             params.put("negativePrompt",compiled.negativePrompt);
+            if (!service.safe(compiled.expectedTags).isEmpty()) {
+                params.put("expectedTags",compiled.expectedTags);
+            }
+            if (!service.safe(compiled.forbiddenTags).isEmpty()) {
+                params.put("forbiddenTags",compiled.forbiddenTags);
+            }
             if (!service.safe(compiled.size).isEmpty()) params.put("size",compiled.size);
             if (!service.safe(compiled.camera).isEmpty()) params.put("camera",compiled.camera);
             if (!service.config().cameraEnable) params.remove("camera");

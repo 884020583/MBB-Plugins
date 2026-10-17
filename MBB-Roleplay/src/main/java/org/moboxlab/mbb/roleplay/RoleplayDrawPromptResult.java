@@ -11,6 +11,8 @@ public class RoleplayDrawPromptResult {
     public String size = "";
     public String camera = "";
     public String validation = "";
+    public String expectedTags = "";
+    public String forbiddenTags = "";
 
     public static RoleplayDrawPromptResult ok(String prompt,String negativePrompt,
                                               String size,String camera,String validation) {

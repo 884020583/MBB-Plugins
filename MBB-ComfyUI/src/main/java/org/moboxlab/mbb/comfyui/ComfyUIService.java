@@ -48,12 +48,15 @@ public class ComfyUIService implements PluginService {
         private final long messageID;
         private final String prompt;
         private final String negativePrompt;
+        private final String expectedTags;
+        private final String forbiddenTags;
         private final int width;
         private final int height;
         private final String cameraMode;
 
         private ComfyUIJob(long taskID,long groupID,long userID,long messageID,
                            String prompt,String negativePrompt,
+                           String expectedTags,String forbiddenTags,
                            int width,int height,String cameraMode) {
             this.taskID = taskID;
             this.groupID = groupID;
@@ -61,6 +64,8 @@ public class ComfyUIService implements PluginService {
             this.messageID = messageID;
             this.prompt = prompt;
             this.negativePrompt = negativePrompt;
+            this.expectedTags = expectedTags;
+            this.forbiddenTags = forbiddenTags;
             this.width = width;
             this.height = height;
             this.cameraMode = cameraMode;
@@ -196,6 +201,8 @@ public class ComfyUIService implements PluginService {
         if (userID <= 0) return error("生图任务缺少用户号！","params");
         String prompt = safe(params.getString("prompt")).trim();
         String negativePrompt = sanitizeNegativePrompt(params.getString("negativePrompt"));
+        String expectedTags = sanitizeTags(params.getString("expectedTags"));
+        String forbiddenTags = sanitizeTags(params.getString("forbiddenTags"));
         if (prompt.length() < config.promptMinChars) {
             return error("生图需求还不够明确，请先补充主体和风格。","prompt");
         }
@@ -214,7 +221,7 @@ public class ComfyUIService implements PluginService {
         }
         long taskID = sequence.incrementAndGet();
         ComfyUIJob job = new ComfyUIJob(taskID,groupID,userID,messageID,
-                prompt,negativePrompt,size.width,size.height,cameraMode);
+                prompt,negativePrompt,expectedTags,forbiddenTags,size.width,size.height,cameraMode);
         if (!busyGroups.add(groupID)) {
             return error("当前群已经有生图任务在执行。","busy");
         }
@@ -271,6 +278,7 @@ public class ComfyUIService implements PluginService {
         String subfolder = image.getString("subfolder");
         String type = image.getString("type");
         File file = downloadImage(job,promptId,filename,subfolder,type);
+        checkIdentity(job,file);
         String notifyText = prepareDrawNotify(job);
         sendImage(job.groupID,file);
         sendDrawNotify(job,notifyText);
@@ -445,6 +453,68 @@ public class ComfyUIService implements PluginService {
         }
         if (builder.length() > 1200) return builder.substring(0,1200);
         return builder.toString();
+    }
+
+    private String sanitizeTags(String value) {
+        String text = safe(value);
+        StringBuilder builder = new StringBuilder();
+        Set<String> seen = new HashSet<>();
+        for (String part : text.split(",")) {
+            String item = part == null ? "" : part.trim();
+            if (item.isEmpty()) continue;
+            String lower = item.toLowerCase(Locale.ROOT);
+            if (seen.contains(lower)) continue;
+            seen.add(lower);
+            if (builder.length() > 0) builder.append(", ");
+            builder.append(item);
+        }
+        return builder.toString();
+    }
+
+    private void checkIdentity(ComfyUIJob job,File file) {
+        if (!config.identityCheckEnable || safe(job.expectedTags).isEmpty()) return;
+        PluginService vision = plugin.getServer().getPluginManager().getService("MBB-Vision");
+        if (vision == null) return;
+        try {
+            JSONObject params = new JSONObject(true);
+            params.put("kind","image");
+            params.put("file",file.getAbsolutePath());
+            params.put("fileUnique","comfyui-"+job.taskID);
+            params.put("context",job.prompt);
+            params.put("reference",job.expectedTags);
+            params.put("force",true);
+            if (!safe(config.identityCheckProfile).isEmpty()) {
+                params.put("profile",config.identityCheckProfile.trim());
+            }
+            JSONObject result = vision.call("describe",params);
+            if (result == null || !result.getBooleanValue("status")) {
+                plugin.getLogger().sendWarn("[ComfyUI] 身份校验失败："
+                        +(result == null ? "没有返回结果" : safe(result.getString("message"))));
+                return;
+            }
+            String summary = safe(result.getString("summary"));
+            String ocr = safe(result.getString("ocr"));
+            String tags = safe(result.getString("emotionTags"));
+            String text = (summary+" "+ocr+" "+tags).toLowerCase(Locale.ROOT);
+            String matched = "";
+            for (String item : safe(job.forbiddenTags).split(",")) {
+                String value = item == null ? "" : item.trim().toLowerCase(Locale.ROOT);
+                if (value.isEmpty()) continue;
+                if (text.contains(value)) {
+                    matched = value;
+                    break;
+                }
+            }
+            if (!matched.isEmpty()) {
+                plugin.getLogger().sendWarn("[ComfyUI] 身份校验疑似不符 群"+job.groupID
+                        +" 命中禁止特征="+matched+" 描述="+shortText(summary,120));
+            } else {
+                plugin.getLogger().sendInfo("[ComfyUI] 身份校验通过 群"+job.groupID
+                        +" 描述="+shortText(summary,100));
+            }
+        } catch (Exception e) {
+            plugin.getLogger().sendWarn("[ComfyUI] 身份校验异常："+describe(e));
+        }
     }
 
     private String normalizeCameraMode(String value) {

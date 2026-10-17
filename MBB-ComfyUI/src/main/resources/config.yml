@@ -51,3 +51,7 @@ promptMinChars: 4
 promptMaxChars: 2000
 #生成图片保存目录，相对于插件数据目录
 outputDirectory: "images"
+#生成后是否调用 MBB-Vision 做一次身份/外貌校验，只写日志不阻断发送
+identityCheckEnable: true
+#身份校验使用的识图模型配置名，留空使用 MBB-Vision 默认配置
+identityCheckProfile: ""
