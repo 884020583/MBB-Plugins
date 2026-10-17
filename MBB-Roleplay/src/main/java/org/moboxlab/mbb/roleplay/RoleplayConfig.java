@@ -162,6 +162,15 @@ public class RoleplayConfig {
     public String replyReviewReasoningEffort = "none";
     public int replyReviewTimeoutSecond = 60;
     public int replyReviewMinScore = 70;
+    public boolean pacingEnable = true;
+    public int pacingBaseMs = 350;
+    public int pacingPerCharMs = 25;
+    public int pacingMaxMs = 2500;
+    public double pacingNightMultiplier = 1.40;
+    public double pacingActiveMultiplier = 0.80;
+    public double pacingActiveThreshold = 0.70;
+    public int pacingNightStartHour = 0;
+    public int pacingNightEndHour = 6;
     public boolean expressionLearnEnable = true;
     public int expressionMinCount = 3;
     public int expressionMinUsers = 2;
@@ -471,6 +480,18 @@ public class RoleplayConfig {
                 plugin.getConfig().getString("replyReviewReasoningEffort","none"));
         config.replyReviewTimeoutSecond = plugin.getConfig().getInt("replyReviewTimeoutSecond",60);
         config.replyReviewMinScore = plugin.getConfig().getInt("replyReviewMinScore",70);
+        config.pacingEnable = plugin.getConfig().getBoolean("pacingEnable",true);
+        config.pacingBaseMs = plugin.getConfig().getInt("pacingBaseMs",350);
+        config.pacingPerCharMs = plugin.getConfig().getInt("pacingPerCharMs",25);
+        config.pacingMaxMs = plugin.getConfig().getInt("pacingMaxMs",2500);
+        config.pacingNightMultiplier = parseDouble(
+                plugin.getConfig().getString("pacingNightMultiplier","1.40"),1.40);
+        config.pacingActiveMultiplier = parseDouble(
+                plugin.getConfig().getString("pacingActiveMultiplier","0.80"),0.80);
+        config.pacingActiveThreshold = parseDouble(
+                plugin.getConfig().getString("pacingActiveThreshold","0.70"),0.70);
+        config.pacingNightStartHour = plugin.getConfig().getInt("pacingNightStartHour",0);
+        config.pacingNightEndHour = plugin.getConfig().getInt("pacingNightEndHour",6);
         config.expressionLearnEnable = plugin.getConfig().getBoolean("expressionLearnEnable",true);
         config.expressionMinCount = plugin.getConfig().getInt("expressionMinCount",3);
         config.expressionMinUsers = plugin.getConfig().getInt("expressionMinUsers",2);
@@ -766,6 +787,19 @@ public class RoleplayConfig {
         if (config.replyReviewTimeoutSecond > 300) config.replyReviewTimeoutSecond = 300;
         if (config.replyReviewMinScore < 0) config.replyReviewMinScore = 0;
         if (config.replyReviewMinScore > 100) config.replyReviewMinScore = 100;
+        if (config.pacingBaseMs < 0) config.pacingBaseMs = 0;
+        if (config.pacingPerCharMs < 0) config.pacingPerCharMs = 0;
+        if (config.pacingMaxMs < 0) config.pacingMaxMs = 0;
+        if (config.pacingNightMultiplier < 0.5) config.pacingNightMultiplier = 0.5;
+        if (config.pacingNightMultiplier > 3.0) config.pacingNightMultiplier = 3.0;
+        if (config.pacingActiveMultiplier < 0.3) config.pacingActiveMultiplier = 0.3;
+        if (config.pacingActiveMultiplier > 1.5) config.pacingActiveMultiplier = 1.5;
+        if (config.pacingActiveThreshold < 0) config.pacingActiveThreshold = 0;
+        if (config.pacingActiveThreshold > 1) config.pacingActiveThreshold = 1;
+        if (config.pacingNightStartHour < 0) config.pacingNightStartHour = 0;
+        if (config.pacingNightStartHour > 23) config.pacingNightStartHour = 23;
+        if (config.pacingNightEndHour < 0) config.pacingNightEndHour = 0;
+        if (config.pacingNightEndHour > 24) config.pacingNightEndHour = 24;
         if (config.expressionMinCount < 2) config.expressionMinCount = 2;
         if (config.expressionMinCount > 100) config.expressionMinCount = 100;
         if (config.expressionMinUsers < 1) config.expressionMinUsers = 1;

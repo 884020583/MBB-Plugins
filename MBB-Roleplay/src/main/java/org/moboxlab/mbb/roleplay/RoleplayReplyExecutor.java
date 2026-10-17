@@ -73,6 +73,7 @@ public class RoleplayReplyExecutor {
         if (sendText) ensurePokeBackAction(draft,decision,reply);
         OneBotClient client = service.plugin().getServer().getOneBotClient();
         if (sendText && client != null) {
+            if (!service.getPacingService().sleep(groupID,event.getUserID(),content,reply)) return;
             service.messageSender().sendReply(client,groupID,selfID,event.getUserID(),reply,
                     decision != null && decision.quoteRequired,draft.quote,event.getMessageID());
         }

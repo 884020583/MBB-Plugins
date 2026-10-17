@@ -87,6 +87,7 @@ public class RoleplayService {
     private final RoleplayEvalService evalService;
     private final RoleplayReplyReviewService replyReviewService;
     private final RoleplayThreadService threadService;
+    private final RoleplayPacingService pacingService;
     private final RoleplayGroupStatusService groupStatusService;
     private final RoleplayMessagePreprocessor messagePreprocessor;
     private final RoleplaySchemaService schemaService;
@@ -301,6 +302,7 @@ public class RoleplayService {
         this.evalService = new RoleplayEvalService(this);
         this.replyReviewService = new RoleplayReplyReviewService(this);
         this.threadService = new RoleplayThreadService(this);
+        this.pacingService = new RoleplayPacingService(this);
         this.groupStatusService = new RoleplayGroupStatusService(this);
         this.messagePreprocessor = new RoleplayMessagePreprocessor(this);
         this.schemaService = new RoleplaySchemaService(this);
@@ -672,6 +674,10 @@ public class RoleplayService {
 
     public RoleplayThreadService getThreadService() {
         return threadService;
+    }
+
+    public RoleplayPacingService getPacingService() {
+        return pacingService;
     }
 
 

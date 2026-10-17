@@ -245,6 +245,24 @@ replyReviewReasoningEffort: "none"
 replyReviewTimeoutSecond: 60
 #复核最低通过分，低于该分数且模型给出改写时使用改写文本
 replyReviewMinScore: 70
+#是否在发送前加入拟人打字延迟
+pacingEnable: true
+#基础延迟毫秒
+pacingBaseMs: 350
+#每个字符增加的延迟毫秒
+pacingPerCharMs: 25
+#单次延迟上限毫秒
+pacingMaxMs: 2500
+#深夜时段延迟倍率
+pacingNightMultiplier: 1.40
+#群活跃时的延迟倍率
+pacingActiveMultiplier: 0.80
+#注意力高于该值时视为群活跃
+pacingActiveThreshold: 0.70
+#深夜时段开始小时
+pacingNightStartHour: 0
+#深夜时段结束小时
+pacingNightEndHour: 6
 #是否从群聊提取表达候选供管理员复核
 expressionLearnEnable: true
 #表达候选至少出现多少次才进入待审
