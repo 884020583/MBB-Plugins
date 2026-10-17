@@ -23,7 +23,10 @@ public class RoleplayRoutingService {
                                                 GroupMessageEvent event,long groupID,long selfID,
                                                 String content) {
         RoleplayRouteDecision ruleDecision = RoleplayDecisionEngine.decide(service.config(),signals);
-        if (!service.config().routerEnable) return ruleDecision;
+        if (!service.config().routerEnable) {
+            traceDecision(ruleDecision,event,groupID,content,"rule");
+            return ruleDecision;
+        }
         RoleplayRouteDecision routed = service.router().route(service.config(),service.persona(),service.skillRegistry(),service.state(groupID),
                 content,service.senderName(event),service.relationshipLabel(event,signals.otherRoleBot),
                 service.contextService().recentContext(groupID),emotionRouterText(groupID,event.getUserID(),
@@ -47,7 +50,25 @@ public class RoleplayRoutingService {
             routed.confidence = Math.min(routed.confidence,service.config().otherRoleBotReplyChance);
         }
         routed.actions = service.skillRegistry().actionIds(service.config());
+        traceDecision(routed,event,groupID,content,"ai");
         return routed;
+    }
+
+    private void traceDecision(RoleplayRouteDecision decision,GroupMessageEvent event,
+                               long groupID,String content,String source) {
+        if (decision == null) return;
+        JSONObject trace = new JSONObject(true);
+        trace.put("source",source);
+        trace.put("addressed",service.safe(decision.addressed));
+        trace.put("reply",decision.reply);
+        trace.put("chance",decision.chance);
+        trace.put("confidence",decision.confidence);
+        trace.put("reason",service.shortText(decision.reason,240));
+        trace.put("skills",decision.skills);
+        trace.put("materials",decision.materials);
+        trace.put("message",service.shortText(content,240));
+        service.getTraceService().record(groupID,event == null ? 0L : event.getUserID(),
+                event == null ? 0L : event.getMessageID(),"route",trace);
     }
 
     String emotionRouterText(long groupID,long userID,boolean otherRoleBot) {

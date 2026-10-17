@@ -84,7 +84,20 @@ public class RoleplayReplyGenerationService {
         params.put("messages",messages);
         long startTime = System.currentTimeMillis();
         JSONObject response = ai.call("chat",params);
-        RoleplayAiLog.log(service.plugin().getLogger(),"回复",groupID,response,System.currentTimeMillis() - startTime);
+        long elapsed = System.currentTimeMillis() - startTime;
+        RoleplayAiLog.log(service.plugin().getLogger(),"回复",groupID,response,elapsed);
+        if (response != null) {
+            JSONObject usage = response.getJSONObject("usage");
+            JSONObject trace = new JSONObject(true);
+            trace.put("message",service.shortText(content,240));
+            trace.put("finishReason",service.safe(response.getString("finishReason")));
+            trace.put("promptTokens",usage == null ? 0 : usage.getIntValue("promptTokens"));
+            trace.put("completionTokens",usage == null ? 0 : usage.getIntValue("completionTokens"));
+            trace.put("cachedPromptTokens",usage == null ? 0 : usage.getIntValue("cachedPromptTokens"));
+            trace.put("elapsedMs",elapsed);
+            trace.put("reply",service.shortText(service.safe(response.getString("content")),240));
+            service.getTraceService().record(groupID,userID,0L,"reply",trace);
+        }
         return response;
     }
 

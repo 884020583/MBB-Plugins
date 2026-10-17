@@ -116,4 +116,81 @@ public class RoleplayFeedbackCommandHandler {
         sender.sendMessage("当前群注意力："+String.format(java.util.Locale.ROOT,"%.2f",score)
                 +"\n0.5 为基线，低于阈值会降低非直接消息的接话概率。");
     }
+
+    void handleTrace(CommandSender sender,String[] args) {
+        long groupID = sender.getGroupID();
+        if (groupID <= 0) {
+            sender.sendMessage("请在群聊中使用。");
+            return;
+        }
+        int limit = command.parsePage(args,2);
+        if (limit > 10) limit = 10;
+        JSONArray traces = command.service().getTraceService().list(groupID,limit);
+        if (traces.isEmpty()) {
+            sender.sendMessage("当前群还没有对话 trace。");
+            return;
+        }
+        StringBuilder builder = new StringBuilder("最近对话 trace：");
+        for (Object object : traces) {
+            JSONObject item = (JSONObject)object;
+            JSONObject data = item.getJSONObject("data");
+            builder.append("\n#").append(item.getLongValue("id"))
+                    .append(" ").append(item.getString("stage"))
+                    .append(" 用户=").append(item.getLongValue("userID"))
+                    .append(" 指向=").append(data.getString("addressed"))
+                    .append(" 技能=").append(data.getString("skills"))
+                    .append(" 原因=").append(data.getString("reason"));
+            String reply = data.getString("reply");
+            if (reply != null && !reply.isEmpty()) {
+                builder.append(" 回复=").append(reply);
+            }
+        }
+        sender.sendMessage(builder.toString());
+    }
+
+    void handleEval(CommandSender sender,String[] args) {
+        RoleplayEvalService eval = command.service().getEvalService();
+        String action = args.length > 2 ? args[2].toLowerCase() : "list";
+        if ("list".equals(action)) {
+            JSONArray cases = eval.list();
+            if (cases.isEmpty()) {
+                sender.sendMessage("没有可用的评测用例。");
+                return;
+            }
+            StringBuilder builder = new StringBuilder("评测用例：");
+            for (Object object : cases) {
+                JSONObject item = (JSONObject)object;
+                builder.append("\n").append(item.getString("id"))
+                        .append(" - ").append(item.getString("name"));
+            }
+            sender.sendMessage(builder.toString());
+            return;
+        }
+        if (!"run".equals(action)) {
+            sender.sendMessage("用法：/role eval [list|run <id|all>]");
+            return;
+        }
+        String target = args.length > 3 ? args[3] : "all";
+        if ("all".equalsIgnoreCase(target)) {
+            JSONArray cases = eval.list();
+            int passed = 0;
+            StringBuilder builder = new StringBuilder("评测结果：");
+            for (Object object : cases) {
+                JSONObject item = (JSONObject)object;
+                JSONObject result = eval.run(item.getString("id"));
+                if (result.getBooleanValue("pass")) passed++;
+                builder.append("\n").append(item.getString("id"))
+                        .append(" ").append(result.getBooleanValue("pass") ? "通过" : "失败")
+                        .append(result.getString("reason").isEmpty() ? "" : "："+result.getString("reason"));
+            }
+            builder.append("\n通过 ").append(passed).append("/").append(cases.size());
+            sender.sendMessage(builder.toString());
+            return;
+        }
+        JSONObject result = eval.run(target);
+        sender.sendMessage("评测 "+target+"："
+                +(result.getBooleanValue("pass") ? "通过" : "失败")
+                +(result.getString("reason").isEmpty() ? "" : "（"+result.getString("reason")+"）")
+                +(result.getString("reply").isEmpty() ? "" : "\n回复："+result.getString("reply")));
+    }
 }

@@ -263,6 +263,20 @@ dailyReviewMaxMessages: 300
 dailyReviewMaxTokens: 4000
 #每日复盘请求超时秒数
 dailyReviewTimeoutSecond: 180
+#是否记录每轮路由、资料和回复 trace，便于排查角色为什么这样回
+traceEnable: true
+#trace 保留小时数
+traceKeepHours: 72
+#trace 最大保留行数
+traceMaxRows: 2000
+#是否允许 /role eval 运行内置评测集
+evalEnable: true
+#评测使用的模型配置名，留空使用 aiProfile
+evalProfile: ""
+#评测输出 Token 上限
+evalMaxTokens: 1200
+#评测请求超时秒数
+evalTimeoutSecond: 60
 #长期记忆与永久记忆是否按当前对话相关性排序后注入
 memoryRelevanceSort: true
 #相关性排序前先加载多少条长期记忆作为候选池

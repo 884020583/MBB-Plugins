@@ -168,6 +168,14 @@ public class RoleplayCommand extends BotCommand {
             handleAttention(sender,args);
             return true;
         }
+        if ("trace".equals(action)) {
+            handleTrace(sender,args);
+            return true;
+        }
+        if ("eval".equals(action)) {
+            handleEval(sender,args);
+            return true;
+        }
         if ("member".equals(action)) {
             handleMember(sender,args);
             return true;
@@ -304,6 +312,14 @@ public class RoleplayCommand extends BotCommand {
 
     private void handleAttention(CommandSender sender,String[] args) {
         roleplayFeedbackCommandHandler.handleAttention(sender,args);
+    }
+
+    private void handleTrace(CommandSender sender,String[] args) {
+        roleplayFeedbackCommandHandler.handleTrace(sender,args);
+    }
+
+    private void handleEval(CommandSender sender,String[] args) {
+        roleplayFeedbackCommandHandler.handleEval(sender,args);
     }
 
     private void handleMember(CommandSender sender,String[] args) {

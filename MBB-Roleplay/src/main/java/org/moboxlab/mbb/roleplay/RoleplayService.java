@@ -83,6 +83,8 @@ public class RoleplayService {
     private final RoleplayMemoryQueryService memoryQueryService;
     private final RoleplayDrawNotifyService drawNotifyService;
     private final RoleplayDrawPromptService drawPromptService;
+    private final RoleplayTraceService traceService;
+    private final RoleplayEvalService evalService;
     private final RoleplayGroupStatusService groupStatusService;
     private final RoleplayMessagePreprocessor messagePreprocessor;
     private final RoleplaySchemaService schemaService;
@@ -293,6 +295,8 @@ public class RoleplayService {
         this.memoryQueryService = new RoleplayMemoryQueryService(this);
         this.drawNotifyService = new RoleplayDrawNotifyService(this);
         this.drawPromptService = new RoleplayDrawPromptService(this);
+        this.traceService = new RoleplayTraceService(plugin,config);
+        this.evalService = new RoleplayEvalService(this);
         this.groupStatusService = new RoleplayGroupStatusService(this);
         this.messagePreprocessor = new RoleplayMessagePreprocessor(this);
         this.schemaService = new RoleplaySchemaService(this);
@@ -318,6 +322,7 @@ public class RoleplayService {
         quietService.init();
         replyFeedbackService.init();
         expressionService.init();
+        traceService.init();
         attentionService.reload(config);
         executorService.ensureTurnExecutor();
         executorService.ensureBackgroundExecutor();
@@ -336,6 +341,7 @@ public class RoleplayService {
         quietService.reload(config);
         replyFeedbackService.reload(config);
         expressionService.reload(config);
+        traceService.reload(config);
         attentionService.reload(config);
         dailyReviewService.reload(config);
         executorService.ensureTurnExecutor();
@@ -640,6 +646,14 @@ public class RoleplayService {
 
     public RoleplayDrawPromptService getDrawPromptService() {
         return drawPromptService;
+    }
+
+    public RoleplayTraceService getTraceService() {
+        return traceService;
+    }
+
+    public RoleplayEvalService getEvalService() {
+        return evalService;
     }
 
 

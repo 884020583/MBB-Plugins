@@ -130,7 +130,9 @@ public class RoleplayMemberCommandHandler {
                     +"\n/role expression promote <ID>"
                     +"\n/role expression reject <ID>"
                     +"\n/role expression clear"
-                    +"\n/role attention [reset]");
+                    +"\n/role attention [reset]"
+                    +"\n/role trace [条数]"
+                    +"\n/role eval [list|run <id|all>]");
             return;
         }
         sender.sendMessage("MBB-Roleplay 命令分类："

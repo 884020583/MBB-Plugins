@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.61.0.0833 | 2026-10-17 | `MBB-Roleplay` 第 1 批质量工程：新增 `RoleplayTraceService`，按群记录每轮路由来源、指向、技能、原因、回复和 token/耗时，支持 `/role trace [条数]` 回看；新增 `RoleplayEvalService` 内置身份、风格、边界、知识评测用例，支持 `/role eval list` 与 `/role eval run <id|all>`；新增 `traceEnable`、`traceKeepHours`、`traceMaxRows`、`evalEnable`、`evalProfile`、`evalMaxTokens`、`evalTimeoutSecond` 配置。 |
 | V0.5.60.0.0808 | 2026-10-17 | `MBB-Roleplay` 修复表达候选把 `@QQ号` 切碎学习的问题：候选提取前移除 CQ 艾特和 `@数字`，跳过纯数字 token，清理数据库里已有的纯数字候选；中文短语不再切 n-gram 子串，避免出现 `388/904/576`、`今日猫/日猫猫` 这类噪声候选。 |
 | V0.5.59.0.0414 | 2026-10-17 | `MBB-Roleplay` 修正生图动作/构图一致性：第三人称、偷拍、远距离、门边、隔板后、旁观等构图自动取消 `camera=photo`，避免叠加 `first person view / point of view`；最终正向/负向 prompt 清洗中文 tag，brief 里的中文元素必须由编译器翻成英文 booru tag，避免 NoobAI 忽略中文动作和物件。 |
 | V0.5.58.0.0411 | 2026-10-17 | `MBB-Roleplay` 修正生图镜头和场景约束：多人普通同框不再使用 `camera=photo`，避免被编译成第一视角；编译器要求严格按 brief 的 action/scene/outfit 画，不能因为角色职业、习惯或梗自动添加画笔、游戏手柄等未要求元素。 |
