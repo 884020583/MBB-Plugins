@@ -169,6 +169,8 @@ public class RoleplayDrawPromptService {
                 .append("- 每个目标角色只允许使用自己的 canonical tag 和外貌；禁止把其他角色外貌套到目标角色身上。\n")
                 .append("- 严格按 brief 的 action/scene/outfit 画，不要因为角色职业、习惯或梗自动添加画笔、游戏手柄、书本等未要求元素。\n")
                 .append("- 必须明确每个角色的发色、瞳色、光环颜色、服装、配饰和武器；不能只写角色名。\n")
+                .append("- 背景必须写具体环境、背景物件、光线、景深和氛围；禁止只写 simple background、solid background、flat color、纯色背景或简单色块。\n")
+                .append("- 必须补充服装材质、光影和细节 tag，例如 fabric texture、detailed clothing、depth of field、volumetric lighting。\n")
                 .append("- 必须使用目标角色 canonical tags；如果 brief 和 canonical tag 冲突，以 canonical tag 为准。\n")
                 .append("- 不要写 masterpiece、best quality、highres、highly detailed、anime illustration 等质量词，插件会自动补。\n")
                 .append("- 不要写 twins、clone、duplicate character、multiple views、split screen、extra person。\n")

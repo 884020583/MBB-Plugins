@@ -28,7 +28,12 @@ public class RoleplayDrawPromptValidator {
             "wrong eye color",
             "wrong halo color",
             "merged characters",
-            "identity confusion"
+            "identity confusion",
+            "simple background",
+            "solid background",
+            "flat color",
+            "flat shading",
+            "minimal background"
     };
 
     public static RoleplayDrawPromptResult validate(java.util.List<RoleplayDrawTarget> targets,

@@ -348,6 +348,9 @@ public class ComfyUIService implements PluginService {
             metadata.put("promptSuffix",config.promptSuffix);
             metadata.put("negativePrompt",effectiveNegativePrompt(job));
             metadata.put("characterNegativePrompt",job.negativePrompt);
+            metadata.put("detailBoostEnable",config.detailBoostEnable);
+            metadata.put("detailPositive",config.detailPositive);
+            metadata.put("detailNegative",config.detailNegative);
             metadata.put("width",job.width);
             metadata.put("height",job.height);
             metadata.put("checkpoint",config.checkpoint);
@@ -425,6 +428,7 @@ public class ComfyUIService implements PluginService {
         appendPrompt(builder,config.promptPrefix);
         appendPrompt(builder,cameraPromptPrefix(cameraMode));
         appendPrompt(builder,sanitizePrompt(prompt));
+        if (config.detailBoostEnable) appendPrompt(builder,config.detailPositive);
         appendPrompt(builder,cameraPromptSuffix(cameraMode));
         appendPrompt(builder,config.promptSuffix);
         return builder.toString();
@@ -433,6 +437,10 @@ public class ComfyUIService implements PluginService {
     private String effectiveNegativePrompt(ComfyUIJob job) {
         String base = safe(config.negativePrompt).trim();
         String extra = job == null ? "" : safe(job.negativePrompt).trim();
+        String detail = config.detailBoostEnable ? safe(config.detailNegative).trim() : "";
+        if (!detail.isEmpty()) {
+            extra = extra.isEmpty() ? detail : extra+", "+detail;
+        }
         if (base.isEmpty()) return extra;
         if (extra.isEmpty()) return base;
         return base+", "+extra;

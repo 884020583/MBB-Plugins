@@ -435,6 +435,7 @@ public class RoleplaySkillRegistry {
                     +"subject 写用户要求的主体；画当前角色本人时填当前角色，画别人时填别人。"
                     +"characters 写画面里所有需要明确身份的角色，单人填一个，双人填两个，必须写清每个角色的标准英文名或常用名。"
                     +"action/expression/outfit/scene/composition 用简短中文描述画面，不要写自然语言长段。"
+                    +"scene 必须写具体环境、背景物件、光线和景深，不要只写“背景”或纯色背景。"
                     +"mustInclude 放本画面必须出现的元素；mustExclude 放本画面禁止出现的元素。"
                     +"只画 brief 指定的目标角色；不要把当前角色自动加入画面，也不要写未指定角色的外貌特征。"
                     +"如果用户让当前角色画别人，characters 填别人，subject 也写别人。"

@@ -55,3 +55,9 @@ outputDirectory: "images"
 identityCheckEnable: true
 #身份校验使用的识图模型配置名，留空使用 MBB-Vision 默认配置
 identityCheckProfile: ""
+#是否自动追加细节增强词，改善背景色块和角色平涂感
+detailBoostEnable: true
+#细节增强正向词
+detailPositive: "environmental details, depth of field, volumetric lighting, detailed clothing, fabric texture, intricate details, sharp focus"
+#细节增强负向词
+detailNegative: "simple background, solid background, flat color, flat shading, minimal background, low detail, blurry"

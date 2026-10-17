@@ -35,6 +35,9 @@ public class ComfyUIConfig {
     public String outputDirectory = "images";
     public boolean identityCheckEnable = true;
     public String identityCheckProfile = "";
+    public boolean detailBoostEnable = true;
+    public String detailPositive = "environmental details, depth of field, volumetric lighting, detailed clothing, fabric texture, intricate details, sharp focus";
+    public String detailNegative = "simple background, solid background, flat color, flat shading, minimal background, low detail, blurry";
 
     public static ComfyUIConfig load(Plugin plugin) {
         ComfyUIConfig config = new ComfyUIConfig();
@@ -70,6 +73,11 @@ public class ComfyUIConfig {
         config.outputDirectory = plugin.getConfig().getString("outputDirectory","images");
         config.identityCheckEnable = plugin.getConfig().getBoolean("identityCheckEnable",true);
         config.identityCheckProfile = plugin.getConfig().getString("identityCheckProfile","");
+        config.detailBoostEnable = plugin.getConfig().getBoolean("detailBoostEnable",true);
+        config.detailPositive = plugin.getConfig().getString("detailPositive",
+                "environmental details, depth of field, volumetric lighting, detailed clothing, fabric texture, intricate details, sharp focus");
+        config.detailNegative = plugin.getConfig().getString("detailNegative",
+                "simple background, solid background, flat color, flat shading, minimal background, low detail, blurry");
         if (config.baseUrl == null || config.baseUrl.trim().isEmpty()) {
             config.baseUrl = "http://192.168.10.10:8188";
         }
@@ -85,6 +93,8 @@ public class ComfyUIConfig {
             config.outputDirectory = "images";
         }
         if (config.identityCheckProfile == null) config.identityCheckProfile = "";
+        if (config.detailPositive == null) config.detailPositive = "";
+        if (config.detailNegative == null) config.detailNegative = "";
         if (config.promptPrefix == null) config.promptPrefix = "";
         if (config.promptSuffix == null) config.promptSuffix = "";
         if (config.cooldownSecond < 0) config.cooldownSecond = 0;
