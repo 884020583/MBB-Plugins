@@ -84,6 +84,36 @@ public class RoleplayReplyFeedbackService {
     }
 
     /**
+     * 引用角色上一条消息，视为比普通接话更强的隐式反馈。
+     */
+    public synchronized void observeQuote(long groupID,long userID) {
+        markEngaged(groupID,userID);
+    }
+
+    /**
+     * 戳一戳角色，视为主动互动反馈。
+     */
+    public synchronized void observePoke(long groupID,long userID) {
+        markEngaged(groupID,userID);
+    }
+
+    /**
+     * 表情回应等平台反馈，有事件接入时调用。
+     */
+    public synchronized void observeReaction(long groupID,long userID) {
+        markEngaged(groupID,userID);
+    }
+
+    private void markEngaged(long groupID,long userID) {
+        if (!config.replyFeedbackEnable || groupID <= 0 || userID <= 0) return;
+        finalizeIfExpired(groupID,System.currentTimeMillis());
+        Pending current = pending.get(groupID);
+        if (current == null) return;
+        if (System.currentTimeMillis() - current.time > config.replyFeedbackWindowSecond * 1000L) return;
+        current.engaged = true;
+    }
+
+    /**
      * 非直接消息的概率修正。直接艾特、引用和另一个机器人不受反馈惩罚。
      */
     public synchronized double adjustChance(long groupID,double chance,boolean direct,boolean otherRoleBot) {

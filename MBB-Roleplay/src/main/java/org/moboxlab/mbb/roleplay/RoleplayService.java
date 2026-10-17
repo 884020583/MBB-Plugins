@@ -85,6 +85,7 @@ public class RoleplayService {
     private final RoleplayDrawPromptService drawPromptService;
     private final RoleplayTraceService traceService;
     private final RoleplayEvalService evalService;
+    private final RoleplayReplyReviewService replyReviewService;
     private final RoleplayGroupStatusService groupStatusService;
     private final RoleplayMessagePreprocessor messagePreprocessor;
     private final RoleplaySchemaService schemaService;
@@ -297,6 +298,7 @@ public class RoleplayService {
         this.drawPromptService = new RoleplayDrawPromptService(this);
         this.traceService = new RoleplayTraceService(plugin,config);
         this.evalService = new RoleplayEvalService(this);
+        this.replyReviewService = new RoleplayReplyReviewService(this);
         this.groupStatusService = new RoleplayGroupStatusService(this);
         this.messagePreprocessor = new RoleplayMessagePreprocessor(this);
         this.schemaService = new RoleplaySchemaService(this);
@@ -658,6 +660,10 @@ public class RoleplayService {
 
     public RoleplayEvalService getEvalService() {
         return evalService;
+    }
+
+    public RoleplayReplyReviewService getReplyReviewService() {
+        return replyReviewService;
     }
 
 

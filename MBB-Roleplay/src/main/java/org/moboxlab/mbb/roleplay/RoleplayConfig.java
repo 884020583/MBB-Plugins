@@ -152,6 +152,12 @@ public class RoleplayConfig {
     public double replyFeedbackMaxPenalty = 0.25;
     public double replyFeedbackBonus = 0.10;
     public int replyFeedbackHistory = 30;
+    public boolean replyReviewEnable = true;
+    public String replyReviewProfile = "";
+    public int replyReviewMaxTokens = 1200;
+    public String replyReviewReasoningEffort = "none";
+    public int replyReviewTimeoutSecond = 60;
+    public int replyReviewMinScore = 70;
     public boolean expressionLearnEnable = true;
     public int expressionMinCount = 3;
     public int expressionMinUsers = 2;
@@ -448,6 +454,13 @@ public class RoleplayConfig {
         config.replyFeedbackMaxPenalty = parseDouble(plugin.getConfig().getString("replyFeedbackMaxPenalty","0.25"),0.25);
         config.replyFeedbackBonus = parseDouble(plugin.getConfig().getString("replyFeedbackBonus","0.10"),0.10);
         config.replyFeedbackHistory = plugin.getConfig().getInt("replyFeedbackHistory",30);
+        config.replyReviewEnable = plugin.getConfig().getBoolean("replyReviewEnable",true);
+        config.replyReviewProfile = plugin.getConfig().getString("replyReviewProfile","");
+        config.replyReviewMaxTokens = plugin.getConfig().getInt("replyReviewMaxTokens",1200);
+        config.replyReviewReasoningEffort = normalizeEffort(
+                plugin.getConfig().getString("replyReviewReasoningEffort","none"));
+        config.replyReviewTimeoutSecond = plugin.getConfig().getInt("replyReviewTimeoutSecond",60);
+        config.replyReviewMinScore = plugin.getConfig().getInt("replyReviewMinScore",70);
         config.expressionLearnEnable = plugin.getConfig().getBoolean("expressionLearnEnable",true);
         config.expressionMinCount = plugin.getConfig().getInt("expressionMinCount",3);
         config.expressionMinUsers = plugin.getConfig().getInt("expressionMinUsers",2);
@@ -732,6 +745,13 @@ public class RoleplayConfig {
         if (config.replyFeedbackBonus > 0.5) config.replyFeedbackBonus = 0.5;
         if (config.replyFeedbackHistory < 5) config.replyFeedbackHistory = 5;
         if (config.replyFeedbackHistory > 200) config.replyFeedbackHistory = 200;
+        if (config.replyReviewProfile == null) config.replyReviewProfile = "";
+        if (config.replyReviewMaxTokens < 300) config.replyReviewMaxTokens = 300;
+        if (config.replyReviewMaxTokens > 4000) config.replyReviewMaxTokens = 4000;
+        if (config.replyReviewTimeoutSecond < 20) config.replyReviewTimeoutSecond = 20;
+        if (config.replyReviewTimeoutSecond > 300) config.replyReviewTimeoutSecond = 300;
+        if (config.replyReviewMinScore < 0) config.replyReviewMinScore = 0;
+        if (config.replyReviewMinScore > 100) config.replyReviewMinScore = 100;
         if (config.expressionMinCount < 2) config.expressionMinCount = 2;
         if (config.expressionMinCount > 100) config.expressionMinCount = 100;
         if (config.expressionMinUsers < 1) config.expressionMinUsers = 1;

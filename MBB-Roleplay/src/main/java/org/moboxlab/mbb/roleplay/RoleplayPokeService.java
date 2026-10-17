@@ -30,6 +30,7 @@ public class RoleplayPokeService {
                     +userID+" 的戳一戳");
             return;
         }
+        service.replyFeedbackService().observePoke(groupID,userID);
         service.submitTurn(() -> runPokeTurn(groupID,userID,selfID));
     }
 

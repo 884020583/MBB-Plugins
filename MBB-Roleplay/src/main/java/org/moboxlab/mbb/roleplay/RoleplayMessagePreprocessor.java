@@ -112,6 +112,9 @@ public class RoleplayMessagePreprocessor {
         signals.direct = direct;
         signals.quotingSelf = service.isQuotingSelf(event,selfID);
         signals.mentioningSelf = service.isMentioningSelf(event,selfID);
+        if (signals.quotingSelf) {
+            service.replyFeedbackService().observeQuote(groupID,event.getUserID());
+        }
         signals.sameUserContinuation = sameUserContinuation;
         signals.justRepliedToSameUser = justRepliedToSameUser;
         //只在"刚回复过同一用户"时才需要查上一条，省一次数据库查询

@@ -63,6 +63,13 @@ public class RoleplayReplyExecutor {
             sendText = false;
         }
         if (sendText) reply = polishReply(groupID,reply,content,event.getUserID(),decision);
+        if (sendText) {
+            RoleplayReplyReviewService.Result review = service.getReplyReviewService().review(
+                    groupID,event.getUserID(),content,reply,decision);
+            if (!review.pass && review.text != null && !review.text.trim().isEmpty()) {
+                reply = review.text.trim();
+            }
+        }
         if (sendText) ensurePokeBackAction(draft,decision,reply);
         OneBotClient client = service.plugin().getServer().getOneBotClient();
         if (sendText && client != null) {

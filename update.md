@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.64.0.0841 | 2026-10-17 | `MBB-Roleplay` 第 4 批反馈与复核：引用角色消息、戳一戳、表情回应作为隐式反馈标记主动发言被接住；新增 `RoleplayReplyReviewService`，发送前复核回复是否像角色、是否有 AI 味、总结腔、说教或重复，低于 `replyReviewMinScore` 时使用模型改写；新增 `replyReviewEnable`、`replyReviewProfile`、`replyReviewMaxTokens`、`replyReviewReasoningEffort`、`replyReviewTimeoutSecond`、`replyReviewMinScore` 配置。 |
 | V0.5.63.0.0838 | 2026-10-17 | `MBB-Roleplay` 第 3 批生图一致性：目标角色资料以角色卡形式注入编译器，输出 `expectedTags/forbiddenTags`；`MBB-ComfyUI` 接收这两个字段，生成后调用 `MBB-Vision` 对图片做一次身份/外貌校验，命中禁止特征时在控制台输出疑似不符，校验不阻断发送；新增 `identityCheckEnable`、`identityCheckProfile` 配置。 |
 | V0.5.62.0.0835 | 2026-10-17 | `MBB-Roleplay` 第 2 批记忆升级：长期记忆新增 `eventTime` 列并自动从 `[yyyy-MM-dd HH:mm]` 解析事件时间；相关性排序加入完整关键词命中和事件时间衰减；长期记忆注入带事件时间；新增 `/role memory timeline [页码]` 按事件时间倒序查看记忆时间线；备份/恢复和合并写回同步兼容 `eventTime`。 |
 | V0.5.61.0.0833 | 2026-10-17 | `MBB-Roleplay` 第 1 批质量工程：新增 `RoleplayTraceService`，按群记录每轮路由来源、指向、技能、原因、回复和 token/耗时，支持 `/role trace [条数]` 回看；新增 `RoleplayEvalService` 内置身份、风格、边界、知识评测用例，支持 `/role eval list` 与 `/role eval run <id|all>`；新增 `traceEnable`、`traceKeepHours`、`traceMaxRows`、`evalEnable`、`evalProfile`、`evalMaxTokens`、`evalTimeoutSecond` 配置。 |

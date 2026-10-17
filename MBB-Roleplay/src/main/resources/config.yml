@@ -229,6 +229,18 @@ replyFeedbackMaxPenalty: 0.25
 replyFeedbackBonus: 0.10
 #内存中保留最近多少次主动发言反馈
 replyFeedbackHistory: 30
+#是否在发送前复核角色回复候选
+replyReviewEnable: true
+#复核使用的模型配置名，留空使用 aiProfile
+replyReviewProfile: ""
+#复核输出 Token 上限
+replyReviewMaxTokens: 1200
+#复核思考强度：none / low / medium / high
+replyReviewReasoningEffort: "none"
+#复核请求超时秒数
+replyReviewTimeoutSecond: 60
+#复核最低通过分，低于该分数且模型给出改写时使用改写文本
+replyReviewMinScore: 70
 #是否从群聊提取表达候选供管理员复核
 expressionLearnEnable: true
 #表达候选至少出现多少次才进入待审
