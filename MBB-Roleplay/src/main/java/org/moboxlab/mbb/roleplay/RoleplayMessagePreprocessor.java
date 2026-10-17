@@ -37,6 +37,12 @@ public class RoleplayMessagePreprocessor {
         String content = service.extractContent(event.getMessage());
         if (content == null || content.trim().isEmpty()) return null;
         if (service.isCommand(content)) return null;
+        JSONObject safety = service.getSafetyService().inspect(groupID,event.getUserID(),content);
+        if (safety.getBooleanValue("block")) {
+            service.plugin().getLogger().sendWarn("[安全] 群"+groupID+" 用户"+event.getUserID()
+                    +" 已拦截："+safety.getString("reason"));
+            return null;
+        }
         boolean otherRoleBot = service.isOtherRoleBot(event,selfID);
         boolean hasImage = service.hasImageContent(event.getMessage());
         boolean hasSticker = service.hasStickerContent(event.getMessage());

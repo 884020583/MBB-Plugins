@@ -171,6 +171,9 @@ public class RoleplayConfig {
     public double pacingActiveThreshold = 0.70;
     public int pacingNightStartHour = 0;
     public int pacingNightEndHour = 6;
+    public boolean safetyGuardEnable = true;
+    public boolean promptInjectionGuardEnable = true;
+    public boolean privacyGuardEnable = true;
     public boolean expressionLearnEnable = true;
     public int expressionMinCount = 3;
     public int expressionMinUsers = 2;
@@ -492,6 +495,10 @@ public class RoleplayConfig {
                 plugin.getConfig().getString("pacingActiveThreshold","0.70"),0.70);
         config.pacingNightStartHour = plugin.getConfig().getInt("pacingNightStartHour",0);
         config.pacingNightEndHour = plugin.getConfig().getInt("pacingNightEndHour",6);
+        config.safetyGuardEnable = plugin.getConfig().getBoolean("safetyGuardEnable",true);
+        config.promptInjectionGuardEnable =
+                plugin.getConfig().getBoolean("promptInjectionGuardEnable",true);
+        config.privacyGuardEnable = plugin.getConfig().getBoolean("privacyGuardEnable",true);
         config.expressionLearnEnable = plugin.getConfig().getBoolean("expressionLearnEnable",true);
         config.expressionMinCount = plugin.getConfig().getInt("expressionMinCount",3);
         config.expressionMinUsers = plugin.getConfig().getInt("expressionMinUsers",2);

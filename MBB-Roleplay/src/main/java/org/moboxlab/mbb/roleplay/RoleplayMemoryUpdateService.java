@@ -290,6 +290,12 @@ public class RoleplayMemoryUpdateService {
         String type = service.safe(json.getString("type"));
         String content = service.safe(json.getString("content")).trim();
         if (type.isEmpty() || content.isEmpty()) return false;
+        String unsafe = service.getSafetyService().unsafeMemoryReason(content);
+        if (!unsafe.isEmpty()) {
+            service.plugin().getLogger().sendWarn("[安全] 拒绝写入长期记忆："+unsafe
+                    +" 内容="+service.shortText(content,80));
+            return false;
+        }
         long subjectID = json.getLongValue("subjectID");
         int importance = json.getIntValue("importance");
         long eventTime = eventTime(json.getLongValue("eventTime"),content,System.currentTimeMillis());

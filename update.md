@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.69.0.0908 | 2026-10-17 | `MBB-Roleplay` 新增安全与防注入：`RoleplaySafetyService` 拦截系统提示词诱导、越狱指令和现实隐私索取，命中后不进入路由和回复链路；长期记忆写入前做同样的安全检查，阻止被诱导内容污染记忆；新增 `safetyGuardEnable`、`promptInjectionGuardEnable`、`privacyGuardEnable` 配置。 |
 | V0.5.68.0.0907 | 2026-10-17 | `MBB-Roleplay` 新增拟人节奏：发送前按回复长度、深夜时段和群注意力计算打字延迟，加入随机抖动和延迟上限，让回复更像真人输入；新增 `pacingEnable`、`pacingBaseMs`、`pacingPerCharMs`、`pacingMaxMs`、`pacingNightMultiplier`、`pacingActiveMultiplier`、`pacingActiveThreshold`、`pacingNightStartHour`、`pacingNightEndHour` 配置。 |
 | V0.5.67.0.0905 | 2026-10-17 | `MBB-Roleplay` 新增记忆冲突整理：长期记忆增加 `memoryStatus` 与 `supersededBy`，写入新记忆时检测同群同类型同用户下的相反极性内容，命中后把旧记忆归档而不是删除；查询、合并、时间线和记忆计数只使用 active 记忆；备份/恢复保留归档状态；新增 `/role memory conflicts [条数]` 查看冲突归档。新增 `memoryConflictResolveEnable`、`memoryConflictMinOverlap` 配置。 |
 | V0.5.66.0.0902 | 2026-10-17 | `MBB-Roleplay` 新增会话线程与回合管理：`RoleplayThreadService` 按群维护活跃线程、参与者、上一位发言者、角色是否参与和是否等待角色回应；线程提示进入路由与回复提示词，帮助判断当前消息是延续旧线程、新线程还是群友之间对话。新增 `threadEnable`、`threadWindowSecond` 配置。 |
