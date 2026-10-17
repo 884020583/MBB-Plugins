@@ -217,6 +217,10 @@ topicFatigueMinCount: 6
 topicFatigueSelfCount: 3
 #话题疲劳记录最多保留多少小时
 topicFatigueKeepHours: 168
+#是否维护会话线程和当前回合状态
+threadEnable: true
+#超过多少秒没有新消息就视为新线程
+threadWindowSecond: 180
 #是否根据主动发言是否被接话修正回复意愿
 replyFeedbackEnable: true
 #主动发言后多少秒内出现真人发言算被接话

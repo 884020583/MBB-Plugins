@@ -14,6 +14,8 @@ public class RoleplayRouteDecision {
     public double confidence = 0;
     public double chance = 0;
     public String reason = "";
+    /** 会话线程与回合提示，只作为上下文，不改变规则否决权 */
+    public String threadHint = "";
     public boolean otherRoleBot = false;
     /** 由规则置位，表达层不能取消 */
     public boolean quoteRequired = false;

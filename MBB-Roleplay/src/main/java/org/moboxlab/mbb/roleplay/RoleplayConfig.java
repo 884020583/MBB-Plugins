@@ -146,6 +146,8 @@ public class RoleplayConfig {
     public int topicFatigueMinCount = 6;
     public int topicFatigueSelfCount = 3;
     public int topicFatigueKeepHours = 168;
+    public boolean threadEnable = true;
+    public int threadWindowSecond = 180;
     public boolean replyFeedbackEnable = true;
     public int replyFeedbackWindowSecond = 180;
     public int replyFeedbackMinSamples = 6;
@@ -448,6 +450,8 @@ public class RoleplayConfig {
         config.topicFatigueMinCount = plugin.getConfig().getInt("topicFatigueMinCount",6);
         config.topicFatigueSelfCount = plugin.getConfig().getInt("topicFatigueSelfCount",3);
         config.topicFatigueKeepHours = plugin.getConfig().getInt("topicFatigueKeepHours",168);
+        config.threadEnable = plugin.getConfig().getBoolean("threadEnable",true);
+        config.threadWindowSecond = plugin.getConfig().getInt("threadWindowSecond",180);
         config.replyFeedbackEnable = plugin.getConfig().getBoolean("replyFeedbackEnable",true);
         config.replyFeedbackWindowSecond = plugin.getConfig().getInt("replyFeedbackWindowSecond",180);
         config.replyFeedbackMinSamples = plugin.getConfig().getInt("replyFeedbackMinSamples",6);
@@ -735,6 +739,8 @@ public class RoleplayConfig {
         if (config.topicFatigueSelfCount > 50) config.topicFatigueSelfCount = 50;
         if (config.topicFatigueKeepHours < 1) config.topicFatigueKeepHours = 1;
         if (config.topicFatigueKeepHours > 720) config.topicFatigueKeepHours = 720;
+        if (config.threadWindowSecond < 30) config.threadWindowSecond = 30;
+        if (config.threadWindowSecond > 3600) config.threadWindowSecond = 3600;
         if (config.replyFeedbackWindowSecond < 10) config.replyFeedbackWindowSecond = 10;
         if (config.replyFeedbackWindowSecond > 3600) config.replyFeedbackWindowSecond = 3600;
         if (config.replyFeedbackMinSamples < 1) config.replyFeedbackMinSamples = 1;

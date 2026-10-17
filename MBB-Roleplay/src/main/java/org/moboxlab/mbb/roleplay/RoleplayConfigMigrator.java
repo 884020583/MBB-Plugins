@@ -164,6 +164,8 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("topicFatigueMinCount","6","同一话题在窗口内达到多少次后判定为疲劳"),
             new ConfigEntry("topicFatigueSelfCount","3","角色自己在窗口内参与多少次后判定为疲劳"),
             new ConfigEntry("topicFatigueKeepHours","168","话题疲劳记录最多保留多少小时"),
+            new ConfigEntry("threadEnable","true","是否维护会话线程和当前回合状态"),
+            new ConfigEntry("threadWindowSecond","180","超过多少秒没有新消息就视为新线程"),
             new ConfigEntry("replyFeedbackEnable","true","是否根据主动发言是否被接话修正回复意愿"),
             new ConfigEntry("replyFeedbackWindowSecond","180","主动发言后多少秒内出现真人发言算被接话"),
             new ConfigEntry("replyFeedbackMinSamples","6","至少积累多少次主动发言反馈后才修正概率"),

@@ -23,6 +23,7 @@ public class RoleplayRoutingService {
                                                 GroupMessageEvent event,long groupID,long selfID,
                                                 String content) {
         RoleplayRouteDecision ruleDecision = RoleplayDecisionEngine.decide(service.config(),signals);
+        ruleDecision.threadHint = signals.threadHint;
         if (!service.config().routerEnable) {
             traceDecision(ruleDecision,event,groupID,content,"rule");
             return ruleDecision;
@@ -50,6 +51,7 @@ public class RoleplayRoutingService {
             routed.confidence = Math.min(routed.confidence,service.config().otherRoleBotReplyChance);
         }
         routed.actions = service.skillRegistry().actionIds(service.config());
+        routed.threadHint = signals.threadHint;
         traceDecision(routed,event,groupID,content,"ai");
         return routed;
     }
@@ -86,6 +88,9 @@ public class RoleplayRoutingService {
         if (signals.direct && !signals.mentioningSelf) parts.add("指向角色：开头或句首叫了角色的名字");
         if (signals.addressedToOtherMember) parts.add("其他指向：艾特的是其他群成员，不是角色");
         if (signals.addressedToOtherRole) parts.add("其他指向：艾特的是另一个角色机器人");
+        if (signals.threadHint != null && !signals.threadHint.trim().isEmpty()) {
+            parts.add(signals.threadHint.trim());
+        }
         if (parts.size() <= 2) parts.add("指向角色：未明确指向角色，需要结合上下文判断");
         return String.join("；",parts);
     }

@@ -26,6 +26,8 @@ public class RoleplayDecisionEngine {
         public boolean recentImageQuestion = false;
         public boolean topicFatigued = false;
         public String topicHint = "";
+        public String threadHint = "";
+        public String threadTurn = "none";
         public int contentLength = 0;
     }
 

@@ -38,6 +38,8 @@ public class RoleplayPromptAssembler {
         return stable
                 +cachedTail
                 +dynamicInstructionText(otherRoleBot,relationship,messageText,actionIds,batchCount)
+                +(decision == null || decision.threadHint == null || decision.threadHint.isEmpty()
+                ? "" : decision.threadHint+"\n")
                 +(skillPrompt.isEmpty() ? "" : "可用技能：\n"+skillPrompt)
                 +"当前时间："+service.currentTimeText()+"\n"
                 +"当前发言者关系："+relationship+"\n"

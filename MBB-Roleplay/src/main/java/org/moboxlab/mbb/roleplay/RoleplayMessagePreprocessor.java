@@ -1,6 +1,7 @@
 package org.moboxlab.mbb.roleplay;
 
 import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSONObject;
 import org.moboxlab.moboxbot.API.Event.GroupMessageEvent;
 
 /**
@@ -104,6 +105,7 @@ public class RoleplayMessagePreprocessor {
             return null;
         }
         RoleplayDecisionEngine.Signals signals = new RoleplayDecisionEngine.Signals();
+        JSONObject thread = service.getThreadService().observe(groupID,event,selfID);
         signals.otherRoleBot = otherRoleBot;
         signals.otherRoleStreak = otherRoleStreak;
         signals.addressedToOtherRole = addressedToOtherRole;
@@ -127,6 +129,8 @@ public class RoleplayMessagePreprocessor {
         RoleplayContextService.TopicFatigue topicFatigue = service.contextService().topicFatigue(groupID,content);
         signals.topicFatigued = topicFatigue.fatigued();
         signals.topicHint = topicFatigue.hint();
+        signals.threadHint = thread.getString("hint");
+        signals.threadTurn = thread.getString("turn");
         String skipReason = RoleplayDecisionEngine.skipReason(service.config(),signals);
         if (skipReason != null) return null;
         RoleplayEmotionService.LocalEvent emotionEvent = service.emotionService().observeMessage(

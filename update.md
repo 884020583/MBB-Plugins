@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.5.66.0.0902 | 2026-10-17 | `MBB-Roleplay` 新增会话线程与回合管理：`RoleplayThreadService` 按群维护活跃线程、参与者、上一位发言者、角色是否参与和是否等待角色回应；线程提示进入路由与回复提示词，帮助判断当前消息是延续旧线程、新线程还是群友之间对话。新增 `threadEnable`、`threadWindowSecond` 配置。 |
 | V0.5.65.0.0847 | 2026-10-17 | `MBB-Roleplay` 与 `MBB-ComfyUI` 生图精细度增强：编译器要求背景必须包含具体环境、物件、光线、景深和氛围，禁止 simple background / solid background / flat color；ComfyUI 新增 `detailBoostEnable`、`detailPositive`、`detailNegative`，默认追加环境细节、景深、体积光、服装材质、织物纹理和锐度 tag，并把纯色背景、平涂、低细节和模糊压到负向词。 |
 | V0.5.64.0.0841 | 2026-10-17 | `MBB-Roleplay` 第 4 批反馈与复核：引用角色消息、戳一戳、表情回应作为隐式反馈标记主动发言被接住；新增 `RoleplayReplyReviewService`，发送前复核回复是否像角色、是否有 AI 味、总结腔、说教或重复，低于 `replyReviewMinScore` 时使用模型改写；新增 `replyReviewEnable`、`replyReviewProfile`、`replyReviewMaxTokens`、`replyReviewReasoningEffort`、`replyReviewTimeoutSecond`、`replyReviewMinScore` 配置。 |
 | V0.5.63.0.0838 | 2026-10-17 | `MBB-Roleplay` 第 3 批生图一致性：目标角色资料以角色卡形式注入编译器，输出 `expectedTags/forbiddenTags`；`MBB-ComfyUI` 接收这两个字段，生成后调用 `MBB-Vision` 对图片做一次身份/外貌校验，命中禁止特征时在控制台输出疑似不符，校验不阻断发送；新增 `identityCheckEnable`、`identityCheckProfile` 配置。 |
