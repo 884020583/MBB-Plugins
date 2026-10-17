@@ -55,6 +55,7 @@
 | `/role memory backups` | `BOT_ADMIN` | 查看备份文件名列表 |
 | `/role memory restore <文件名>` | `OWNER` | 从备份文件恢复全部记忆 |
 | `/role memory timeline [页码]` | `BOT_ADMIN` | 按事件时间倒序查看长期记忆时间线 |
+| `/role memory conflicts [条数]` | `BOT_ADMIN` | 查看因冲突被归档的长期记忆 |
 | `/role forget` | `BOT_ADMIN` | 清空当前群记忆、聊天上下文并轮换 AI 会话 |
 | `/role persona [文件名]` | `BOT_ADMIN` | 查看或切换角色设定文件 |
 | `/role persona reset <文件名>` | `BOT_ADMIN` | 用内置版本覆盖指定角色设定文件 |

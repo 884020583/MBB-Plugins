@@ -53,6 +53,8 @@ flowchart LR
 
 主动发言反馈除了“窗口内有人接话”，还会把引用角色消息、戳一戳、表情回应作为隐式反馈。发送前 `RoleplayReplyReviewService` 会对回复候选做一次复核，低于 `replyReviewMinScore` 且模型给出改写时使用改写文本。
 
+会话线程由 `RoleplayThreadService` 维护，线程提示会进入路由和回复提示词；拟人节奏由 `RoleplayPacingService` 控制；安全与防注入由 `RoleplaySafetyService` 在消息进入路由前和长期记忆写入前拦截。
+
 ## 戳一戳与引用
 
 被人戳一戳时，插件走和群消息同一条处理链路，只是把当前消息换成「有人戳了你」。

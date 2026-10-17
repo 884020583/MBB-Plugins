@@ -167,6 +167,22 @@ replyReviewMaxTokens: 1200
 replyReviewReasoningEffort: "none"
 replyReviewTimeoutSecond: 60
 replyReviewMinScore: 70
+pacingEnable: true
+pacingBaseMs: 350
+pacingPerCharMs: 25
+pacingMaxMs: 2500
+pacingNightMultiplier: 1.40
+pacingActiveMultiplier: 0.80
+pacingActiveThreshold: 0.70
+pacingNightStartHour: 0
+pacingNightEndHour: 6
+safetyGuardEnable: true
+promptInjectionGuardEnable: true
+privacyGuardEnable: true
+threadEnable: true
+threadWindowSecond: 180
+memoryConflictResolveEnable: true
+memoryConflictMinOverlap: 2
 traceEnable: true
 traceKeepHours: 72
 traceMaxRows: 2000
@@ -226,6 +242,14 @@ quietReplyEnable: true
 `replyReviewEnable` 默认 `true`。角色回复在发送前会经过 `RoleplayReplyReviewService` 复核：检查是否像角色、是否有 AI 味、总结腔、说教、重复或过长；分数低于 `replyReviewMinScore` 且模型给出 `rewrite` 时使用改写文本。`replyReviewProfile` 留空时使用 `aiProfile`。
 
 `traceEnable` 默认 `true`，按群记录路由与回复 trace，保留 `traceKeepHours` 小时，最多 `traceMaxRows` 行；`/role trace` 查看。`evalEnable` 默认 `true`，`/role eval` 运行内置或 `evals/roleplay-evals.json` 自定义评测集，`evalProfile` 留空时使用 `aiProfile`。
+
+`threadEnable` 默认 `true`，按群维护会话线程、参与者、上一位发言者和角色是否被等待回应；`threadWindowSecond` 控制多久没有新消息后视为新线程。
+
+`memoryConflictResolveEnable` 默认 `true`。写入新长期记忆时，如果同群、同类型、同用户下存在相反极性的高重合旧记忆，会把旧记忆标记为 `archived` 并记录 `supersededBy`，不直接删除；`/role memory conflicts` 可查看。
+
+`pacingEnable` 默认 `true`。发送前按回复长度、深夜时段和群注意力计算拟人打字延迟，`pacingMaxMs` 控制上限；深夜使用 `pacingNightMultiplier`，群活跃时使用 `pacingActiveMultiplier`。
+
+`safetyGuardEnable` 默认 `true`，拦截系统提示词诱导、越狱指令和现实隐私索取；`promptInjectionGuardEnable` 和 `privacyGuardEnable` 可分别关闭。长期记忆写入也会经过同样的安全检查。
 
 `topicFatigueEnable` 默认 `true`。插件会按群记录话题疲劳：同一话题在 `topicFatigueWindowMinute` 分钟内出现次数达到 `topicFatigueMinCount`，且角色自己参与达到 `topicFatigueSelfCount` 时，路由层会降权或跳过主动回复；直接点名、引用回复或明确提问仍可打破疲劳。记录保留 `topicFatigueKeepHours` 小时。
 
