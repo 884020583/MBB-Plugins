@@ -63,3 +63,17 @@ D:\CodeX\Projects\MoBoxBot
 4. 发现问题时，基于 PR head 建本地修复分支，保留原作者提交；修复后重新构建和自检。
 5. 只有审查无阻断问题，或阻断问题已修复并验证后，才能合并到 `master`。
 6. 合并后运行全量构建、密钥扫描，推送远端并确认远程分支状态。
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues（本 fork `884020583/MBB-Plugins`，用 `gh` CLI 操作）。详见 `docs/agents/issue-tracker.md`。
+
+### Triage labels
+
+沿用默认五角色 `needs-triage` / `needs-info` / `ready-for-agent` / `ready-for-human` / `wontfix`，另有 `wayfinder:*` 标签。详见 `docs/agents/triage-labels.md`。
+
+### Domain docs
+
+single-context（根目录一份 `GLOSSARY.md`，架构决定放 `docs/adr/`）。详见 `docs/agents/domain.md`。
