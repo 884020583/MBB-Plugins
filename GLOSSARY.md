@@ -109,3 +109,64 @@ _Avoid_: 总结、纪事
 **归档（Archive）**：
 把结束的局标记为 ENDED 并保留 30 天供查询，到期后按日志、成员、局的顺序清理。
 _Avoid_: 删除、关闭
+
+
+## 剧本与内容
+
+**剧本 ID（Script ID）**：
+剧本的稳定标识，正则 ^[a-z0-9][a-z0-9-]{0,31}$；`session` 只存这个值，不存剧本正文。
+_Avoid_: 模组编号、剧本文件名
+
+**内置剧本（Built-in Script）**：
+随插件 JAR 资源发布、只读且不可删除的剧本；`coc-example` 是默认内置剧本。
+_Avoid_: 官方模组、自带剧本
+
+**剧本库（Script Catalog）**：
+当前可用的内置与导入剧本集合；onEnable 全量校验后缓存，没有 reload 命令。
+_Avoid_: 剧本列表、模组库
+
+**剧本导入（Script Import）**：
+管理员通过分段粘贴把 JSON 写入数据目录的流程；分开始、片段、end/cancel 三步，暂存在内存。
+_Avoid_: 上传剧本、导入模组
+
+**剧本生成（Script Generation）**：
+调用 MBB-AI 一次性生成剧本草稿并走同一套校验的流程；与 AI 主持解耦，不写 `ai_trace`。
+_Avoid_: AI 写模组、自动创作
+
+**剧本校验（Script Validation）**：
+按 schema 与语义规则对剧本做全量检查；全有或全无，任何 E_ 级错误都不落盘。
+_Avoid_: 格式检查、合法性检查
+
+**场景（Scene）**：
+剧本中的一个叙述单元，按数组顺序排列；第一个是开场，用标题定位，进入时解锁其 `clueIds`。
+_Avoid_: 章节、幕
+
+**线索键（Clue Key）**：
+线索的 `id`，也是文本日志 clue 事件 `content` 的值；读取时按它去重。
+_Avoid_: 线索编号、线索 ID
+
+**检定建议（Check Suggestion）**：
+剧本中 `checks` 的一项，给出技能、难度、奖惩骰与提示；不自动掷骰，也不绑定指令。
+_Avoid_: 剧本检定、自动检定
+
+**触发提示（Trigger Hint）**：
+剧本中 `triggers` 的一项，在场景进入、线索解锁或检定结算后给 KP 的提示；v1 不改状态。
+_Avoid_: 自动事件、剧情钩子
+
+**结局（Ending）**：
+剧本中 `endings` 的一项，按数组顺序取第一个所需线索全部解锁者；都不满足时用插件通用文本。
+_Avoid_: 结尾、通关
+
+**起始物品（Starting Items）**：
+剧本顶层 `startingItems`，玩家加入时复制到 `cardJSON.items` 的字符串数组。
+_Avoid_: 初始装备、自带道具
+
+**导入暂存（Import Buffer）**：
+分段导入期间按（会话, 用户）保存在内存里的原文与状态；重启即丢失，有超时与大小上限。
+_Avoid_: 草稿、缓存
+
+**保留字（Reserved Word）**：
+脚本 id 不得使用的词：list、show、import、delete、gen、end、cancel；另不得以 `gen-` 开头。
+_Avoid_: 关键字、禁用词
+
+
