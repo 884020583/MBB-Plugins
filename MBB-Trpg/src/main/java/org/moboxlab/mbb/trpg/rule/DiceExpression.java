@@ -50,11 +50,6 @@ public final class DiceExpression {
         return count == 0 ? modifier : count * sides + modifier;
     }
 
-    /** 最小可能值。 */
-    public int minValue() {
-        return count == 0 ? modifier : count + modifier;
-    }
-
     public int count() {
         return count;
     }

@@ -6,12 +6,21 @@ import static org.junit.Assert.assertSame;
 import static org.junit.Assert.assertTrue;
 
 import org.junit.After;
+import org.junit.Before;
 import org.junit.Test;
 
 /** 规则集注册表契约测试，覆盖 G7 的未知规则集回退与告警。 */
 public class RuleRegistryTest {
 
     private static final String CUSTOM_ID = "test.custom";
+
+    /** 每个用例都从「内置已注册、无告警」的干净状态开始，避免静态注册表跨用例污染。 */
+    @Before
+    public void setUp() {
+        RuleRegistry.unregister(CUSTOM_ID);
+        RuleRegistry.register(new D100RuleSet());
+        RuleRegistry.clearWarnings();
+    }
 
     @After
     public void cleanup() {
@@ -30,9 +39,9 @@ public class RuleRegistryTest {
 
     @Test
     public void sameIdOverwritesPreviousRegistration() {
-        RuleRegistry.register(new D100RuleSet());
-        RuleRegistry.register(new D100RuleSet());
-        assertTrue(RuleRegistry.get("d100") instanceof D100RuleSet);
+        D100RuleSet later = new D100RuleSet();
+        RuleRegistry.register(later);
+        assertSame(later, RuleRegistry.get("d100"));
     }
 
     @Test

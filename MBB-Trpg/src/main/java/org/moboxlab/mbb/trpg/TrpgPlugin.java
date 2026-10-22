@@ -57,8 +57,8 @@ public class TrpgPlugin extends Plugin {
         if (trpgConfig == null) {
             trpgConfig = TrpgConfig.load(getConfig());
         }
-        // 规则集是编译期 SPI，先注册内置实现，再按配置里的 id 取用；
-        // 注册失败不影响建表与存储组装，只有取用阶段才会因拿不到规则集而禁用。
+        // 规则集是编译期 SPI：先注册内置实现，再按配置里的 id 取用。
+        // 注册与取用不依赖数据库，因此放在建表之前，建表失败时规则集依然可用。
         registerBuiltinRuleSets();
         if (getServer() == null) {
             trpgEnabled = false;
@@ -96,13 +96,11 @@ public class TrpgPlugin extends Plugin {
         if (ruleSet == null) {
             getLogger().sendError("[MBB-Trpg] 规则集 " + trpgConfig.ruleSetId()
                     + " 未注册且内置 d100 缺失，检定不可用");
-        } else if (!ruleSet.id().equals(trpgConfig.ruleSetId())) {
-            getLogger().sendWarn("[MBB-Trpg] 规则集 " + trpgConfig.ruleSetId() + " 未知，已回退到 "
-                    + ruleSet.id() + "（" + ruleSet.displayName() + "）");
-        } else {
+        } else if (ruleSet.id().equals(trpgConfig.ruleSetId())) {
             getLogger().sendInfo("[MBB-Trpg] 规则集 " + ruleSet.id() + "（" + ruleSet.displayName()
                     + "）已就绪");
         }
+        // 回退告警由 RuleRegistry 统一记录，这里只负责打成插件日志，避免同一件事报两遍。
         for (String warning : RuleRegistry.warnings()) {
             getLogger().sendWarn("[MBB-Trpg] " + warning);
         }
@@ -176,12 +174,12 @@ public class TrpgPlugin extends Plugin {
         return disabledReason;
     }
 
-    /** 当前生效的规则集；未启用时为 null。 */
+    /** 当前生效的规则集；注册完成后即有值，插件停用后为 null。 */
     public RuleSet ruleSet() {
         return ruleSet;
     }
 
-    /** 生产随机源；未启用时为 null。 */
+    /** 生产随机源；注册完成后即有值，插件停用后为 null。 */
     public RandomSource randomSource() {
         return randomSource;
     }

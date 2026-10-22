@@ -21,7 +21,7 @@ public final class D100RuleSet implements RuleSet {
     public static final String ID = RuleRegistry.BUILTIN_RULE_SET_ID;
 
     /** 单次理智损失达到该值即触发临时性疯狂判定。 */
-    public static final int SAN_TRIGGER_THRESHOLD = 5;
+    private static final int SAN_TRIGGER_THRESHOLD = 5;
 
     /** 低于该技能值时，96..100 都算大失败。 */
     private static final int HIGH_FUMBLE_SKILL_BOUNDARY = 50;
@@ -39,6 +39,10 @@ public final class D100RuleSet implements RuleSet {
     private static final String[] DEGREE_LABELS = {
             "大失败", "失败", "常规成功", "困难成功", "极难成功", "大成功"
     };
+
+    /** 成长掷 1D10 的档位：十位骰 0..9 加一得 1..10。 */
+    private static final int GROWTH_DIE_OFFSET = 1;
+    private static final int GROWTH_DIE_FACES = 10;
 
     @Override
     public String id() {
@@ -124,8 +128,9 @@ public final class D100RuleSet implements RuleSet {
                     leftRoll < rightRoll ? OpposedOutcome.LEFT_WIN : OpposedOutcome.RIGHT_WIN,
                     OpposedTieBreak.ROLL);
         }
-        int leftReroll = rollPercentile(random);
-        int rightReroll = rollPercentile(random);
+        // 重掷一次：仍按双方原奖惩骰掷完整的 d100，只比较归一化骰面。
+        int leftReroll = rollD100(leftCheck.bonusDice(), leftCheck.penaltyDice(), random).normalized();
+        int rightReroll = rollD100(rightCheck.bonusDice(), rightCheck.penaltyDice(), random).normalized();
         if (leftReroll == rightReroll) {
             return new OpposedResult(left, right, OpposedOutcome.NONE, OpposedTieBreak.ROLL_TIE);
         }
@@ -138,10 +143,16 @@ public final class D100RuleSet implements RuleSet {
         RollTrace roll = rollD100(check.bonusDice(), check.penaltyDice(), random);
         int degree = degreeOf(roll.normalized(), check.skillValue());
         boolean success = isSuccess(degree, check.difficulty());
-        String summary = skillSummary(check, degree, roll.normalized());
+        String summary = skillSummary(check, degree, success, roll.normalized());
         return new CheckResult(success, degree, roll, summary, null, false, 0);
     }
 
+    /**
+     * 理智检定：大失败取失败损失上限，成功扣 X，失败扣 Y；单次损失 ≥5 置硬直标记。
+     *
+     * <p>理智归零后的永久疯狂退场由上层用 {@code currentSan} 与 {@code sanLoss} 判定，
+     * 本规则集只回报扣点，不改角色状态。</p>
+     */
     private CheckResult resolveSan(D100SanCheck check, RandomSource random) throws RuleException {
         RollTrace roll = rollD100(0, 0, random);
         int degree = degreeOf(roll.normalized(), check.currentSan());
@@ -154,7 +165,7 @@ public final class D100RuleSet implements RuleSet {
             loss = check.failureLoss().roll(random);
         }
         boolean trigger = loss >= SAN_TRIGGER_THRESHOLD;
-        String summary = "理智检定" + sanLabel(degree) + "（掷出 " + roll.normalized()
+        String summary = "理智检定" + degreeLabel(degree) + "（掷出 " + roll.normalized()
                 + "），损失 " + loss;
         return new CheckResult(degree >= CheckResult.DEGREE_REGULAR, degree, roll, summary,
                 Integer.valueOf(loss), trigger, 0);
@@ -162,13 +173,12 @@ public final class D100RuleSet implements RuleSet {
 
     private CheckResult resolveGrowth(D100GrowthCheck check, RandomSource random) throws RuleException {
         int rolled = rollPercentile(random);
-        int units = rolled % 10;
-        int tens = (rolled % 100) / 10;
-        RollTrace roll = new RollTrace(units, tens, new int[0], new int[0], tens, rolled);
+        int tens = tensOf(rolled);
+        RollTrace roll = new RollTrace(unitsOf(rolled), tens, new int[0], new int[0], tens, rolled);
         boolean success = rolled > check.skillValue();
         int delta = 0;
         if (success) {
-            int gain = rollTensDie(random) + 1;
+            int gain = rollGrowthDie(random);
             int cap = MAX_SKILL_VALUE - check.skillValue();
             delta = Math.min(gain, Math.max(0, cap));
         }
@@ -187,8 +197,8 @@ public final class D100RuleSet implements RuleSet {
     /** 掷一次 d100 并选择奖惩骰后的十位；抵消后的奖励取最小归一值，惩罚取最大归一值。 */
     private RollTrace rollD100(int bonusDice, int penaltyDice, RandomSource random) throws RuleException {
         int base = rollPercentile(random);
-        int units = base % 10;
-        int baseTens = (base % 100) / 10;
+        int units = unitsOf(base);
+        int baseTens = tensOf(base);
         int[] bonusTens = new int[bonusDice];
         for (int i = 0; i < bonusDice; i++) {
             bonusTens[i] = rollTensDie(random);
@@ -197,6 +207,7 @@ public final class D100RuleSet implements RuleSet {
         for (int i = 0; i < penaltyDice; i++) {
             penaltyTens[i] = rollTensDie(random);
         }
+        // 十位骰先全部掷出再抵消：被抵消的骰面仍进 RollTrace，便于战报复盘原始骰面。
         int cancelled = Math.min(bonusDice, penaltyDice);
         int remainingBonus = bonusDice - cancelled;
         int remainingPenalty = penaltyDice - cancelled;
@@ -230,12 +241,29 @@ public final class D100RuleSet implements RuleSet {
         return face;
     }
 
+    /** 成长收益 1..10：十位骰 0..9 加一，等价 1D10。 */
+    private static int rollGrowthDie(RandomSource random) throws RuleException {
+        int gain = rollTensDie(random) + GROWTH_DIE_OFFSET;
+        if (gain < 1 || gain > GROWTH_DIE_FACES) {
+            throw new RuleException("成长骰面必须在 1..10 之间，实际：" + gain);
+        }
+        return gain;
+    }
+
     private static int rollTensDie(RandomSource random) throws RuleException {
         int digit = random.d10();
         if (digit < 0 || digit > 9) {
             throw new RuleException("十位骰面必须在 0..9 之间，实际：" + digit);
         }
         return digit;
+    }
+
+    private static int unitsOf(int percentile) {
+        return percentile % 10;
+    }
+
+    private static int tensOf(int percentile) {
+        return (percentile % 100) / 10;
     }
 
     /** 十位 0 且个位 0 归一化为 100，其余为十位 ×10 + 个位。 */
@@ -254,13 +282,13 @@ public final class D100RuleSet implements RuleSet {
         if (isFumble(normalized, skillValue)) {
             return CheckResult.DEGREE_FUMBLE;
         }
-        if (normalized <= skillValue / 5) {
+        if (normalized <= successThreshold(skillValue, CheckDifficulty.EXTREME)) {
             return CheckResult.DEGREE_EXTREME;
         }
-        if (normalized <= skillValue / 2) {
+        if (normalized <= successThreshold(skillValue, CheckDifficulty.HARD)) {
             return CheckResult.DEGREE_HARD;
         }
-        if (normalized <= skillValue) {
+        if (normalized <= successThreshold(skillValue, CheckDifficulty.REGULAR)) {
             return CheckResult.DEGREE_REGULAR;
         }
         return CheckResult.DEGREE_FAILURE;
@@ -291,37 +319,31 @@ public final class D100RuleSet implements RuleSet {
         }
     }
 
-    private static String skillSummary(D100SkillCheck check, int degree, int normalized) {
-        String label = DEGREE_LABELS[degree + 1];
+    /** 摘要只陈述事实：达成难度用「≤ 本次阈值」，未达成用「> 本次阈值」，不写「成功」误导。 */
+    private static String skillSummary(D100SkillCheck check, int degree, boolean success, int normalized) {
+        String label = degreeLabel(degree);
         if (degree == CheckResult.DEGREE_CRITICAL || degree == CheckResult.DEGREE_FUMBLE) {
             return label + "（掷出 " + normalized + "）";
         }
-        if (degree == CheckResult.DEGREE_FAILURE) {
-            return label + "（掷出 " + normalized + " > " + check.skillValue() + "）";
-        }
-        return label + "（掷出 " + normalized + " ≤ " + thresholdOf(degree, check.skillValue()) + "）";
+        int threshold = successThreshold(check.skillValue(), check.difficulty());
+        return success
+                ? label + "（掷出 " + normalized + " ≤ " + threshold + "）"
+                : label + "（掷出 " + normalized + " > " + threshold + "）";
     }
 
-    private static int thresholdOf(int degree, int skillValue) {
-        if (degree >= CheckResult.DEGREE_EXTREME) {
-            return skillValue / 5;
+    /** 各难度「算成功」的骰面上限，也是摘要里的比较阈值。 */
+    private static int successThreshold(int skillValue, CheckDifficulty difficulty) {
+        switch (difficulty) {
+            case EXTREME:
+                return skillValue / 5;
+            case HARD:
+                return skillValue / 2;
+            default:
+                return skillValue;
         }
-        if (degree == CheckResult.DEGREE_HARD) {
-            return skillValue / 2;
-        }
-        return skillValue;
     }
 
-    private static String sanLabel(int degree) {
-        if (degree == CheckResult.DEGREE_CRITICAL) {
-            return "大成功";
-        }
-        if (degree == CheckResult.DEGREE_FUMBLE) {
-            return "大失败";
-        }
-        if (degree >= CheckResult.DEGREE_REGULAR) {
-            return "成功";
-        }
-        return "失败";
+    private static String degreeLabel(int degree) {
+        return DEGREE_LABELS[degree + 1];
     }
 }

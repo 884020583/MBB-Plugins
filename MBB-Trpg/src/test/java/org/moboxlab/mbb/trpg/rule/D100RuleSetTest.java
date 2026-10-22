@@ -169,6 +169,19 @@ public class D100RuleSetTest {
     }
 
     @Test
+    public void opposedRerollKeepsBonusDiceOfBothSides() throws Exception {
+        // 十位骰面 1..10 对应十位 0..9，面 2 即十位 1。首轮双方都取到 15 平局，
+        // 重掷时左侧仍是十位 1（15），右侧十位 2（25），由骰面低者胜。
+        FakeRandom random = new FakeRandom(45, 2, 45, 2, 45, 2, 45, 3);
+        OpposedResult result = rules.resolveOpposed(
+                opposed(skill(60, CheckDifficulty.REGULAR, 1, 0), skill(60, CheckDifficulty.REGULAR, 1, 0)),
+                random);
+        assertEquals(OpposedOutcome.LEFT_WIN, result.outcome());
+        assertEquals(OpposedTieBreak.ROLL_TIE, result.decidedBy());
+        assertEquals(Arrays.asList(100, 10, 100, 10, 100, 10, 100, 10), random.requestedSides());
+    }
+
+    @Test
     public void opposedNoneWhenRerollStillTies() throws Exception {
         OpposedResult result = rules.resolveOpposed(opposed(skill(50), skill(50)),
                 new FakeRandom(20, 20, 30, 30));

@@ -14,7 +14,6 @@ public class DiceExpressionTest {
         assertEquals(0, expression.count());
         assertEquals(3, expression.roll(new FakeRandom()));
         assertEquals(3, expression.maxValue());
-        assertEquals(3, expression.minValue());
         assertEquals("3", expression.describe());
     }
 
@@ -24,7 +23,6 @@ public class DiceExpressionTest {
         FakeRandom random = new FakeRandom(6, 3);
         assertEquals(10, expression.roll(random));
         assertEquals(13, expression.maxValue());
-        assertEquals(3, expression.minValue());
         assertEquals("2D6+1", expression.describe());
         assertEquals(2, expression.count());
         assertEquals(6, expression.sides());
@@ -35,7 +33,6 @@ public class DiceExpressionTest {
     public void negativeModifierIsDescribed() {
         DiceExpression expression = DiceExpression.dice(1, 6, -2);
         assertEquals("1D6-2", expression.describe());
-        assertEquals(-1, expression.minValue());
         assertEquals(4, expression.maxValue());
     }
 
