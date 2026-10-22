@@ -1,21 +1,37 @@
 package org.moboxlab.mbb.trpg;
 
 import org.moboxlab.moboxbot.API.Plugin;
+import org.moboxlab.moboxbot.API.PluginManager;
 import org.moboxlab.moboxbot.API.Storage.StorageService;
+import org.moboxlab.mbb.trpg.ai.TraceStore;
 import org.moboxlab.mbb.trpg.config.TrpgConfig;
+import org.moboxlab.mbb.trpg.session.PluginManagerScheduler;
+import org.moboxlab.mbb.trpg.session.ScheduledTask;
+import org.moboxlab.mbb.trpg.store.BlacklistService;
+import org.moboxlab.mbb.trpg.store.SessionStore;
+import org.moboxlab.mbb.trpg.store.SqlSessionStore;
+import org.moboxlab.mbb.trpg.store.SqlTraceStore;
+import org.moboxlab.mbb.trpg.store.TrpgRetentionService;
 import org.moboxlab.mbb.trpg.store.TrpgSchemaService;
 
 /**
  * MBB-Trpg 插件主类。
  *
- * <p>S1 阶段职责：加载配置、建表并保持幂等；其余能力（存储实现、规则引擎、
- * 会话状态机、呈现与指令层）由后续切片装配到 {@link #onEnable()} 末尾的装配位。</p>
+ * <p>当前职责：加载配置、建表并保持幂等，装配存储实现、审计端口、拉黑名单与归档清理，
+ * 并排入每小时清理任务；规则引擎、会话状态机、呈现与指令层由后续切片装配到
+ * {@link #onEnable()} 末尾的装配位。</p>
  */
 public class TrpgPlugin extends Plugin {
 
     private TrpgConfig trpgConfig;
     private boolean trpgEnabled;
     private String disabledReason = "";
+
+    private SessionStore sessionStore;
+    private TraceStore traceStore;
+    private BlacklistService blacklistService;
+    private TrpgRetentionService retentionService;
+    private ScheduledTask retentionTask;
 
     @Override
     public void onLoad() {
@@ -57,12 +73,52 @@ public class TrpgPlugin extends Plugin {
         }
         trpgEnabled = true;
         disabledReason = "";
-        // 后续切片装配位：SessionStore、SessionService、RuleEngine、呈现服务、指令与监听器。
+        assembleServices(storage);
+        // 后续切片装配位：SessionService、RuleEngine、呈现服务、指令与监听器。
         getLogger().sendInfo("[MBB-Trpg] 已启用，版本 " + getVersion() + "，数据表已就绪");
+    }
+
+    private void assembleServices(StorageService storage) {
+        SqlSessionStore store = new SqlSessionStore(storage, getLogger());
+        sessionStore = store;
+        traceStore = new SqlTraceStore(store);
+        blacklistService = new BlacklistService(store);
+        retentionService = new TrpgRetentionService(store, getLogger(),
+                trpgConfig.retentionSessionDays(), trpgConfig.aiTraceKeepHours(),
+                trpgConfig.aiTraceMaxRows());
+
+        // 启动先清一轮，再交给定时任务按小时执行
+        try {
+            TrpgRetentionService.Result result = retentionService.runOnce(System.currentTimeMillis());
+            getLogger().sendInfo("[MBB-Trpg] 启动清理完成：" + result);
+        } catch (RuntimeException e) {
+            getLogger().sendWarn("[MBB-Trpg] 启动清理异常，已跳过：" + e.getMessage());
+        }
+        PluginManager pluginManager = getServer() == null ? null : getServer().getPluginManager();
+        if (pluginManager == null) {
+            retentionTask = null;
+            getLogger().sendWarn("[MBB-Trpg] 取不到插件管理器，归档清理不会按小时执行");
+            return;
+        }
+        try {
+            retentionTask = retentionService.scheduleHourly(
+                    new PluginManagerScheduler(this, pluginManager, getLogger()));
+        } catch (RuntimeException e) {
+            retentionTask = null;
+            getLogger().sendWarn("[MBB-Trpg] 归档清理定时任务注册失败：" + e.getMessage());
+        }
     }
 
     @Override
     public void onDisable() {
+        if (retentionTask != null) {
+            retentionTask.cancel();
+            retentionTask = null;
+        }
+        sessionStore = null;
+        traceStore = null;
+        blacklistService = null;
+        retentionService = null;
         getLogger().sendInfo("[MBB-Trpg] 已停用");
     }
 
@@ -79,5 +135,25 @@ public class TrpgPlugin extends Plugin {
     /** TRPG 被禁用的原因；可用时为空串。 */
     public String disabledReason() {
         return disabledReason;
+    }
+
+    /** 会话存储；未启用时为 null。 */
+    public SessionStore sessionStore() {
+        return sessionStore;
+    }
+
+    /** AI 审计端口；未启用时为 null。 */
+    public TraceStore traceStore() {
+        return traceStore;
+    }
+
+    /** 拉黑名单服务；未启用时为 null。 */
+    public BlacklistService blacklistService() {
+        return blacklistService;
+    }
+
+    /** 归档清理服务；未启用时为 null。 */
+    public TrpgRetentionService retentionService() {
+        return retentionService;
     }
 }

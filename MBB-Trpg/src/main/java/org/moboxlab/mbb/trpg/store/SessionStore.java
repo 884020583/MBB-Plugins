@@ -105,6 +105,13 @@ public interface SessionStore {
     /** 追加 AI 审计行，返回自增主键；0 表示失败。 */
     long appendAiTrace(AiTraceRow row);
 
+    /**
+     * 读最近审计行（按 id 倒序）。
+     *
+     * <p>{@code sessionId <= 0} 时只按群过滤；{@code limit <= 0} 时不查库、返回空表。</p>
+     */
+    List<AiTraceRow> listAiTrace(long groupId, long sessionId, int limit);
+
     /** 删除创建时间早于给定时点的审计行。 */
     int deleteAiTraceBefore(long createTime);
 
