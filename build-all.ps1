@@ -1,6 +1,7 @@
 ﻿# MBB-Plugins 批量构建脚本
 param(
-    [string]$Bot = "D:\CodeX\Projects\MoBoxBot\out\MoBoxBot.jar"
+    [string]$Bot = "D:\CodeX\Projects\MoBoxBot\out\MoBoxBot.jar",
+    [switch]$RunTests
 )
 
 $ErrorActionPreference = "Stop"
@@ -11,6 +12,31 @@ $plugins = Get-ChildItem -LiteralPath $root -Directory | Where-Object { $_.Name 
 if (-not $plugins -or $plugins.Count -eq 0) {
     Write-Host "没有找到 MBB-* 插件目录。"
     exit 1
+}
+
+# 只跑测试：对含有 src\test\java 的插件执行 build.ps1 -Test，不重复做常规构建
+if ($RunTests) {
+    $tested = 0
+    foreach ($plugin in $plugins) {
+        $testDir = Join-Path $plugin.FullName "src\test\java"
+        $build = Join-Path $plugin.FullName "build.ps1"
+        if (-not (Test-Path -LiteralPath $testDir) -or -not (Test-Path -LiteralPath $build)) {
+            continue
+        }
+        Write-Host ("==== 测试 " + $plugin.Name + " ====")
+        & powershell -NoProfile -ExecutionPolicy Bypass -File $build -Bot $Bot -Test
+        if ($LASTEXITCODE -ne 0) {
+            Write-Host ($plugin.Name + " 测试失败，已中止。")
+            exit $LASTEXITCODE
+        }
+        $tested++
+    }
+    if ($tested -eq 0) {
+        Write-Host "没有找到带测试的插件（src\test\java 为空）。"
+        exit 0
+    }
+    Write-Host ("全部测试完成，共 " + $tested + " 个插件。")
+    exit 0
 }
 
 foreach ($plugin in $plugins) {

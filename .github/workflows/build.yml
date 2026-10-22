@@ -36,6 +36,10 @@ jobs:
         shell: powershell
         run: .\build-all.ps1 -Bot .\MoBoxBot\out\MoBoxBot.jar
 
+      - name: Run tests
+        shell: powershell
+        run: .\build-all.ps1 -Bot .\MoBoxBot\out\MoBoxBot.jar -RunTests
+
       - name: Package release archive
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
         shell: powershell
