@@ -34,13 +34,18 @@ public final class TrpgImageTemplates {
         return wrapForImage(text, LINE_WIDTH);
     }
 
-    /** 按给定宽度折行，保留原有换行。 */
+    /**
+     * 按给定宽度折行，保留原有换行。
+     *
+     * <p>宽度按「全角 1 行、半角 0.5 行」折算：ASCII 记 1 个单位，其余字符记 2 个单位，
+     * 一行的预算为 {@code width * 2} 个单位，避免中英混排时行被撑爆。</p>
+     */
     public static List<String> wrapForImage(String text, int width) {
         List<String> lines = new ArrayList<String>();
         if (text == null || text.isEmpty()) {
             return Collections.unmodifiableList(lines);
         }
-        int limit = Math.max(1, width);
+        int budget = Math.max(2, width * 2);
         for (String raw : text.split("\n", -1)) {
             String line = raw.trim();
             if (line.isEmpty()) {
@@ -48,14 +53,23 @@ public final class TrpgImageTemplates {
             }
             int offset = 0;
             while (offset < line.length()) {
-                int remaining = line.codePointCount(offset, line.length());
-                int take = Math.min(limit, remaining);
-                int end = line.offsetByCodePoints(offset, take);
+                int used = 0;
+                int end = offset;
+                while (end < line.length()) {
+                    int codePoint = line.codePointAt(end);
+                    int units = codePoint < 128 ? 1 : 2;
+                    if (used + units > budget) {
+                        break;
+                    }
+                    used += units;
+                    end += Character.charCount(codePoint);
+                }
+                if (end == offset) {
+                    // 单字符就超预算（宽度设置过小时）也必须前进，避免死循环。
+                    end = offset + Character.charCount(line.codePointAt(offset));
+                }
                 lines.add(line.substring(offset, end));
                 offset = end;
-                if (take <= 0) {
-                    break;
-                }
             }
         }
         return Collections.unmodifiableList(lines);
@@ -103,9 +117,7 @@ public final class TrpgImageTemplates {
         }
         List<String> sections = new ArrayList<String>();
         sections.add("【局】《" + report.scriptName() + "》");
-        sections.add("【时间】" + TrpgMessageTemplates.date(report.startedAt()) + ' '
-                + clock(report.startedAt()) + " — " + clock(report.endedAt())
-                + "（" + report.durationText() + "）");
+        sections.add("【时间】" + timeRange(report));
         sections.add("【KP】" + report.kpName());
         sections.add("【玩家】" + foldNames(report.playerNames(), "人"));
         sections.add("【结局】" + report.endingTitle());
@@ -129,8 +141,8 @@ public final class TrpgImageTemplates {
         if (script == null) {
             throw new IllegalArgumentException("剧本不能为空");
         }
+        // 首行标题由渲染器负责（与图片标题同名），这里不再重复。
         List<String> lines = new ArrayList<String>();
-        lines.add("剧本 · 《" + (script.name().isEmpty() ? "未知剧本" : script.name()) + "》");
         lines.add("id：" + script.id() + "　作者："
                 + (script.author().isEmpty() ? "未知" : script.author()));
         lines.add(TrpgMessageTemplates.scriptMeta(script));
@@ -148,7 +160,7 @@ public final class TrpgImageTemplates {
         if (report.clueNames().isEmpty()) {
             return "无（0/" + report.clueTotal() + "）";
         }
-        return join(report.clueNames(), " / ") + "（" + report.clueNames().size() + '/'
+        return foldNames(report.clueNames(), " / ", "条") + "（" + report.clueNames().size() + '/'
                 + report.clueTotal() + "）";
     }
 
@@ -162,6 +174,16 @@ public final class TrpgImageTemplates {
         return "独立检定 " + report.checkTotal() + " 次：" + join(report.checkResults(), "、");
     }
 
+    /** 时间栏：同一天只写一次日期，跨天时两端都带日期。 */
+    private static String timeRange(TrpgReport report) {
+        String startDate = TrpgMessageTemplates.date(report.startedAt());
+        String endDate = TrpgMessageTemplates.date(report.endedAt());
+        String start = startDate + ' ' + clock(report.startedAt());
+        String end = endDate.equals(startDate) ? clock(report.endedAt())
+                : endDate + ' ' + clock(report.endedAt());
+        return start + " — " + end + "（" + report.durationText() + "）";
+    }
+
     private static String clock(long millis) {
         String dateTime = TrpgMessageTemplates.dateTime(millis);
         return dateTime.length() >= 16 ? dateTime.substring(11) : dateTime;
@@ -169,15 +191,20 @@ public final class TrpgImageTemplates {
 
     /** 名单超过 3 行时折成「前两人 等 N 人」。 */
     private static String foldNames(List<String> names, String unit) {
+        return foldNames(names, "、", unit);
+    }
+
+    /** 名单按指定分隔符拼；超过 3 行时折成「前两项 等 N 单位」。 */
+    private static String foldNames(List<String> names, String separator, String unit) {
         if (names.isEmpty()) {
             return "无";
         }
-        String joined = join(names, "、");
+        String joined = join(names, separator);
         if (wrapForImage(joined).size() <= NAME_FOLD_LINES) {
             return joined;
         }
         int shown = Math.min(2, names.size());
-        return join(names.subList(0, shown), "、") + " 等 " + names.size() + " " + unit;
+        return join(names.subList(0, shown), separator) + " 等 " + names.size() + " " + unit;
     }
 
     private static List<String> wrapAll(List<String> lines) {

@@ -19,6 +19,9 @@ public final class TrpgReport {
     private final List<String> playerNames;
     private final List<String> clueNames;
     private final int clueTotal;
+    /** 检定成功数未知（日志里还没有可解析的结果）。 */
+    public static final int CHECK_SUCCESS_UNKNOWN = -1;
+
     private final int checkTotal;
     private final int checkSuccess;
     private final List<String> checkResults;
@@ -37,7 +40,8 @@ public final class TrpgReport {
         this.clueNames = copy(builder.clueNames);
         this.clueTotal = Math.max(0, builder.clueTotal);
         this.checkTotal = Math.max(0, builder.checkTotal);
-        this.checkSuccess = Math.max(0, builder.checkSuccess);
+        // 允许 -1 透传：呈现层据此不输出「（成功 N）」，避免把未知写成成功 0。
+        this.checkSuccess = Math.max(CHECK_SUCCESS_UNKNOWN, builder.checkSuccess);
         this.checkResults = copy(builder.checkResults);
         this.growthLines = copy(builder.growthLines);
         this.retentionDays = Math.max(1, builder.retentionDays);
@@ -100,6 +104,7 @@ public final class TrpgReport {
         return checkTotal;
     }
 
+    /** 检定成功数；{@link #CHECK_SUCCESS_UNKNOWN} 表示日志尚未提供可解析结果。 */
     public int checkSuccess() {
         return checkSuccess;
     }
@@ -150,7 +155,7 @@ public final class TrpgReport {
         private List<String> clueNames = new ArrayList<String>();
         private int clueTotal;
         private int checkTotal;
-        private int checkSuccess;
+        private int checkSuccess = CHECK_SUCCESS_UNKNOWN;
         private List<String> checkResults = new ArrayList<String>();
         private List<String> growthLines = new ArrayList<String>();
         private int retentionDays = 30;

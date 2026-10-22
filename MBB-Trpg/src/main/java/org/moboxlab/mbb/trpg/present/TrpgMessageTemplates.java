@@ -27,17 +27,35 @@ public final class TrpgMessageTemplates {
     /** 时间显示格式（本地时区）。 */
     private static final String DATE_TIME_PATTERN = "yyyy-MM-dd HH:mm";
     private static final String DATE_PATTERN = "yyyy-MM-dd";
-    /** 标题行预留字数：模板截断只作用于正文，标题另算。 */
-    private static final int TITLE_HEADROOM = 32;
     /*
-     * 以下是模板级正文上限，与 presentation.* 配置的分工：
-     * 模板先把内容收敛到合理体量，发送前的拆分/折叠再按 config.groupMaxChars() / privateMaxChars() 处理。
+     * 模板级正文上限，逐条对应呈现规范 §3 的表格（不含标题行）。
+     * 发送前的拆分/折叠再按 config.groupMaxChars() / privateMaxChars() 处理。
      */
-    private static final int BODY_MAX_SHORT = 300 + TITLE_HEADROOM;
-    private static final int BODY_MAX_ENDED = 1200;
-    private static final int BODY_MAX_REPORT_TEXT = 600;
-    private static final int BODY_MAX_KP_HINT = 900;
-    private static final int BODY_MAX_LIST = 500;
+    private static final int LIMIT_RECRUIT = 300;
+    private static final int LIMIT_JOINED = 120;
+    private static final int LIMIT_LEFT = 120;
+    private static final int LIMIT_INVITED = 120;
+    private static final int LIMIT_TAKEN_OVER = 120;
+    private static final int LIMIT_HOST = 100;
+    private static final int LIMIT_BEGIN = 300;
+    private static final int LIMIT_SCENE = 400;
+    private static final int LIMIT_CLUE = 200;
+    private static final int LIMIT_CHECK = 200;
+    private static final int LIMIT_OPPOSED = 220;
+    private static final int LIMIT_SAN = 200;
+    private static final int LIMIT_GROWTH = 300;
+    private static final int LIMIT_ADJUST = 160;
+    private static final int LIMIT_TRIGGER = 200;
+    private static final int LIMIT_AI_NARRATION = 300;
+    private static final int LIMIT_RECOVERED = 200;
+    private static final int LIMIT_NOTICE = 120;
+    private static final int LIMIT_ERROR = 120;
+    private static final int LIMIT_END_CONFIRM = 160;
+    private static final int LIMIT_ENDED = 1200;
+    private static final int LIMIT_REPORT_TEXT = 600;
+    private static final int LIMIT_CARD = 600;
+    private static final int LIMIT_KP_HINT = 900;
+    private static final int LIMIT_SCRIPT_LIBRARY = 500;
 
     private TrpgMessageTemplates() {
     }
@@ -58,7 +76,7 @@ public final class TrpgMessageTemplates {
             body.append('\n').append(description);
         }
         body.append("\n\n发送 /trpg join 加入；发送 /trpg status 查看局面。");
-        return FORMATTER.truncate(body.toString(), BODY_MAX_SHORT);
+        return limit(body.toString(), LIMIT_RECRUIT);
     }
 
     /** 剧本元信息行：标签 · 人数 · 时长。 */
@@ -89,7 +107,7 @@ public final class TrpgMessageTemplates {
         if (occupation != null && !occupation.trim().isEmpty()) {
             body.append("职业：").append(occupation.trim()).append('。');
         }
-        return body.toString();
+        return limit(body.toString(), LIMIT_JOINED);
     }
 
     /** 离开。 */
@@ -101,25 +119,25 @@ public final class TrpgMessageTemplates {
         if (cardKept) {
             body.append("角色卡已保留，招募期内可再次加入。");
         }
-        return body.toString();
+        return limit(body.toString(), LIMIT_LEFT);
     }
 
     /** 邀请（KP 拉人）。 */
     public static String invited(String name, int current, int maxPlayers) {
-        return TrpgTitles.of(TrpgTitles.INVITE, name) + "\n" + name + " 被邀请加入本局，当前 "
-                + current + "/" + maxPlayers + " 人。";
+        return limit(TrpgTitles.of(TrpgTitles.INVITE, name) + "\n" + name + " 被邀请加入本局，当前 "
+                + current + "/" + maxPlayers + " 人。", LIMIT_INVITED);
     }
 
     /** KP 接管。 */
     public static String takenOver(String oldKpName, String newKpName) {
-        return TrpgTitles.of(TrpgTitles.TAKE, newKpName) + "\nKP 已由 " + oldKpName
-                + " 移交给 " + newKpName + "。";
+        return limit(TrpgTitles.of(TrpgTitles.TAKE, newKpName) + "\nKP 已由 " + oldKpName
+                + " 移交给 " + newKpName + "。", LIMIT_TAKEN_OVER);
     }
 
     /** 主持方式提示。 */
     public static String host(boolean aiEnabled) {
-        return TrpgTitles.of(TrpgTitles.HOST) + "\n当前主持方式："
-                + (aiEnabled ? "AI 叙述" : "人主持（AI 已关闭）") + "。";
+        return limit(TrpgTitles.of(TrpgTitles.HOST) + "\n当前主持方式："
+                + (aiEnabled ? "AI 叙述" : "人主持（AI 已关闭）") + "。", LIMIT_HOST);
     }
 
     /** 开局公告。 */
@@ -133,18 +151,18 @@ public final class TrpgMessageTemplates {
         if (firstSceneTitle != null && !firstSceneTitle.trim().isEmpty()) {
             body.append('\n').append("第一幕：").append(firstSceneTitle.trim());
         }
-        return body.toString();
+        return limit(body.toString(), LIMIT_BEGIN);
     }
 
     /** 场景叙述（纯文本，图片降级时也用这条）。 */
     public static String scene(String sceneTitle, String narration) {
         String text = narration == null ? "" : narration;
-        return TrpgTitles.of(TrpgTitles.SCENE, sceneTitle) + "\n" + text;
+        return limit(TrpgTitles.of(TrpgTitles.SCENE, sceneTitle) + "\n" + text, LIMIT_SCENE);
     }
 
     /** 情景卡降级正文：场景叙述 + 下一步提示。 */
     public static String sceneFallback(String sceneTitle, String narration) {
-        return scene(sceneTitle, narration) + "\n\n发送 /trpg status 查看局面。";
+        return limit(scene(sceneTitle, narration) + "\n\n发送 /trpg status 查看局面。", LIMIT_SCENE);
     }
 
     /** 线索公开钩子（全文只私聊 KP）。 */
@@ -157,7 +175,7 @@ public final class TrpgMessageTemplates {
             body.append(locked).append('\n');
         }
         body.append("线索全文已私聊 KP。");
-        return body.toString();
+        return limit(body.toString(), LIMIT_CLUE);
     }
 
     /** 技能检定。 */
@@ -171,7 +189,7 @@ public final class TrpgMessageTemplates {
         if (!note.isEmpty()) {
             body.append('\n').append(note);
         }
-        return body.toString();
+        return limit(body.toString(), LIMIT_CHECK);
     }
 
     /** 理智检定。 */
@@ -182,7 +200,7 @@ public final class TrpgMessageTemplates {
                 .append(' ').append(degreeClause(view)).append('\n');
         body.append("SAN ").append(view.sanBefore()).append(" → ").append(view.sanAfter())
                 .append("（损失 ").append(view.sanLoss()).append("）");
-        return body.toString();
+        return limit(body.toString(), LIMIT_SAN);
     }
 
     /** 对抗检定。 */
@@ -200,7 +218,7 @@ public final class TrpgMessageTemplates {
             body.append(leftWin ? left.rollerName() : right.rollerName()).append(" 胜（")
                     .append(tieBreakLabel.trim()).append("）。");
         }
-        return body.toString();
+        return limit(body.toString(), LIMIT_OPPOSED);
     }
 
     /** 成长结算明细。 */
@@ -214,23 +232,25 @@ public final class TrpgMessageTemplates {
                 body.append('\n').append(line);
             }
         }
-        return FORMATTER.truncate(body.toString(), BODY_MAX_SHORT);
+        return limit(body.toString(), LIMIT_GROWTH);
     }
 
     /** 数值调整。 */
     public static String adjust(String name, String item, String from, String to) {
-        return TrpgTitles.of(TrpgTitles.ADJUST, name) + "\n" + item + "：" + from + " → " + to + "。";
+        return limit(TrpgTitles.of(TrpgTitles.ADJUST, name) + "\n" + item + "：" + from + " → " + to + "。",
+                LIMIT_ADJUST);
     }
 
     /** KP 触发提示（只私聊 KP）。 */
     public static String trigger(String sceneTitle, String hint) {
-        return TrpgTitles.of(TrpgTitles.TRIGGER, sceneTitle) + "\n" + (hint == null ? "" : hint);
+        return limit(TrpgTitles.of(TrpgTitles.TRIGGER, sceneTitle) + "\n"
+                + (hint == null ? "" : hint), LIMIT_TRIGGER);
     }
 
     /** AI 叙述（含建议动作与落款）。 */
     public static String aiNarration(String sceneTitle, String text, List<String> suggestions,
                                      String kpName, boolean degraded) {
-        String body = FORMATTER.truncate(FORMATTER.clean(text), 300);
+        String body = FORMATTER.truncate(FORMATTER.clean(text), LIMIT_AI_NARRATION);
         StringBuilder message = new StringBuilder();
         // 冻结样例（规范 §4.3）：标题行是「【AI 叙述】」直接接场景名，不加分隔符。
         message.append(TrpgTitles.of(TrpgTitles.AI_NARRATION));
@@ -265,12 +285,12 @@ public final class TrpgMessageTemplates {
         body.append("已恢复 ").append(Math.max(0, playerCount)).append(" 名玩家。\n");
         body.append("本局在上次重启前正在进行，KP 可发送 /trpg resume 继续。\n\n");
         body.append("/trpg status 可以随时查看局面。");
-        return body.toString();
+        return limit(body.toString(), LIMIT_RECOVERED);
     }
 
     /** 一次性提示。 */
     public static String notice(String text) {
-        return TrpgTitles.of(TrpgTitles.NOTICE) + "\n" + (text == null ? "" : text);
+        return limit(TrpgTitles.of(TrpgTitles.NOTICE) + "\n" + (text == null ? "" : text), LIMIT_NOTICE);
     }
 
     /** 固定错误：原因 + 下一步怎么做。 */
@@ -280,7 +300,7 @@ public final class TrpgMessageTemplates {
         if (next != null && !next.trim().isEmpty()) {
             body.append('\n').append(next.trim());
         }
-        return body.toString();
+        return limit(body.toString(), LIMIT_ERROR);
     }
 
     /** 结束确认。 */
@@ -290,7 +310,7 @@ public final class TrpgMessageTemplates {
                 .append("》\n");
         body.append("确认方式：").append(method).append("。\n");
         body.append(confirmSeconds).append(" 秒内再次发送 /trpg end 生效。");
-        return body.toString();
+        return limit(body.toString(), LIMIT_END_CONFIRM);
     }
 
     /** 局结束（先战报图，再这条文字）。 */
@@ -307,16 +327,18 @@ public final class TrpgMessageTemplates {
                 .append(SEPARATOR).append("线索 ").append(report.clueNames().size()).append('/')
                 .append(report.clueTotal())
                 .append(SEPARATOR).append("检定 ").append(report.checkTotal()).append(" 次");
-        if (report.checkTotal() > 0) {
+        // 成功数未知（-1，例如尚未解析检定日志）时不输出括号，避免写成错误的「成功 0」。
+        boolean successKnown = report.checkSuccess() >= 0;
+        if (report.checkTotal() > 0 && successKnown) {
             body.append("（成功 ").append(report.checkSuccess()).append('）');
         }
         // 冻结样例（规范 §4.4）：成功数括号后紧接「· 成长」，无空格。
-        body.append(report.checkTotal() > 0 ? "· 成长 " : SEPARATOR + "成长 ")
+        body.append(report.checkTotal() > 0 && successKnown ? "· 成长 " : SEPARATOR + "成长 ")
                 .append(report.growthLines().size()).append(" 人次\n");
         body.append(reportImageSent
                 ? "战报图见上一条；文字明细发送 /trpg log 查看（保留 " + report.retentionDays() + " 天）。"
                 : "文字明细发送 /trpg log 查看（保留 " + report.retentionDays() + " 天）。");
-        return FORMATTER.truncate(body.toString(), BODY_MAX_ENDED);
+        return limit(body.toString(), LIMIT_ENDED);
     }
 
     /** 战报纯文本（图失败时的回退，字段与图一致）。 */
@@ -348,7 +370,7 @@ public final class TrpgMessageTemplates {
                 ? "本局无涨点" : join(report.growthLines(), "、"));
         body.append('\n').append("日志：/trpg log 可查看本局记录（保留 ")
                 .append(report.retentionDays()).append(" 天）");
-        return FORMATTER.truncate(body.toString(), BODY_MAX_REPORT_TEXT);
+        return limit(body.toString(), LIMIT_REPORT_TEXT);
     }
 
     /** 角色卡全文（只私聊本人）。 */
@@ -379,7 +401,7 @@ public final class TrpgMessageTemplates {
         }
         body.append('\n').append("物品：")
                 .append(data.items().isEmpty() ? "无" : join(data.items(), "、"));
-        return FORMATTER.truncate(body.toString(), BODY_MAX_REPORT_TEXT);
+        return limit(body.toString(), LIMIT_CARD);
     }
 
     /** KP 提示（只私聊 KP）：场景、触发、线索全文、下一场景。 */
@@ -399,7 +421,7 @@ public final class TrpgMessageTemplates {
         if (nextSceneTitle != null && !nextSceneTitle.trim().isEmpty()) {
             body.append("下一场景：").append(nextSceneTitle.trim());
         }
-        return FORMATTER.truncate(body.toString(), BODY_MAX_KP_HINT);
+        return limit(body.toString(), LIMIT_KP_HINT);
     }
 
     /** 剧本库列表（每页 10 条）。 */
@@ -411,7 +433,7 @@ public final class TrpgMessageTemplates {
             body.append('\n').append(entry);
         }
         body.append("\n\n发送 /trpg script show <id> 查看详情。");
-        return FORMATTER.truncate(body.toString(), BODY_MAX_LIST);
+        return limit(body.toString(), LIMIT_SCRIPT_LIBRARY);
     }
 
     /** 剧本详情（私聊）。 */
@@ -430,7 +452,7 @@ public final class TrpgMessageTemplates {
         if (!script.description().isEmpty()) {
             body.append('\n').append(script.description());
         }
-        return FORMATTER.truncate(body.toString(), BODY_MAX_LIST);
+        return limit(body.toString(), LIMIT_SCRIPT_LIBRARY);
     }
 
     /** /r 与 /roll 回复：不套标题。 */
@@ -472,6 +494,17 @@ public final class TrpgMessageTemplates {
             return "未知";
         }
         return new SimpleDateFormat(DATE_PATTERN, Locale.CHINA).format(new Date(millis));
+    }
+
+    /** 收敛到 §3 表格的正文上限：保留标题行，只截正文。 */
+    private static String limit(String message, int limit) {
+        int newline = message.indexOf('\n');
+        if (newline < 0) {
+            return message;
+        }
+        String title = message.substring(0, newline);
+        String body = message.substring(newline + 1);
+        return title + "\n" + FORMATTER.truncate(body, limit);
     }
 
     private static String twoDigits(int value) {

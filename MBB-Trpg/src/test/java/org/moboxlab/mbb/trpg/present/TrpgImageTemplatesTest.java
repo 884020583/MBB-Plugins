@@ -106,8 +106,8 @@ public class TrpgImageTemplatesTest {
         assertTrue(lines.contains("【下一步】翻看书桌；查看壁炉"));
         assertTrue("行数应不超过 14，实际 " + lines.size(), lines.size() <= TrpgImageTemplates.SCENE_MAX_LINES);
         for (String line : lines) {
-            assertTrue("每行不超过 26 字：" + line,
-                    line.codePointCount(0, line.length()) <= TrpgImageTemplates.LINE_WIDTH);
+            assertTrue("每行不超过 26 全角字符宽：" + line,
+                    displayWidth(line) <= TrpgImageTemplates.LINE_WIDTH * 2);
         }
     }
 
@@ -156,8 +156,8 @@ public class TrpgImageTemplatesTest {
         assertTrue(flat.contains("【成长】聆听 50 → 52、侦察 40 → 41"));
         assertTrue(flat.contains("【日志】/trpg log 可查看本局记录（保留 30 天）"));
         for (String line : lines) {
-            assertTrue("每行不超过 26 字：" + line,
-                    line.codePointCount(0, line.length()) <= TrpgImageTemplates.LINE_WIDTH);
+            assertTrue("每行不超过 26 全角字符宽：" + line,
+                    displayWidth(line) <= TrpgImageTemplates.LINE_WIDTH * 2);
         }
     }
 
@@ -190,8 +190,8 @@ public class TrpgImageTemplatesTest {
     @Test
     public void scriptPageListsScenes() {
         List<String> lines = TrpgImageTemplates.scriptPage(script());
-        assertEquals("剧本 · 《雨夜古宅》", lines.get(0));
-        assertEquals("id：coc-example　作者：MBB-Trpg", lines.get(1));
+        // 首行标题由渲染器负责，图片正文从 id 行开始。
+        assertEquals("id：coc-example　作者：MBB-Trpg", lines.get(0));
         String flat = flat(lines);
         assertTrue(flat.contains("1920 年代 · 调查 · 2～4 人 · 约 60 分钟"));
         assertTrue(flat.contains("场景 2 个　线索 1 个　结局 1 个"));
@@ -210,5 +210,61 @@ public class TrpgImageTemplatesTest {
             builder.append(line);
         }
         return builder.toString();
+    }
+
+    @Test
+    public void reportFoldsLongClueLists() {
+        List<String> clues = new ArrayList<String>();
+        for (int index = 0; index < 12; index++) {
+            clues.add("长线索名称" + index);
+        }
+        TrpgReport report = TrpgReport.builder().scriptName("雨夜古宅").endingTitle("雨夜脱身")
+                .kpName("阿岚").clueNames(clues).clueTotal(12).build();
+        String flat = flat(TrpgImageTemplates.report(report));
+        assertTrue("线索超过 3 行应折叠：" + flat, flat.contains("等 12 条"));
+    }
+
+    @Test
+    public void reportShowsBothDatesWhenEndingNextDay() {
+        long start = 1_700_000_000_000L;
+        long end = start + 30L * 60L * 60L * 1000L;
+        TrpgReport report = TrpgReport.builder().scriptName("雨夜古宅").endingTitle("雨夜脱身")
+                .startedAt(start).endedAt(end).durationMinutes(1800).build();
+        String flat = flat(TrpgImageTemplates.report(report));
+        assertTrue("跨天时应带结束日期：" + flat,
+                flat.contains(TrpgMessageTemplates.date(start) + " ")
+                        && flat.contains(TrpgMessageTemplates.date(end)));
+    }
+
+    @Test
+    public void wrappingCountsHalfWidthCharactersAsHalf() {
+        StringBuilder ascii = new StringBuilder();
+        for (int index = 0; index < 60; index++) {
+            ascii.append('a');
+        }
+        // 半角每行可放 52 个字符（26 全角 × 2 单位），60 个字符只需 2 行。
+        assertEquals(2, TrpgImageTemplates.wrapForImage(ascii.toString(), 26).size());
+        StringBuilder fullWidth = new StringBuilder();
+        for (int index = 0; index < 60; index++) {
+            fullWidth.append('中');
+        }
+        assertEquals(3, TrpgImageTemplates.wrapForImage(fullWidth.toString(), 26).size());
+    }
+
+    @Test
+    public void scriptPageLeavesTitleToRenderer() {
+        List<String> lines = TrpgImageTemplates.scriptPage(script());
+        assertTrue("图片正文不再重复标题行", !lines.get(0).startsWith("剧本 · 《"));
+    }
+
+    /** 全角记 2 单位、半角记 1 单位，与图片渲染的折行口径一致。 */
+    private static int displayWidth(String line) {
+        int width = 0;
+        for (int index = 0; index < line.length(); ) {
+            int codePoint = line.codePointAt(index);
+            width += codePoint < 0x80 ? 1 : 2;
+            index += Character.charCount(codePoint);
+        }
+        return width;
     }
 }

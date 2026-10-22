@@ -133,9 +133,23 @@ public final class TrpgPresenter implements SessionEventPublisher {
         return splitAndSendGroup(groupId, message, false);
     }
 
-    /** 群内发一条消息：超长按标题+正文拆成至多 {@code splitMax} 条，折叠尾注指向 /trpg log。 */
+    /**
+     * 群内发一条消息：超长按标题+正文拆成至多 {@code splitMax} 条，折叠尾注指向 /trpg log。
+     *
+     * <p>规格 §5.4：开团与开局属于关键消息，发送失败时补一行【提示】（结束与恢复由事件处理自己补）。</p>
+     */
     public boolean sendGroup(long groupId, String message) {
-        return splitAndSendGroup(groupId, message, true);
+        boolean sent = splitAndSendGroup(groupId, message, true);
+        if (!sent && isCriticalTitle(message)) {
+            sendCriticalFailureNotice(groupId);
+        }
+        return sent;
+    }
+
+    private boolean isCriticalTitle(String message) {
+        String title = titleOf(formatter.clean(message));
+        return title.equals(TrpgTitles.of(TrpgTitles.RECRUIT))
+                || title.equals(TrpgTitles.of(TrpgTitles.BEGIN));
     }
 
     private boolean splitAndSendGroup(long groupId, String message, boolean allowSplit) {
@@ -215,13 +229,19 @@ public final class TrpgPresenter implements SessionEventPublisher {
         return false;
     }
 
-    /** 发情景卡：图片优先，关闭或失败时回退纯文本。 */
+    /** 发情景卡：图片优先，关闭或失败时回退纯文本（局号未知）。 */
     public boolean sendScene(long groupId, TrpgSceneCard card) {
+        return sendScene(groupId, 0L, card);
+    }
+
+    /** 发情景卡：图片优先，关闭或失败时回退纯文本。 */
+    public boolean sendScene(long groupId, long sessionId, TrpgSceneCard card) {
         if (card == null) {
             throw new IllegalArgumentException("情景卡不能为空");
         }
         if (config.sceneImage()) {
-            byte[] image = render("情景卡", card.sceneTitle(), TrpgImageTemplates.scene(card));
+            byte[] image = render("情景卡", "情景卡 · " + card.sceneTitle(), sessionId,
+                    TrpgImageTemplates.scene(card));
             if (image != null) {
                 if (messaging.sendGroupImage(groupId, image)) {
                     return true;
@@ -238,7 +258,7 @@ public final class TrpgPresenter implements SessionEventPublisher {
         if (report == null) {
             throw new IllegalArgumentException("战报不能为空");
         }
-        byte[] image = renderReport(sessionId, report,
+        byte[] image = render("战报", report.cardTitle(), sessionId,
                 TrpgImageTemplates.report(report, config.imageMaxLines()));
         if (image == null) {
             return false;
@@ -255,7 +275,8 @@ public final class TrpgPresenter implements SessionEventPublisher {
         if (script == null) {
             throw new IllegalArgumentException("剧本不能为空");
         }
-        byte[] image = render("剧本页", script.name(), TrpgImageTemplates.scriptPage(script));
+        byte[] image = render("剧本页", "剧本 · 《" + script.name() + "》", 0L,
+                TrpgImageTemplates.scriptPage(script));
         if (image != null) {
             if (messaging.sendPrivateImage(userId, image)) {
                 notePrivateResult(userId, true);
@@ -301,28 +322,26 @@ public final class TrpgPresenter implements SessionEventPublisher {
         });
     }
 
-    private byte[] render(String kind, String subject, List<String> lines) {
+    /**
+     * 渲染图片；渲染器未装配、返回 null 或抛异常都按规范 §7.4 记 WARN 后回退纯文本。
+     *
+     * <p>局号未知时传 0，告警里不写「局=0」。</p>
+     */
+    private byte[] render(String kind, String subject, long sessionId, List<String> lines) {
+        String context = "，类型=" + kind + (sessionId > 0L ? "，局=" + sessionId : "")
+                + "，主体=" + subject;
         if (renderer == null) {
+            warn("图片渲染不可用，回退纯文本" + context);
             return null;
         }
         try {
-            return renderer.render(subject, lines);
+            byte[] image = renderer.render(subject, lines);
+            if (image == null) {
+                warn("图片渲染返回空，回退纯文本" + context);
+            }
+            return image;
         } catch (RuntimeException error) {
-            warn("图片渲染失败，回退纯文本：类型=" + kind + "，主体=" + subject
-                    + "，原因=" + error.getMessage());
-            return null;
-        }
-    }
-
-    private byte[] renderReport(long sessionId, TrpgReport report, List<String> lines) {
-        if (renderer == null) {
-            return null;
-        }
-        try {
-            return renderer.render(report.cardTitle(), lines);
-        } catch (RuntimeException error) {
-            warn("图片渲染失败，回退纯文本：类型=战报，局=" + sessionId
-                    + "，原因=" + error.getMessage());
+            warn("图片渲染失败，回退纯文本" + context + "，原因=" + error.getMessage());
             return null;
         }
     }

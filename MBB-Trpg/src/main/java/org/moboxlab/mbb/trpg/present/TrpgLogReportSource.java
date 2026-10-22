@@ -17,7 +17,8 @@ import java.util.List;
  * 战报数据来源：局已收尾后从快照、剧本与日志补齐战报字段。
  *
  * <p>结局标题与叙述取自收尾摘要（摘要由 {@code SummaryResolver} 写成「标题\n叙述」）；
- * 检定次数取最近日志中 check/san/opposed 的条数，成功数与明细归后续切片按日志内容解析。</p>
+ * 检定次数取最近日志中 check/san/opposed 的条数。检定的成功数与明细按日志正文解析：
+ * 约定正文形如「聆听 常规成功」「侦察 失败」（等级词收尾），等级词缺省时只计数、不算成功。</p>
  */
 public final class TrpgLogReportSource implements TrpgReportSource {
 
@@ -26,6 +27,14 @@ public final class TrpgLogReportSource implements TrpgReportSource {
 
     /** 战报只统计最近这批日志，避免长局把内存打满。 */
     private static final int LOG_SCAN_LIMIT = 200;
+    /** 检定等级词，长的放前面，避免「大失败」先命中「失败」。 */
+    private static final String[] DEGREE_LABELS = {
+        "大成功", "极难成功", "困难成功", "常规成功", "大失败", "失败"};
+    private static final String EVENT_CHECK = "check";
+    private static final String EVENT_SAN = "san";
+    private static final String EVENT_OPPOSED = "opposed";
+    private static final String DEGREE_FAILURE = "失败";
+    private static final String DEGREE_FUMBLE = "大失败";
 
     private final SessionStore store;
     private final ScriptCatalog catalog;
@@ -129,12 +138,60 @@ public final class TrpgLogReportSource implements TrpgReportSource {
         }
         List<LogRow> logs = store.listLogs(snapshot.sessionId(), LOG_SCAN_LIMIT, 0);
         int total = 0;
+        int success = 0;
+        int known = 0;
+        List<String> results = new ArrayList<String>();
         for (LogRow log : logs) {
             String type = log.eventType();
-            if ("check".equals(type) || "san".equals(type) || "opposed".equals(type)) {
-                total++;
+            if (!EVENT_CHECK.equals(type) && !EVENT_SAN.equals(type) && !EVENT_OPPOSED.equals(type)) {
+                continue;
             }
+            total++;
+            String content = log.content() == null ? "" : log.content().trim();
+            String degree = degreeOf(content);
+            if (degree == null) {
+                continue;
+            }
+            boolean ok = !DEGREE_FAILURE.equals(degree) && !DEGREE_FUMBLE.equals(degree);
+            known++;
+            if (ok) {
+                success++;
+            }
+            String label = labelOf(content, degree);
+            results.add((label.isEmpty() ? typeLabel(type) : label) + (ok ? " 成功" : " 失败"));
         }
         report.checkTotal(total);
+        report.checkResults(results);
+        if (known > 0) {
+            // 只有解析出等级词时才给出成功数，否则保持「未知」，避免把未知写成成功 0。
+            report.checkSuccess(success);
+        }
+    }
+
+    private static String degreeOf(String content) {
+        for (String label : DEGREE_LABELS) {
+            if (content.endsWith(label)) {
+                return label;
+            }
+        }
+        return null;
+    }
+
+    private static String labelOf(String content, String degree) {
+        String label = content.substring(0, content.length() - degree.length()).trim();
+        while (label.endsWith("→") || label.endsWith("=") || label.endsWith("：")) {
+            label = label.substring(0, label.length() - 1).trim();
+        }
+        return label;
+    }
+
+    private static String typeLabel(String type) {
+        if (EVENT_SAN.equals(type)) {
+            return "理智";
+        }
+        if (EVENT_OPPOSED.equals(type)) {
+            return "对抗";
+        }
+        return "检定";
     }
 }

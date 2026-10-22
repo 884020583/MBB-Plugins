@@ -70,10 +70,31 @@ public class TrpgMessageSplitterTest {
         }
         String folded = splitter.fold("【角色卡】小满", body.toString(), 100);
         assertTrue(folded.startsWith("【角色卡】小满\n"));
-        assertTrue(folded.endsWith(TrpgMessageSplitter.PRIVATE_FOLD_SUFFIX));
+        // 私聊折叠与群内同款提示（呈现规范 §5.2），不再自造「私聊不再展开」。
+        assertTrue(folded.contains(TrpgMessageSplitter.GROUP_FOLD_PREFIX));
+        assertTrue(folded.endsWith("发送 /trpg log 查看）"));
         TrpgMessageFormatter formatter = new TrpgMessageFormatter();
         String bodyPart = folded.substring(folded.indexOf('\n') + 1);
-        assertTrue(formatter.count(bodyPart) <= 100);
+        int foldAt = bodyPart.indexOf("\n\n" + TrpgMessageSplitter.GROUP_FOLD_PREFIX);
+        String limited = foldAt < 0 ? bodyPart : bodyPart.substring(0, foldAt);
+        assertTrue("正文（不含折叠行）应在上限内", formatter.count(limited) <= 100);
+    }
+
+    @Test
+    public void untitledMessageHasNoLeadingBlankLine() {
+        List<String> parts = splitter.split("", "第一行正文", 500, 3);
+        assertEquals(1, parts.size());
+        assertEquals("第一行正文", parts.get(0));
+
+        StringBuilder longBody = new StringBuilder();
+        for (int index = 0; index < 40; index++) {
+            longBody.append("无标题长正文").append(index).append("。");
+        }
+        for (String part : splitter.split("", longBody.toString(), 40, 3)) {
+            assertFalse("无标题消息不应以换行开头：" + part, part.startsWith("\n"));
+        }
+        assertFalse("无标题折叠不应以换行开头",
+                splitter.fold("", longBody.toString(), 60).startsWith("\n"));
     }
 
     @Test

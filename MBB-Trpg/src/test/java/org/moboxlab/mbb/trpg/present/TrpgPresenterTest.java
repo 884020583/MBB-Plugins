@@ -236,7 +236,8 @@ public class TrpgPresenterTest {
         assertEquals(0, renderer.renderCount());
         String text = messaging.sentTo("group").get(0).text();
         assertTrue(text.contains("【场景 · 书房】"));
-        assertTrue(text.contains("房门在你们敲到第三下时才开。"));
+        // 回退正文优先当前场景叙述（规范 §7.4），剧本原文只在叙述缺失时兜底。
+        assertTrue(text.contains("灯芯爆了一下，书架后传来轻轻的摩擦声。"));
         assertTrue(text.contains("发送 /trpg status 查看局面。"));
     }
 
@@ -247,6 +248,19 @@ public class TrpgPresenterTest {
         assertTrue(presenter.sendScene(GROUP, sceneCard()));
 
         assertTrue(messaging.sentTo("group").get(0).text().contains("【场景 · 书房】"));
+    }
+
+    @Test
+    public void sceneFallsBackToScriptNarrationWhenNarrationMissing() {
+        presenter = presenter(new TrpgPresentConfig(500, 1200, 3, false, true, 22, "broadcast"));
+        TrpgSceneCard card = new TrpgSceneCard("书房", 2, 4, Collections.<String>emptyList(),
+                Collections.<String>emptyList(), "",
+                "房门在你们敲到第三下时才开。", Collections.<String>emptyList());
+
+        assertTrue(presenter.sendScene(GROUP, card));
+
+        String text = messaging.sentTo("group").get(0).text();
+        assertTrue(text.contains("房门在你们敲到第三下时才开。"));
     }
 
     @Test
@@ -278,7 +292,7 @@ public class TrpgPresenterTest {
         assertTrue(presenter.sendScriptPage(GROUP, 402L, script()));
 
         assertEquals(1, messaging.sentTo("private-image").size());
-        assertEquals("雨夜古宅", renderer.last().title());
+        assertEquals("剧本 · 《雨夜古宅》", renderer.last().title());
     }
 
     @Test

@@ -72,8 +72,11 @@ public final class TrpgSceneCard {
         return nextSteps;
     }
 
-    /** 降级正文：优先 AI 关闭时的剧本原文，没有就用场景叙述。 */
+    /**
+     * 降级正文：优先当前场景叙述（AI 关闭时也应展示本幕内容），
+     * 叙述为空时才用剧本给出的人工兜底原文（规范 §7.4）。
+     */
     public String fallbackText() {
-        return fallbackNarration.trim().isEmpty() ? narration : fallbackNarration;
+        return narration.trim().isEmpty() ? fallbackNarration : narration;
     }
 }

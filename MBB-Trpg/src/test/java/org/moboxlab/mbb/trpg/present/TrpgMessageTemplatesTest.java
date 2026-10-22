@@ -236,4 +236,49 @@ public class TrpgMessageTemplatesTest {
         assertEquals("未知", TrpgMessageTemplates.dateTime(0L));
         assertEquals("未知", TrpgMessageTemplates.date(-1L));
     }
+
+    @Test
+    public void truncatesTemplatesToTheirBodyLimits() {
+        StringBuilder longText = new StringBuilder();
+        for (int index = 0; index < 300; index++) {
+            longText.append("很长的正文");
+        }
+        assertBodyWithin(TrpgMessageTemplates.scene("书房", longText.toString()), 400);
+        assertBodyWithin(TrpgMessageTemplates.sceneFallback("书房", longText.toString()), 400);
+        assertBodyWithin(TrpgMessageTemplates.notice(longText.toString()), 120);
+        assertBodyWithin(TrpgMessageTemplates.error(longText.toString(), longText.toString()), 120);
+        assertBodyWithin(TrpgMessageTemplates.clue(new Clue("clue-print", "泥脚印",
+                longText.toString(), "全文")), 200);
+        assertBodyWithin(TrpgMessageTemplates.adjust("小满", "HP", longText.toString(),
+                longText.toString()), 160);
+        assertBodyWithin(TrpgMessageTemplates.trigger("书房", longText.toString()), 200);
+        assertBodyWithin(TrpgMessageTemplates.growth(Collections.singletonList(
+                longText.toString())), 300);
+        assertBodyWithin(TrpgMessageTemplates.recovered(sampleScript(), snapshot("书房", 1), 2), 200);
+    }
+
+    @Test
+    public void endedOmitsSuccessCountWhenUnknown() {
+        TrpgReport report = TrpgReport.builder().scriptName("雨夜古宅").endingTitle("雨夜脱身")
+                .durationMinutes(10).checkTotal(3).build();
+        String message = TrpgMessageTemplates.ended(report, false);
+        assertTrue(message.contains("检定 3 次"));
+        assertTrue("成功数未知时不应写括号：" + message, !message.contains("（成功"));
+    }
+
+    @Test
+    public void endedPrintsKnownSuccessCount() {
+        TrpgReport report = TrpgReport.builder().scriptName("雨夜古宅").endingTitle("雨夜脱身")
+                .durationMinutes(10).checkTotal(3).checkSuccess(2)
+                .growthLines(Collections.singletonList("聆听 50 → 52")).build();
+        String message = TrpgMessageTemplates.ended(report, false);
+        assertTrue(message.contains("检定 3 次（成功 2）· 成长 1 人次"));
+    }
+
+    private static void assertBodyWithin(String message, int limit) {
+        int newline = message.indexOf('\n');
+        String body = newline < 0 ? "" : message.substring(newline + 1);
+        assertTrue("正文应截到 " + limit + " 字，实际 " + body.length() + "：" + body,
+                new TrpgMessageFormatter().count(body) <= limit);
+    }
 }
