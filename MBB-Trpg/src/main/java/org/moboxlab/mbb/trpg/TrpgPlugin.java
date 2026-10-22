@@ -10,6 +10,9 @@ import org.moboxlab.mbb.trpg.rule.DefaultRandomSource;
 import org.moboxlab.mbb.trpg.rule.RandomSource;
 import org.moboxlab.mbb.trpg.rule.RuleRegistry;
 import org.moboxlab.mbb.trpg.rule.RuleSet;
+import org.moboxlab.mbb.trpg.script.BuiltinScriptCatalog;
+import org.moboxlab.mbb.trpg.script.ScriptCatalog;
+import org.moboxlab.mbb.trpg.script.ScriptValidator;
 import org.moboxlab.mbb.trpg.session.Clock;
 import org.moboxlab.mbb.trpg.session.PluginManagerScheduler;
 import org.moboxlab.mbb.trpg.session.ScheduledTask;
@@ -40,6 +43,7 @@ public class TrpgPlugin extends Plugin {
     private BlacklistService blacklistService;
     private TrpgRetentionService retentionService;
     private ScheduledTask retentionTask;
+    private ScriptCatalog scriptCatalog;
 
     @Override
     public void onLoad() {
@@ -82,6 +86,9 @@ public class TrpgPlugin extends Plugin {
                     + "请检查数据库与上方告警后重启插件");
             return;
         }
+        if (!assembleScriptCatalog()) {
+            return;
+        }
         trpgEnabled = true;
         disabledReason = "";
         assembleServices(storage);
@@ -104,6 +111,34 @@ public class TrpgPlugin extends Plugin {
         for (String warning : RuleRegistry.warnings()) {
             getLogger().sendWarn("[MBB-Trpg] " + warning);
         }
+    }
+
+    /**
+     * 加载并校验内置剧本库。
+     *
+     * <p>内置剧本随 JAR 分发，缺失或校验失败属于分发问题：此时把插件置为不可用，
+     * 避免指令层对外暴露不可用剧本。导入剧本属于 S10，届时由剧本库组合视图负责。</p>
+     *
+     * @return 加载成功返回 true；失败时已设置禁用原因与错误日志
+     */
+    private boolean assembleScriptCatalog() {
+        BuiltinScriptCatalog catalog;
+        try {
+            catalog = new BuiltinScriptCatalog(TrpgPlugin.class.getClassLoader(),
+                    new ScriptValidator());
+        } catch (RuntimeException e) {
+            trpgEnabled = false;
+            disabledReason = "内置剧本未就绪";
+            scriptCatalog = null;
+            getLogger().sendError("[MBB-Trpg] 内置剧本加载失败，TRPG 能力已禁用：" + e.getMessage());
+            return false;
+        }
+        scriptCatalog = catalog;
+        for (String warning : catalog.warnings()) {
+            getLogger().sendWarn("[MBB-Trpg] 剧本校验告警：" + warning);
+        }
+        getLogger().sendInfo("[MBB-Trpg] 内置剧本已加载，共 " + catalog.size() + " 份");
+        return true;
     }
 
     private void assembleServices(StorageService storage) {
@@ -156,6 +191,7 @@ public class TrpgPlugin extends Plugin {
         traceStore = null;
         blacklistService = null;
         retentionService = null;
+        scriptCatalog = null;
         getLogger().sendInfo("[MBB-Trpg] 已停用");
     }
 
@@ -202,5 +238,10 @@ public class TrpgPlugin extends Plugin {
     /** 归档清理服务；未启用时为 null。 */
     public TrpgRetentionService retentionService() {
         return retentionService;
+    }
+
+    /** 剧本库（内置只读）；未启用时为 null。 */
+    public ScriptCatalog scriptCatalog() {
+        return scriptCatalog;
     }
 }

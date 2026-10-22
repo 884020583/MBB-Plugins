@@ -6,7 +6,19 @@ MoBoxBot 的跑团主持插件：在群里开一局 TRPG，提供 CoC 风格 d10
 
 ## 当前阶段
 
-S3 规则引擎切片：在 S1、S2 之上落地可插拔规则集 SPI 与内置 d100 检定。
+S4 剧本契约切片：在 S1–S3 之上冻结 v1 剧本格式、随包示例与校验器。
+
+- `ScriptValidator`：结构与跨字段语义一起校验，全有或全无。先看字节数（≤ 65536），再解析 JSON、
+  按字段白名单读值与范围、查全局 id 唯一与引用存在；未知字段只记 `W_UNKNOWN_FIELD` 告警，
+  不阻断导入；文本字段先去首尾空白再判非空与长度，落盘保留原文（只把 CRLF 统一为 LF）。
+- `BuiltinScriptCatalog`：启动时读 `scripts/index.txt`，逐个加载 JAR 内 `scripts/<id>.json`
+  并校验缓存；内置剧本只读（删除回 `E_BUILTIN`），导入与替换归 S10（现在回 `E_IMPORT_STATE`）。
+  库级读写锁先就位，供「先群锁后库读锁」的调用顺序使用。
+- `ScriptImportService`：只冻结「开始 → 分段粘贴 → 结束 / 取消」端口，实现归 S10。
+- 随包示例 `coc-example`（雨夜古宅）：4 个线性场景、4 条线索、2 个 NPC、3 个建议检定、
+  3 个触发、3 个结局，覆盖三种 `when` 与 `clue.lockedSummary` / `npc.secret` 素材结构。
+
+S3 已落地的规则引擎继续保留：
 
 - `RuleSet` / `RuleRegistry`：编译期 SPI，插件启用时显式注册内置 `D100RuleSet`；
   配置只保存规则集 id（`ruleset: d100`），未知 id 回退 d100 并告警，不暴露阈值、骰型与失败口径。
@@ -26,7 +38,22 @@ S2 已落地的存储层继续保留：
 - `TrpgRetentionService`：启动清一轮，之后每小时清一次过期已结算局
   （先日志、再成员、最后主行，失败留待下一轮）与过期/超量审计行。
 
-当前版本仍不注册任何用户可见指令；剧本、呈现、指令层与 AI 主持在后续切片按依赖顺序落地。
+当前版本仍不注册任何用户可见指令；呈现、指令层、局面状态机与 AI 主持在后续切片按依赖顺序落地。
+
+## 剧本文件
+
+片段格式的权威定义是 [docs/scripts/README.md](../docs/scripts/README.md) 与
+[docs/scripts/script-v1.schema.json](../docs/scripts/script-v1.schema.json)；JAR 里的
+`script-v1.schema.json` 是后者的逐字节副本。示例见 `src/main/resources/scripts/coc-example.json`。
+
+运行时**不**加载 JSON Schema 引擎：`ScriptValidator` 是与 schema 同构的手写结构检查加跨字段语义检查，
+语义口径以 docs 为准（schema 只作机器可读摘要，个别约束故意放宽，例如 `check.loss` 的形态由
+DiceExpression 再解析一次）。
+
+- 内置剧本随 JAR 分发，只读；导入剧本放数据目录 `scripts/<id>.json`，同 id 以内置为准。
+- 单份内容上限 65536 字节（BOM 计入），允许 UTF-8 BOM，但非法 UTF-8 字节回 `E_PARSE`；`schemaVersion` 固定 1，`ruleSet` 只接受 `d100`。
+- 校验失败不落盘，回执最多列 5 条错误并追加「另有 N 条」；未知字段只告警。
+- 内置剧本缺失或校验失败视为分发问题：插件直接置为不可用并记错误日志。
 
 ## 配置
 
