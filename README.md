@@ -28,6 +28,7 @@ MoBoxBot 独立插件仓库。
 | [MBB-Roleplay](docs/MBB-Roleplay.md) | `/role ...` | `BOT_ADMIN` | 按角色设定参与群聊，支持长期与短期记忆 |
 | [MBB-Status](docs/MBB-Status.md) | `/status` | `BOT_ADMIN` | 系统运行状态 |
 | [MBB-Sticker](docs/MBB-Sticker.md) | `/sticker ...` | `EVERYONE` / `BOT_ADMIN` | 表情包收录、AI 情绪标签检索与发送 |
+| [MBB-Trpg](docs/MBB-Trpg.md) | 规划中 | 规划中 | 群内跑团主持：d100 骰点、局面状态管理与 AI 叙述 |
 | [MBB-Vision](docs/MBB-Vision.md) | `/vision ...` | `BOT_ADMIN` | 公用识图与本地缓存，供表情包和角色扮演调用 |
 | [MBB-Version](docs/MBB-Version.md) | `/version` | `BOT_ADMIN` | 版本信息图片 |
 | [MBB-Welcome](docs/MBB-Welcome.md) | `/welcome` | `BOT_ADMIN` | 群进群退群消息 |

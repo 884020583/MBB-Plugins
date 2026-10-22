@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.1.0.0.2151 | 2026-10-22 | `MBB-Trpg` 插件骨架落地：新增插件骨架、注入端口与值对象、44 项配置读取、五表八索引幂等建表与补列、测试基座与插件级单测；本版只做初始化，指令与规则引擎在后续版本开放。 |
 | V0.5.69.0.0908 | 2026-10-17 | `MBB-Roleplay` 新增安全与防注入：`RoleplaySafetyService` 拦截系统提示词诱导、越狱指令和现实隐私索取，命中后不进入路由和回复链路；长期记忆写入前做同样的安全检查，阻止被诱导内容污染记忆；新增 `safetyGuardEnable`、`promptInjectionGuardEnable`、`privacyGuardEnable` 配置。 |
 | V0.5.68.0.0907 | 2026-10-17 | `MBB-Roleplay` 新增拟人节奏：发送前按回复长度、深夜时段和群注意力计算打字延迟，加入随机抖动和延迟上限，让回复更像真人输入；新增 `pacingEnable`、`pacingBaseMs`、`pacingPerCharMs`、`pacingMaxMs`、`pacingNightMultiplier`、`pacingActiveMultiplier`、`pacingActiveThreshold`、`pacingNightStartHour`、`pacingNightEndHour` 配置。 |
 | V0.5.67.0.0905 | 2026-10-17 | `MBB-Roleplay` 新增记忆冲突整理：长期记忆增加 `memoryStatus` 与 `supersededBy`，写入新记忆时检测同群同类型同用户下的相反极性内容，命中后把旧记忆归档而不是删除；查询、合并、时间线和记忆计数只使用 active 记忆；备份/恢复保留归档状态；新增 `/role memory conflicts [条数]` 查看冲突归档。新增 `memoryConflictResolveEnable`、`memoryConflictMinOverlap` 配置。 |
