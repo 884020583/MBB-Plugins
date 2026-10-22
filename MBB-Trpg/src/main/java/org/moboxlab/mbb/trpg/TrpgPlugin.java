@@ -33,7 +33,19 @@ public class TrpgPlugin extends Plugin {
         if (trpgConfig == null) {
             trpgConfig = TrpgConfig.load(getConfig());
         }
-        StorageService storage = getServer() == null ? null : getServer().getStorage();
+        if (getServer() == null) {
+            trpgEnabled = false;
+            disabledReason = "服务器未就绪";
+            getLogger().sendError("[MBB-Trpg] 取不到服务器实例，TRPG 能力已禁用");
+            return;
+        }
+        StorageService storage = getServer().getStorage();
+        if (storage == null) {
+            trpgEnabled = false;
+            disabledReason = "存储服务不可用";
+            getLogger().sendError("[MBB-Trpg] 取不到存储服务，TRPG 能力已禁用");
+            return;
+        }
         TrpgSchemaService schemaService = new TrpgSchemaService(storage, getLogger());
         boolean ready = schemaService.ensureSchema();
         if (!ready) {

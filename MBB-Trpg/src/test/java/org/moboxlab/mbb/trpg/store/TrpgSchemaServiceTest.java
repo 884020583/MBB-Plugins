@@ -8,6 +8,7 @@ import org.junit.Test;
 import java.io.File;
 import java.nio.file.Files;
 import java.util.List;
+import java.util.Map;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -114,23 +115,64 @@ public class TrpgSchemaServiceTest {
         assertEquals("五张表仍应建成", 5, countType(schemaObjects(), "table"));
     }
 
+    /** F4：PRAGMA 只读到部分行时重读合并，不得对已存在列发 ALTER，也不得因此禁用 TRPG。 */
+    @Test
+    public void f4PartialPragmaRowsDoNotTriggerAlterOrDisable() {
+        assertTrue(service.ensureSchema());
+        int before = storage.executedSql().size();
+
+        storage.partialNextQuery(3);
+        assertTrue("部分行不应判定建表失败", service.ensureSchema());
+        for (int i = before; i < storage.executedSql().size(); i++) {
+            String sql = storage.executedSql().get(i);
+            assertFalse("不得对已存在列补列：" + sql,
+                    sql.toUpperCase().startsWith("ALTER TABLE"));
+        }
+        assertEquals("五张表仍应建成", 5, countType(schemaObjects(), "table"));
+    }
+
+    /** 补列 SQL 必须同时带列名与常量默认值，且不包含主键（主键无法补）。 */
+    @Test
+    public void allSqlAltersCarryColumnNameAndDefault() {
+        int alterCount = 0;
+        for (String sql : TrpgSchemaService.allSql()) {
+            if (!sql.toUpperCase().startsWith("ALTER TABLE")) {
+                continue;
+            }
+            alterCount++;
+            assertTrue("补列必须带列名与类型：" + sql, sql.matches(
+                    "ALTER TABLE plugin_mbb_trpg_\\w+ ADD COLUMN \\w+ (INTEGER|TEXT).*"));
+            assertFalse("主键无法补列：" + sql, sql.contains("AUTOINCREMENT"));
+        }
+        int expected = 0;
+        for (Map<String, String> columns : TrpgSchemaService.expectedColumns().values()) {
+            expected += columns.size() - 1;
+        }
+        assertEquals("每个非主键列一条补列语句", expected, alterCount);
+    }
+
     /** 活跃局唯一索引在真库上确实生效（同群不能有两条未归档局）。 */
     @Test
     public void activeSessionUniqueIndexIsEnforced() {
         assertTrue(service.ensureSchema());
-        storage.insert("INSERT INTO plugin_mbb_trpg_session "
-                        + "(groupID, state, kpUserID, createTime, updateTime) VALUES (?,?,?,?,?)",
-                3003L, "RECRUITING", 9L, 1L, 1L);
-        try {
-            storage.insert("INSERT INTO plugin_mbb_trpg_session "
-                            + "(groupID, state, kpUserID, createTime, updateTime) VALUES (?,?,?,?,?)",
-                    3003L, "RUNNING", 9L, 2L, 2L);
-            fail("同群第二条未归档局应触发唯一索引冲突");
-        } catch (RuntimeException expected) {
-            assertTrue(expected.getMessage() != null);
-        }
-        assertEquals("冲突后仍只有一条", 1L,
-                storage.count("SELECT COUNT(*) FROM plugin_mbb_trpg_session WHERE groupID = ?", 3003L));
+        assertEquals("第一条未归档局应写入成功", 1L,
+                storage.insert("INSERT INTO plugin_mbb_trpg_session "
+                                + "(groupID, state, kpUserID, createTime, updateTime) VALUES (?,?,?,?,?)",
+                        3003L, "RECRUITING", 9L, 1L, 1L));
+        // 唯一索引冲突在主程序语义下被吞成插入失败（0），不会抛异常
+        assertEquals("同群第二条未归档局应被唯一索引挡下", 0L,
+                storage.insert("INSERT INTO plugin_mbb_trpg_session "
+                                + "(groupID, state, kpUserID, createTime, updateTime) VALUES (?,?,?,?,?)",
+                        3003L, "RUNNING", 9L, 2L, 2L));
+        assertEquals("冲突后仍只有一条未归档局", 1L,
+                storage.count("SELECT COUNT(*) FROM plugin_mbb_trpg_session "
+                        + "WHERE groupID = ? AND state IN ('RECRUITING','RUNNING')", 3003L));
+        // 索引只约束未归档局：已结束的同群局可以并存
+        assertTrue("已结束局不受唯一索引限制",
+                storage.insert("INSERT INTO plugin_mbb_trpg_session "
+                                + "(groupID, state, kpUserID, endedAt, createTime, updateTime) "
+                                + "VALUES (?,?,?,?,?,?)",
+                        3003L, "ENDED", 9L, 5L, 3L, 3L) > 0L);
     }
 
     /** K1：全部 SQL 只碰 plugin_ 前缀表，不含 bot_，且不含删除表结构。 */

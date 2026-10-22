@@ -10,6 +10,17 @@ public final class D100SkillCheck implements CheckRequest {
     private final int bonusDice;
     private final int penaltyDice;
 
+    /** 默认常规难度、无奖励惩罚骰的检定。 */
+    public D100SkillCheck(String skillId, String skillLabel, int skillValue) throws RuleException {
+        this(skillId, skillLabel, skillValue, CheckDifficulty.REGULAR, 0, 0);
+    }
+
+    /** 默认常规难度、带奖励/惩罚骰的检定。 */
+    public D100SkillCheck(String skillId, String skillLabel, int skillValue,
+                          int bonusDice, int penaltyDice) throws RuleException {
+        this(skillId, skillLabel, skillValue, CheckDifficulty.REGULAR, bonusDice, penaltyDice);
+    }
+
     public D100SkillCheck(String skillId, String skillLabel, int skillValue,
                           CheckDifficulty difficulty, int bonusDice, int penaltyDice)
             throws RuleException {

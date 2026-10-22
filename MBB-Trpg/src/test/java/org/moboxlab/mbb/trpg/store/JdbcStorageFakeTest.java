@@ -87,6 +87,15 @@ public class JdbcStorageFakeTest {
         assertTrue(rows.isEmpty());
     }
 
+    /** 坏 SQL 只返回失败码，不抛异常，与主程序吞异常语义一致。 */
+    @Test
+    public void brokenStatementsReturnFailureCodesInsteadOfThrowing() {
+        assertEquals("语句未执行应返回 -1", -1,
+                storage.update("UPDATE plugin_mbb_trpg_missing SET name = ?", "x"));
+        assertEquals("插入失败应返回 0", 0L,
+                storage.insert("INSERT INTO plugin_mbb_trpg_missing (name) VALUES (?)", "x"));
+    }
+
     /** 插件键值存储不参与测试，直接拒绝。 */
     @Test
     public void keyValueApiIsRejected() {

@@ -34,8 +34,20 @@ public final class TrpgSchemaService {
     /** AI 审计表。 */
     public static final String TABLE_AI_TRACE = "plugin_mbb_trpg_ai_trace";
 
+    /** 主键列名；主键无法通过 ALTER TABLE 补列。 */
+    private static final String PRIMARY_KEY_COLUMN = "id";
+
     private static final List<String> CREATE_TABLE_SQL;
     private static final List<String> CREATE_INDEX_SQL;
+
+    /**
+     * 各表列定义，供补列使用。
+     *
+     * <p>冻结 DDL（规格 §7.2）里部分 NOT NULL 列没有 DEFAULT，写入时显式给值；
+     * 但 SQLite 的 ALTER TABLE ADD COLUMN 对 NOT NULL 列强制要求常量默认值，
+     * 迁移老库只能用 0 / '' 补齐。这是 §7.2 与 SQLite 语法的折中：新库以
+     * CREATE TABLE 为准，迁移库补上的列会带默认值。</p>
+     */
     private static final Map<String, Map<String, String>> COLUMNS;
 
     static {
@@ -287,16 +299,57 @@ public final class TrpgSchemaService {
     }
 
     private boolean ensureColumns(String table) {
+        Map<String, String> expected = COLUMNS.get(table);
+        if (expected == null) {
+            return true;
+        }
+        Set<String> existing = readColumns(table);
+        if (existing == null) {
+            // 读失败或表结构为空：只告警，不做盲改（F4）
+            return true;
+        }
+        if (!existing.containsAll(expected.keySet())) {
+            // StorageService 的 query 失败会被吞成部分行，缺列可能只是读到一半；
+            // 重读一次并合并结果，仍缺的才当成真的缺列，避免对已存在列发 ALTER
+            Set<String> reread = readColumns(table);
+            if (reread == null) {
+                warn("表结构读取不完整，跳过补列（不做盲改）：" + table);
+                return true;
+            }
+            existing.addAll(reread);
+        }
+        for (Map.Entry<String, String> entry : expected.entrySet()) {
+            if (existing.contains(entry.getKey())) {
+                continue;
+            }
+            if (PRIMARY_KEY_COLUMN.equals(entry.getKey())) {
+                // 主键列无法用 ALTER TABLE 补，缺 id 说明表已被外部破坏，只告警不阻断
+                warn("表 " + table + " 缺少主键列 " + PRIMARY_KEY_COLUMN + "，无法补列");
+                continue;
+            }
+            String sql = addColumnSql(table, entry.getKey(), entry.getValue());
+            warn("表 " + table + " 缺少列 " + entry.getKey() + "，尝试补列");
+            if (!executeDdl(sql, "补列")) {
+                // 补列失败常见原因是列其实已存在（重复列）或数据库忙；表本身可用，
+                // 不据此禁用整块 TRPG 能力，只保留告警等下次启用重试
+                warn("补列失败，已跳过；本次不因补列失败禁用 TRPG：" + entry.getKey());
+            }
+        }
+        return true;
+    }
+
+    /** 读 PRAGMA table_info；读失败或结果为空时返回 null，由调用方只告警。 */
+    private Set<String> readColumns(String table) {
         List<JSONObject> rows;
         try {
             rows = storage.query("PRAGMA table_info(" + table + ")");
         } catch (RuntimeException e) {
             warn("读取表结构失败，跳过补列：" + table + "，" + e.getMessage());
-            return true;
+            return null;
         }
         if (rows == null || rows.isEmpty()) {
             warn("表结构为空，跳过补列（不做盲改）：" + table);
-            return true;
+            return null;
         }
         Set<String> existing = new LinkedHashSet<String>();
         for (JSONObject row : rows) {
@@ -310,37 +363,30 @@ public final class TrpgSchemaService {
         }
         if (existing.isEmpty()) {
             warn("表结构缺少列名，跳过补列（不做盲改）：" + table);
-            return true;
+            return null;
         }
-        Map<String, String> expected = COLUMNS.get(table);
-        if (expected == null) {
-            return true;
-        }
-        for (Map.Entry<String, String> entry : expected.entrySet()) {
-            if (existing.contains(entry.getKey())) {
-                continue;
-            }
-            String sql = "ALTER TABLE " + table + " ADD COLUMN " + entry.getKey() + " "
-                    + entry.getValue();
-            warn("表 " + table + " 缺少列 " + entry.getKey() + "，尝试补列");
-            if (!executeDdl(sql, "补列")) {
-                return false;
-            }
-        }
-        return true;
+        return existing;
     }
 
-    /** 全部 SQL，用于边界自检。 */
+    /** 全部 SQL，用于边界自检；与真正可能执行的语句一一对应。 */
     public static List<String> allSql() {
         List<String> all = new ArrayList<String>();
         all.addAll(CREATE_TABLE_SQL);
         all.addAll(CREATE_INDEX_SQL);
         for (Map.Entry<String, Map<String, String>> table : COLUMNS.entrySet()) {
-            for (String definition : table.getValue().values()) {
-                all.add("ALTER TABLE " + table.getKey() + " ADD COLUMN " + definition);
+            for (Map.Entry<String, String> column : table.getValue().entrySet()) {
+                if (PRIMARY_KEY_COLUMN.equals(column.getKey())) {
+                    continue;
+                }
+                all.add(addColumnSql(table.getKey(), column.getKey(), column.getValue()));
             }
         }
         return all;
+    }
+
+    /** 补列语句：必须同时带列名与常量默认值。 */
+    private static String addColumnSql(String table, String column, String definition) {
+        return "ALTER TABLE " + table + " ADD COLUMN " + column + " " + definition;
     }
 
     /** 插件 SQL 边界：必须含 plugin_，且不得含 bot_。 */

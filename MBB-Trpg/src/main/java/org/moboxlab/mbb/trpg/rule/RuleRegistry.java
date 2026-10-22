@@ -3,8 +3,10 @@ package org.moboxlab.mbb.trpg.rule;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
+import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * 规则集注册表。
@@ -16,8 +18,11 @@ public final class RuleRegistry {
     /** 内置规则集 ID。 */
     public static final String BUILTIN_RULE_SET_ID = "d100";
 
+    /** 告警条数上限，避免未知规则集反复回退时无限增长。 */
+    private static final int MAX_WARNINGS = 20;
+
     private static final Map<String, RuleSet> RULE_SETS = new LinkedHashMap<String, RuleSet>();
-    private static final List<String> WARNINGS = new ArrayList<String>();
+    private static final Set<String> WARNINGS = new LinkedHashSet<String>();
 
     private RuleRegistry() {
     }
@@ -45,7 +50,9 @@ public final class RuleRegistry {
         if (ruleSet != null) {
             return ruleSet;
         }
-        WARNINGS.add("未知规则集 " + ruleSetId + "，回退内置 " + BUILTIN_RULE_SET_ID);
+        if (WARNINGS.size() < MAX_WARNINGS) {
+            WARNINGS.add("未知规则集 " + ruleSetId + "，回退内置 " + BUILTIN_RULE_SET_ID);
+        }
         return get(BUILTIN_RULE_SET_ID);
     }
 

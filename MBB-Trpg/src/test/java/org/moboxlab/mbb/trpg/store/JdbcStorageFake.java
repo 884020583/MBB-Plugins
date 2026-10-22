@@ -158,7 +158,8 @@ public final class JdbcStorageFake implements StorageService {
                 statement.close();
             }
         } catch (SQLException e) {
-            throw new IllegalStateException("执行 SQL 失败：" + sql + "，" + e.getMessage(), e);
+            // 主程序把语句失败吞成 -1，这里保持一致，避免测试把生产会降级的情况判成崩溃
+            return -1;
         }
     }
 
@@ -192,7 +193,8 @@ public final class JdbcStorageFake implements StorageService {
                 idStatement.close();
             }
         } catch (SQLException e) {
-            throw new IllegalStateException("执行插入失败：" + sql + "，" + e.getMessage(), e);
+            // 主程序把插入失败吞成 0，这里保持一致
+            return 0L;
         }
     }
 
