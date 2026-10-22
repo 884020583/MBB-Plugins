@@ -16,6 +16,11 @@ import org.moboxlab.mbb.trpg.script.ScriptValidator;
 import org.moboxlab.mbb.trpg.session.Clock;
 import org.moboxlab.mbb.trpg.session.PluginManagerScheduler;
 import org.moboxlab.mbb.trpg.session.ScheduledTask;
+import org.moboxlab.mbb.trpg.session.SessionEvent;
+import org.moboxlab.mbb.trpg.session.SessionEventPublisher;
+import org.moboxlab.mbb.trpg.session.SessionService;
+import org.moboxlab.mbb.trpg.session.SessionSnapshot;
+import org.moboxlab.mbb.trpg.session.SessionState;
 import org.moboxlab.mbb.trpg.store.BlacklistService;
 import org.moboxlab.mbb.trpg.store.SessionStore;
 import org.moboxlab.mbb.trpg.store.SqlSessionStore;
@@ -23,12 +28,14 @@ import org.moboxlab.mbb.trpg.store.SqlTraceStore;
 import org.moboxlab.mbb.trpg.store.TrpgRetentionService;
 import org.moboxlab.mbb.trpg.store.TrpgSchemaService;
 
+import java.util.List;
+
 /**
  * MBB-Trpg 插件主类。
  *
  * <p>当前职责：加载配置、注册内置规则集并选定生效规则集、建表并保持幂等，装配存储实现、
- * 审计端口、拉黑名单与归档清理，并排入每小时清理任务；会话状态机、呈现与指令层由后续切片
- * 装配到 {@link #onEnable()} 末尾的装配位。</p>
+ * 审计端口、拉黑名单、会话状态机与归档清理，按冻结顺序执行启动序列并排入每小时清理任务；
+ * 呈现层、检定与场景、指令与监听器由后续切片继续装配。</p>
  */
 public class TrpgPlugin extends Plugin {
 
@@ -41,6 +48,7 @@ public class TrpgPlugin extends Plugin {
     private SessionStore sessionStore;
     private TraceStore traceStore;
     private BlacklistService blacklistService;
+    private SessionService sessionService;
     private TrpgRetentionService retentionService;
     private ScheduledTask retentionTask;
     private ScriptCatalog scriptCatalog;
@@ -92,7 +100,7 @@ public class TrpgPlugin extends Plugin {
         trpgEnabled = true;
         disabledReason = "";
         assembleServices(storage);
-        // 后续切片装配位：SessionService、RuleEngine、呈现服务、指令与监听器。
+        // 后续切片装配位：呈现服务、检定与场景、指令与监听器。
         getLogger().sendInfo("[MBB-Trpg] 已启用，版本 " + getVersion() + "，数据表已就绪");
     }
 
@@ -152,17 +160,40 @@ public class TrpgPlugin extends Plugin {
         sessionStore = store;
         traceStore = new SqlTraceStore(store);
         blacklistService = new BlacklistService(store);
+        sessionService = new SessionService(store, scriptCatalog, clock, randomSource, trpgConfig,
+                logOnlyPublisher(), getLogger());
         retentionService = new TrpgRetentionService(store, getLogger(), clock,
                 trpgConfig.retentionSessionDays(), trpgConfig.aiTraceKeepHours(),
                 trpgConfig.aiTraceMaxRows());
 
-        // 启动顺序按规格 §6.5：建表 → 成长与摘要补做 → 清理。补做属于后续切片，
-        // 落地后要插在下面这一行之前，保证先结算再清理。
+        // 启动顺序按规格 §5.7 / §6.5：建表 → 成长与摘要补做 → 清理 → 扫未归档局并重建内存局面。
+        // 补做先于清理，避免已结算的局被当成过期数据；恢复只读不写库。
+        try {
+            int settled = sessionService.settlePending();
+            if (settled > 0) {
+                getLogger().sendInfo("[MBB-Trpg] 启动补做完成，结算 " + settled + " 局");
+            }
+        } catch (RuntimeException e) {
+            getLogger().sendWarn("[MBB-Trpg] 启动补做异常，已跳过：" + e.getMessage());
+        }
         try {
             TrpgRetentionService.Result result = retentionService.runOnce(clock.nowMillis());
             getLogger().sendInfo("[MBB-Trpg] 启动清理完成：" + result);
         } catch (RuntimeException e) {
             getLogger().sendWarn("[MBB-Trpg] 启动清理异常，已跳过：" + e.getMessage());
+        }
+        try {
+            List<SessionSnapshot> recovered = sessionService.recover();
+            int running = 0;
+            for (SessionSnapshot snapshot : recovered) {
+                if (snapshot.active() && snapshot.state() == SessionState.RUNNING) {
+                    running++;
+                }
+            }
+            getLogger().sendInfo("[MBB-Trpg] 已加载进行中的局 " + recovered.size()
+                    + " 个，其中待确认恢复 " + running + " 个");
+        } catch (RuntimeException e) {
+            getLogger().sendWarn("[MBB-Trpg] 启动恢复异常，已跳过：" + e.getMessage());
         }
         PluginManager pluginManager = getServer() == null ? null : getServer().getPluginManager();
         if (pluginManager == null) {
@@ -179,6 +210,35 @@ public class TrpgPlugin extends Plugin {
         }
     }
 
+    /**
+     * 会话事件的生产发布器：本切片只写插件日志。
+     *
+     * <p>恢复提示与结束时战报由呈现切片（S6）经 Messaging 异步发送，这里保持无网络调用，
+     * 也不会把发送带进群锁临界区（事件在锁外统一发布）。</p>
+     */
+    private SessionEventPublisher logOnlyPublisher() {
+        return new SessionEventPublisher() {
+            @Override
+            public void publish(SessionEvent event) {
+                if (event == null) {
+                    return;
+                }
+                switch (event.type()) {
+                    case RECOVERED:
+                        getLogger().sendInfo("[MBB-Trpg] 局面待恢复确认：群 " + event.snapshot().groupId()
+                                + "，局 " + event.snapshot().sessionId());
+                        break;
+                    case ENDED:
+                        getLogger().sendInfo("[MBB-Trpg] 局面已结束：群 " + event.snapshot().groupId()
+                                + "，局 " + event.snapshot().sessionId() + "，原因 " + event.endReason());
+                        break;
+                    default:
+                        break;
+                }
+            }
+        };
+    }
+
     @Override
     public void onDisable() {
         if (retentionTask != null) {
@@ -190,6 +250,7 @@ public class TrpgPlugin extends Plugin {
         sessionStore = null;
         traceStore = null;
         blacklistService = null;
+        sessionService = null;
         retentionService = null;
         scriptCatalog = null;
         getLogger().sendInfo("[MBB-Trpg] 已停用");
@@ -233,6 +294,11 @@ public class TrpgPlugin extends Plugin {
     /** 拉黑名单服务；未启用时为 null。 */
     public BlacklistService blacklistService() {
         return blacklistService;
+    }
+
+    /** 会话状态机；未启用时为 null。 */
+    public SessionService sessionService() {
+        return sessionService;
     }
 
     /** 归档清理服务；未启用时为 null。 */

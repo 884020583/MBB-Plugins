@@ -5,15 +5,15 @@ import java.util.Collections;
 import java.util.List;
 
 /**
- * 局面只读快照（不可变）。
+ * 局面只读快照（不可变）：呈现层、指令层与后续切片只读它，不直接读存储行。
  *
- * <p>供表现层与 AI 主持在群锁外读取；不暴露写入方法。场景版本取本局最新事件序号，
- * 无事件时为 0，AI 结果返回时用于判定是否过期。</p>
+ * <p>{@code recovered=false} 表示本机重启后该局尚未确认恢复（内存事实，不落库）；
+ * {@code sceneVersion} 是最新日志序号，重启后由日志重算。</p>
  */
 public final class SessionSnapshot {
 
-    private final long sessionId;
     private final long groupId;
+    private final long sessionId;
     private final SessionState state;
     private final long kpUserId;
     private final String scriptId;
@@ -28,45 +28,51 @@ public final class SessionSnapshot {
     private final boolean aiEnabled;
     private final long aiSuspendedUntil;
     private final int aiFailStreak;
+    private final boolean growthSettled;
     private final boolean recovered;
     private final long sceneVersion;
     private final List<MemberView> members;
     private final List<String> unlockedClues;
 
     private SessionSnapshot(Builder builder) {
-        this.sessionId = builder.sessionId;
         this.groupId = builder.groupId;
-        this.state = builder.state == null ? SessionState.NONE : builder.state;
+        this.sessionId = builder.sessionId;
+        this.state = builder.state;
         this.kpUserId = builder.kpUserId;
-        this.scriptId = builder.scriptId == null ? "" : builder.scriptId;
-        this.ruleSetId = builder.ruleSetId == null ? "" : builder.ruleSetId;
+        this.scriptId = builder.scriptId;
+        this.ruleSetId = builder.ruleSetId;
         this.sceneIndex = builder.sceneIndex;
-        this.sceneTitle = builder.sceneTitle == null ? "" : builder.sceneTitle;
+        this.sceneTitle = builder.sceneTitle;
         this.startedAt = builder.startedAt;
         this.endedAt = builder.endedAt;
-        this.endReason = builder.endReason == null ? "" : builder.endReason;
-        this.summary = builder.summary == null ? "" : builder.summary;
+        this.endReason = builder.endReason;
+        this.summary = builder.summary;
         this.lastActivityAt = builder.lastActivityAt;
         this.aiEnabled = builder.aiEnabled;
         this.aiSuspendedUntil = builder.aiSuspendedUntil;
         this.aiFailStreak = builder.aiFailStreak;
+        this.growthSettled = builder.growthSettled;
         this.recovered = builder.recovered;
         this.sceneVersion = builder.sceneVersion;
         this.members = Collections.unmodifiableList(new ArrayList<MemberView>(builder.members));
-        this.unlockedClues = Collections.unmodifiableList(
-                new ArrayList<String>(builder.unlockedClues));
+        this.unlockedClues = Collections.unmodifiableList(new ArrayList<String>(builder.unlockedClues));
     }
 
     public static Builder builder() {
         return new Builder();
     }
 
-    public long sessionId() {
-        return sessionId;
+    /** 本群无活跃局的空快照。 */
+    public static SessionSnapshot none(long groupId) {
+        return builder().groupId(groupId).state(SessionState.NONE).recovered(true).build();
     }
 
     public long groupId() {
         return groupId;
+    }
+
+    public long sessionId() {
+        return sessionId;
     }
 
     public SessionState state() {
@@ -125,11 +131,16 @@ public final class SessionSnapshot {
         return aiFailStreak;
     }
 
-    /** 重启恢复后尚未被 KP 确认时为 true。 */
+    public boolean growthSettled() {
+        return growthSettled;
+    }
+
+    /** 本机重启后是否已确认恢复；新局与已确认的局都是 true。 */
     public boolean recovered() {
         return recovered;
     }
 
+    /** 情景版本（最新日志序号）。 */
     public long sceneVersion() {
         return sceneVersion;
     }
@@ -138,7 +149,17 @@ public final class SessionSnapshot {
         return members;
     }
 
-    /** 按成员 ID 查找；不存在返回 null。 */
+    /** 已解锁线索 key（按首次解锁顺序）。 */
+    public List<String> unlockedClues() {
+        return unlockedClues;
+    }
+
+    /** 是否处于活跃状态（招募中或进行中）。 */
+    public boolean active() {
+        return state != null && state.active();
+    }
+
+    /** 按用户号找局内成员；不在局内返回 null。 */
     public MemberView member(long userId) {
         for (MemberView member : members) {
             if (member.userId() == userId) {
@@ -148,15 +169,16 @@ public final class SessionSnapshot {
         return null;
     }
 
-    public List<String> unlockedClues() {
-        return unlockedClues;
+    /** 是否仍是局内成员（入局且未离场）。 */
+    public boolean insideMember(long userId) {
+        MemberView member = member(userId);
+        return member != null && member.inSession();
     }
 
-    /** 快照构造器。 */
     public static final class Builder {
 
-        private long sessionId;
         private long groupId;
+        private long sessionId;
         private SessionState state = SessionState.NONE;
         private long kpUserId;
         private String scriptId = "";
@@ -171,23 +193,24 @@ public final class SessionSnapshot {
         private boolean aiEnabled;
         private long aiSuspendedUntil;
         private int aiFailStreak;
-        private boolean recovered;
+        private boolean growthSettled;
+        private boolean recovered = true;
         private long sceneVersion;
         private List<MemberView> members = new ArrayList<MemberView>();
         private List<String> unlockedClues = new ArrayList<String>();
-
-        public Builder sessionId(long value) {
-            this.sessionId = value;
-            return this;
-        }
 
         public Builder groupId(long value) {
             this.groupId = value;
             return this;
         }
 
+        public Builder sessionId(long value) {
+            this.sessionId = value;
+            return this;
+        }
+
         public Builder state(SessionState value) {
-            this.state = value;
+            this.state = value == null ? SessionState.NONE : value;
             return this;
         }
 
@@ -197,12 +220,12 @@ public final class SessionSnapshot {
         }
 
         public Builder scriptId(String value) {
-            this.scriptId = value;
+            this.scriptId = value == null ? "" : value;
             return this;
         }
 
         public Builder ruleSetId(String value) {
-            this.ruleSetId = value;
+            this.ruleSetId = value == null ? "" : value;
             return this;
         }
 
@@ -212,7 +235,7 @@ public final class SessionSnapshot {
         }
 
         public Builder sceneTitle(String value) {
-            this.sceneTitle = value;
+            this.sceneTitle = value == null ? "" : value;
             return this;
         }
 
@@ -227,12 +250,12 @@ public final class SessionSnapshot {
         }
 
         public Builder endReason(String value) {
-            this.endReason = value;
+            this.endReason = value == null ? "" : value;
             return this;
         }
 
         public Builder summary(String value) {
-            this.summary = value;
+            this.summary = value == null ? "" : value;
             return this;
         }
 
@@ -253,6 +276,11 @@ public final class SessionSnapshot {
 
         public Builder aiFailStreak(int value) {
             this.aiFailStreak = value;
+            return this;
+        }
+
+        public Builder growthSettled(boolean value) {
+            this.growthSettled = value;
             return this;
         }
 
@@ -280,4 +308,5 @@ public final class SessionSnapshot {
             return new SessionSnapshot(this);
         }
     }
+
 }

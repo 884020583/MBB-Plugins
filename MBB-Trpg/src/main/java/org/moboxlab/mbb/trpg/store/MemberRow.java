@@ -63,6 +63,23 @@ public final class MemberRow {
         return new Builder();
     }
 
+    /** 以当前行的全部字段为起点复制一个构造器，便于只改其中一两个字段。 */
+    public Builder toBuilder() {
+        return new Builder()
+                .id(id)
+                .sessionId(sessionId)
+                .userId(userId)
+                .cardJson(cardJson)
+                .successSkillsJson(successSkillsJson)
+                .joinedAt(joinedAt)
+                .leftAt(leftAt)
+                .takenOver(takenOver)
+                .madnessUntil(madnessUntil)
+                .createTime(createTime)
+                .updateTime(updateTime)
+                .warnings(warnings);
+    }
+
     public long id() {
         return id;
     }

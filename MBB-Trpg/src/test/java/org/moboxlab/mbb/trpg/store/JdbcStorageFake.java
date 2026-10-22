@@ -32,6 +32,8 @@ public final class JdbcStorageFake implements StorageService {
     private Connection connection;
     private final List<String> executedSql = new ArrayList<String>();
     private int failNextUpdate;
+    private String failUpdateFragment = "";
+    private int failUpdateFragmentTimes;
     private int failNextInsert;
     private int failNextQuery;
     private int partialQueryRows;
@@ -51,6 +53,19 @@ public final class JdbcStorageFake implements StorageService {
     /** 让接下来的若干次 update 返回 -1（语句未执行）。 */
     public void failNextUpdate(int times) {
         this.failNextUpdate = times;
+    }
+
+    /**
+     * 让接下来若干次「SQL 文本包含指定片段」的 update 返回 -1。
+     *
+     * <p>用于只打中某类语句（例如只让 CAS 迁移失败、或只让成员写回失败）。</p>
+     */
+    public void failUpdateContaining(String fragment, int times) {
+        if (fragment == null || fragment.isEmpty()) {
+            throw new IllegalArgumentException("SQL 片段不能为空");
+        }
+        this.failUpdateFragment = fragment;
+        this.failUpdateFragmentTimes = times;
     }
 
     /** 让接下来的若干次 insert 返回 0（没插入或取键失败）。 */
@@ -145,6 +160,10 @@ public final class JdbcStorageFake implements StorageService {
     @Override
     public int update(String sql, Object... params) {
         executedSql.add(sql);
+        if (failUpdateFragmentTimes > 0 && sql.contains(failUpdateFragment)) {
+            failUpdateFragmentTimes--;
+            return -1;
+        }
         if (failNextUpdate > 0) {
             failNextUpdate--;
             return -1;
