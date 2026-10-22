@@ -12,8 +12,8 @@ import static org.junit.Assert.assertTrue;
 public class TrpgTitlesTest {
 
     @Test
-    public void allTitlesAreUniqueAndCount26() {
-        assertEquals(26, TrpgTitles.ALL.size());
+    public void allTitlesAreUniqueAndCount29() {
+        assertEquals(29, TrpgTitles.ALL.size());
         Set<String> unique = new HashSet<String>(TrpgTitles.ALL);
         assertEquals(TrpgTitles.ALL.size(), unique.size());
     }
@@ -37,7 +37,10 @@ public class TrpgTitlesTest {
     @Test
     public void allTitlesAppearInSpecOrder() {
         assertEquals(TrpgTitles.RECRUIT, TrpgTitles.ALL.get(0));
-        assertEquals(TrpgTitles.HOST, TrpgTitles.ALL.get(TrpgTitles.ALL.size() - 1));
+        assertEquals(TrpgTitles.HOST, TrpgTitles.ALL.get(25));
+        assertEquals(TrpgTitles.LOG, TrpgTitles.ALL.get(TrpgTitles.ALL.size() - 1));
         assertTrue(TrpgTitles.ALL.contains(TrpgTitles.AI_NARRATION));
+        assertTrue(TrpgTitles.ALL.contains(TrpgTitles.STATUS));
+        assertTrue(TrpgTitles.ALL.contains(TrpgTitles.HELP));
     }
 }

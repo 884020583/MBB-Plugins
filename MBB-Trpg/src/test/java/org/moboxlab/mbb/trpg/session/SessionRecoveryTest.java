@@ -128,6 +128,7 @@ public class SessionRecoveryTest extends SessionTestFixture {
     public void settlePendingSkipsAlreadySettledSessions() {
         startRunning();
         assertTrue(service.end(actor(KP)).confirmationPending());
+        clock.advance(1000L);
         assertTrue(service.end(actor(KP)).ok());
         service = buildService(new FakeRandom(), collectingPublisher());
         assertEquals(0, service.settlePending());

@@ -324,6 +324,11 @@ public class TrpgRetentionServiceTest {
         }
 
         @Override
+        public SessionRow findLatestArchivedByGroup(long groupId, long endedAfter) {
+            return delegate.findLatestArchivedByGroup(groupId, endedAfter);
+        }
+
+        @Override
         public long insertSession(SessionRow row) {
             return delegate.insertSession(row);
         }

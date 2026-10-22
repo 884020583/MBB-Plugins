@@ -3,6 +3,7 @@ package org.moboxlab.mbb.trpg.present;
 import org.moboxlab.mbb.trpg.script.Clue;
 import org.moboxlab.mbb.trpg.script.Script;
 import org.moboxlab.mbb.trpg.session.SessionSnapshot;
+import org.moboxlab.mbb.trpg.session.SessionState;
 import org.moboxlab.mbb.trpg.store.CardData;
 
 import java.text.SimpleDateFormat;
@@ -56,6 +57,9 @@ public final class TrpgMessageTemplates {
     private static final int LIMIT_CARD = 600;
     private static final int LIMIT_KP_HINT = 900;
     private static final int LIMIT_SCRIPT_LIBRARY = 500;
+    private static final int LIMIT_STATUS = 400;
+    private static final int LIMIT_LOG = 900;
+    private static final int LIMIT_HELP = 500;
 
     private TrpgMessageTemplates() {
     }
@@ -288,6 +292,117 @@ public final class TrpgMessageTemplates {
         return limit(body.toString(), LIMIT_RECOVERED);
     }
 
+    /** 私聊不可达时的群内折叠行：只发职业与关键数值（规范 §5.2 第 2 条）。 */
+    public static String cardFolded(String name, String profession, CardData card) {
+        CardData data = card == null ? CardData.empty() : card;
+        StringBuilder body = new StringBuilder();
+        body.append(TrpgTitles.of(TrpgTitles.CARD, name)).append("职业：")
+                .append(profession == null || profession.trim().isEmpty() ? "冒险者" : profession.trim())
+                .append('\n').append("STR ").append(data.attribute("STR"))
+                .append(ALIGN).append("CON ").append(data.attribute("CON"))
+                .append(ALIGN).append("SAN ").append(data.san())
+                .append(ALIGN).append("HP ").append(data.hp());
+        return limit(body.toString(), LIMIT_CARD);
+    }
+
+    /** 局面摘要（/trpg status）：无局、招募中、进行中三种形态。 */
+    public static String status(TrpgStatusView view) {
+        TrpgStatusView data = view == null ? TrpgStatusView.none() : view;
+        if (!data.active()) {
+            StringBuilder empty = new StringBuilder();
+            empty.append(TrpgTitles.of(TrpgTitles.NOTICE)).append('\n');
+            empty.append("本群暂无局。发送 /trpg start <剧本ID> 开团，或 /trpg help 查看指令。");
+            return limit(empty.toString(), LIMIT_NOTICE);
+        }
+        String name = data.scriptName().isEmpty() ? "未命名剧本" : data.scriptName();
+        StringBuilder body = new StringBuilder();
+        if (data.state() == SessionState.RECRUITING) {
+            body.append(TrpgTitles.of(TrpgTitles.STATUS)).append('《').append(name).append("》招募中\n");
+            body.append("KP：").append(data.kpName()).append(ALIGN)
+                    .append("已加入 ").append(data.currentPlayers()).append('/')
+                    .append(data.maxPlayers()).append(" 人\n");
+            body.append("当前成员：").append(playerSummary(data.playerLabels())).append('\n');
+            body.append("发送 /trpg join 加入；KP 发送 /trpg begin 开局。");
+            return limit(body.toString(), LIMIT_STATUS);
+        }
+        body.append(TrpgTitles.of(TrpgTitles.STATUS)).append('《').append(name).append("》进行中\n");
+        if (!data.sceneTitle().isEmpty()) {
+            body.append("当前场景：").append(data.sceneTitle()).append("（第 ")
+                    .append(Math.max(1, data.sceneNo())).append('/')
+                    .append(Math.max(Math.max(1, data.sceneNo()), data.sceneTotal()))
+                    .append(" 幕）\n");
+        }
+        body.append("局内人数：").append(data.currentPlayers()).append('/').append(data.maxPlayers())
+                .append(" 人").append(data.playerLabels().isEmpty() ? ""
+                        : "（" + playerSummary(data.playerLabels()) + "）")
+                .append('\n');
+        body.append("已解锁线索 ").append(data.clueUnlocked()).append('/').append(data.clueTotal());
+        if (data.lastActivityAt() > 0L) {
+            body.append(ALIGN).append("最近活动：").append(dateTime(data.lastActivityAt()));
+        }
+        body.append('\n').append("AI 主持：").append(data.aiLine().isEmpty() ? "关" : data.aiLine());
+        if (!data.recovered()) {
+            body.append("\n本局在重启前正在进行，KP 可发送 /trpg resume 确认继续。");
+        }
+        return limit(body.toString(), LIMIT_STATUS);
+    }
+
+    /** 日志回看（/trpg log）：按 seq 倒序的一页，页脚给翻页方式。 */
+    public static String logPage(String scriptName, int page, int totalPages, long total,
+            List<TrpgLogEntry> entries) {
+        String name = scriptName == null || scriptName.trim().isEmpty() ? "未知剧本"
+                : scriptName.trim();
+        int safePage = Math.max(1, page);
+        int safeTotalPages = Math.max(1, totalPages);
+        StringBuilder body = new StringBuilder();
+        body.append(TrpgTitles.of(TrpgTitles.LOG,
+                safePage + "/" + safeTotalPages)).append('\n');
+        body.append('《').append(name).append("》共 ").append(Math.max(0L, total))
+                .append(" 条，按时间倒序。" );
+        if (entries == null || entries.isEmpty()) {
+            body.append("\n本局暂无日志。");
+            return limit(body.toString(), LIMIT_LOG);
+        }
+        for (TrpgLogEntry entry : entries) {
+            if (entry == null) {
+                continue;
+            }
+            String actor = entry.actorName().isEmpty() ? "系统" : entry.actorName();
+            body.append('\n').append(dateTime(entry.createTime())).append(ALIGN)
+                    .append(actor).append('：')
+                    .append(FORMATTER.clean(entry.content()));
+        }
+        if (safePage < safeTotalPages) {
+            body.append("\n发送 /trpg log ").append(safePage + 1).append(" 查看下一页。");
+        } else if (safePage > 1) {
+            body.append("\n发送 /trpg log ").append(safePage - 1).append(" 查看上一页。");
+        }
+        return limit(body.toString(), LIMIT_LOG);
+    }
+
+    /** 指令帮助：标题固定，正文由指令层按注册表逐行给出。 */
+    public static String help(List<String> lines) {
+        StringBuilder body = new StringBuilder();
+        body.append(TrpgTitles.of(TrpgTitles.HELP)).append('\n');
+        body.append("指令前缀 /trpg，主名与中文别名等价。\n");
+        if (lines != null) {
+            for (String line : lines) {
+                if (line != null && !line.trim().isEmpty()) {
+                    body.append(line.trim()).append('\n');
+                }
+            }
+        }
+        body.append("直接发送 /r 3d6 可以掷骰。");
+        return limit(body.toString(), LIMIT_HELP);
+    }
+
+    private static String playerSummary(List<String> labels) {
+        if (labels == null || labels.isEmpty()) {
+            return "无";
+        }
+        return join(labels, "、");
+    }
+
     /** 一次性提示。 */
     public static String notice(String text) {
         return limit(TrpgTitles.of(TrpgTitles.NOTICE) + "\n" + (text == null ? "" : text), LIMIT_NOTICE);
@@ -455,15 +570,31 @@ public final class TrpgMessageTemplates {
         return limit(body.toString(), LIMIT_SCRIPT_LIBRARY);
     }
 
-    /** /r 与 /roll 回复：不套标题。 */
-    public static String dice(String expression, List<String> segmentLines, int total) {
-        StringBuilder body = new StringBuilder();
-        if (segmentLines != null) {
-            for (String line : segmentLines) {
-                body.append(line).append('\n');
-            }
+    /**
+     * /r 与 /roll 回复：不套标题（规范 §3.4）。
+     *
+     * <p>单段只回一行 {@code /r 3d6+2 = 14}；多段每条骰段一行 {@code [r] 3d6 = 9}，
+     * 末行合计 {@code [r] 3d6+2 = 14}（常数段不单独列行）。</p>
+     */
+    public static String dice(TrpgDiceView view) {
+        if (view == null) {
+            return "";
         }
-        body.append(expression).append(" = ").append(total);
+        StringBuilder body = new StringBuilder();
+        if (view.segmentCount() > 1) {
+            for (int index = 0; index < view.segmentCount(); index++) {
+                String text = view.segmentTexts().get(index);
+                if (text == null || text.trim().isEmpty()) {
+                    continue;
+                }
+                body.append("[r] ").append(text).append(" = ")
+                        .append(view.segmentValues().get(index)).append('\n');
+            }
+            body.append("[r] ").append(view.expression()).append(" = ").append(view.total());
+            return body.toString();
+        }
+        body.append('/').append(view.commandPrefix()).append(' ').append(view.expression())
+                .append(" = ").append(view.total());
         return body.toString();
     }
 

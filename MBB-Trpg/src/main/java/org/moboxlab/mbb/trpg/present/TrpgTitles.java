@@ -43,6 +43,10 @@ public final class TrpgTitles {
     public static final String SCRIPT_LIBRARY = "剧本库";
     public static final String RECOVER = "恢复";
     public static final String HOST = "主持";
+    /** 查询回复（S7 新增，已同步规格标题表）。 */
+    public static final String STATUS = "局面";
+    public static final String HELP = "帮助";
+    public static final String LOG = "日志";
 
     /** 词表全集（顺序与规格表一致）。 */
     public static final List<String> ALL = Collections.unmodifiableList(Arrays.asList(
@@ -51,7 +55,8 @@ public final class TrpgTitles {
             CHECK, OPPOSED, SAN, GROWTH, ADJUST,
             CLUE, TRIGGER, AI_NARRATION,
             END, END_CONFIRM, REPORT,
-            NOTICE, ERROR, CARD, KP_HINT, SCRIPT_LIBRARY, RECOVER, HOST));
+            NOTICE, ERROR, CARD, KP_HINT, SCRIPT_LIBRARY, RECOVER, HOST,
+            STATUS, HELP, LOG));
 
     private TrpgTitles() {
     }

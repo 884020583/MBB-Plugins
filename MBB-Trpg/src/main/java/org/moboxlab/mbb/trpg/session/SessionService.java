@@ -64,6 +64,8 @@ public final class SessionService {
     private final SessionArchiver archiver;
     private final SessionRecoveryService recovery;
     private final SessionReader reader;
+    /** 角色卡指令（pc / pc reroll / pc set）。 */
+    private final SessionCardService cardService;
 
     /** 启动后尚未确认恢复的局（内存事实，不落库）；只包含进行中的局。 */
     private final Set<Long> pendingRecovery = ConcurrentHashMap.newKeySet();
@@ -76,10 +78,15 @@ public final class SessionService {
                 new GroupLockRegistry(clock), new CooldownRegistry(), new ErrorDedupe());
     }
 
-    /** 测试可注入锁、冷却与去重登记。 */
-    SessionService(SessionStore store, ScriptCatalog catalog, Clock clock, RandomSource random,
-                   TrpgConfig config, SessionEventPublisher publisher, PluginLogger logger,
-                   GroupLockRegistry locks, CooldownRegistry cooldowns, ErrorDedupe dedupe) {
+    /**
+     * 生产装配：与其它指令服务共用同一份群锁、冷却与去重登记。
+     *
+     * <p>共用是为了让「同群同类错误 10 秒只回一次」（规范 §3.2）与各指令的冷却窗口
+     * 跨 /trpg 与 /r 一起生效；测试可注入假登记。</p>
+     */
+    public SessionService(SessionStore store, ScriptCatalog catalog, Clock clock, RandomSource random,
+                          TrpgConfig config, SessionEventPublisher publisher, PluginLogger logger,
+                          GroupLockRegistry locks, CooldownRegistry cooldowns, ErrorDedupe dedupe) {
         if (store == null) {
             throw new IllegalArgumentException("存储端口不能为空");
         }
@@ -113,10 +120,11 @@ public final class SessionService {
                 pendingRecovery);
         this.reader = new SessionReader(store, archiver, locks, clock, config, publisher, logger,
                 this::isRecovered);
+        this.cardService = new SessionCardService(this, store, cooldowns, config);
     }
 
     /** 请求者不能为空：与构造函数一样用 IllegalArgumentException 表达契约违例。 */
-    private static SessionActor requireActor(SessionActor actor) {
+    static SessionActor requireActor(SessionActor actor) {
         if (actor == null) {
             throw new IllegalArgumentException("请求者不能为空");
         }
@@ -140,6 +148,7 @@ public final class SessionService {
                 if (cooling != null) {
                     return cooling;
                 }
+                cooldowns.mark(ACTION_STATUS, actor.userId(), turn.groupId, turn.now);
                 return SessionResult.ok(turn.snapshot(row), "");
             }
         });
@@ -406,6 +415,8 @@ public final class SessionService {
                 Long first = confirmations.get(key);
                 if (first == null || turn.now - first.longValue() > window) {
                     confirmations.put(key, Long.valueOf(turn.now));
+                    // 首次确认也计一次冷却，避免 1 秒内连发两次 end 直接生效（矩阵 end 1s）。
+                    cooldowns.mark(ACTION_END, actor.userId(), turn.groupId, turn.now);
                     return SessionResult.awaitingConfirmation(turn.snapshot(row),
                             "结束本局需要确认：请在 " + config.confirmWindowSeconds() + " 秒内再次执行");
                 }
@@ -533,6 +544,55 @@ public final class SessionService {
         });
     }
 
+    /**
+     * 角色卡指令的前置放行判定：只判群内、局面存在、请求者在本局、非 KP。
+     *
+     * <p>供指令层在回报「参数不对」之前调用，保证 §5.5 的判定顺序（状态与权限先于参数）；
+     * 放行时不执行动作，因此不写冷却。</p>
+     */
+    public SessionResult cardGate(SessionActor actor) {
+        return cardGate(actor, false);
+    }
+
+    /**
+     * 角色卡动作的前置放行判定：在 {@link #cardGate(SessionActor)} 之上再拒掉 KP。
+     *
+     * <p>pc reroll / pc set 对 KP 属于成员状态不满足，必须排在参数错误之前（§5.5）。</p>
+     */
+    public SessionResult cardActionGate(SessionActor actor) {
+        return cardGate(actor, true);
+    }
+
+    private SessionResult cardGate(SessionActor actor, boolean rejectKp) {
+        if (!requireActor(actor).inGroup()) {
+            return SessionResult.rejected(SessionReject.NOT_IN_GROUP, "请在群内使用");
+        }
+        return cardService.gate(actor, rejectKp);
+    }
+
+    /** 查看角色卡（§6.2）：本局成员可看自己（含离场），KP 可看任意成员。 */
+    public SessionResult viewCard(SessionActor actor, long targetUserId) {
+        return cardService.viewCard(actor, targetUserId);
+    }
+
+    /**
+     * 重掷角色卡（§6.1 pc reroll）：仅招募期、玩家本人；新卡由指令层生成后传入。
+     *
+     * <p>按 §7.5，重掷把 SAN 重置为 POW 属于生成侧职责，本方法只整卡替换并落库。</p>
+     */
+    public SessionResult rerollCard(SessionActor actor, CardData card) {
+        return cardService.rerollCard(actor, card);
+    }
+
+    /**
+     * 微调角色卡（§6.1 pc set）：仅招募期、玩家本人；只接受八属性、每项 15–90 的整数。
+     *
+     * <p>改 POW 不联动 SAN；SAN / HP / MP 与技能、物品都不在这里改（§7.5）。</p>
+     */
+    public SessionResult setAttribute(SessionActor actor, String field, String rawValue) {
+        return cardService.setAttribute(actor, field, rawValue);
+    }
+
     /** 读取本群当前局面；无活跃局返回空快照（读状态会先惰性归档过期局）。 */
     public SessionSnapshot readSnapshot(long groupId) {
         return reader.readSnapshot(groupId);
@@ -553,8 +613,8 @@ public final class SessionService {
         return recovery.settlePending();
     }
 
-    /** 执行一段需要群锁的动作。 */    /** 执行一段需要群锁的动作。 */
-    private SessionResult withGroupLock(SessionActor actor, String action, LockedAction body) {
+    /** 执行一段需要群锁的动作。 */
+    SessionResult withGroupLock(SessionActor actor, String action, LockedAction body) {
         long groupId = actor.groupId();
         long now = clock.nowMillis();
         if (!locks.tryLock(groupId)) {
@@ -591,17 +651,17 @@ public final class SessionService {
         return SessionResult.ended(archived.snapshot(), archived.endReason(), archived.growth());
     }
 
-    private SessionResult cooling(String action, Turn turn, int cooldownSeconds) {
+    SessionResult cooling(String action, Turn turn, int cooldownSeconds) {
         long remaining = cooldowns.remainingMillis(action, turn.actor.userId(), turn.groupId,
                 turn.now, cooldownSeconds * (long) MILLIS_PER_SECOND);
         if (remaining <= 0L) {
             return null;
         }
         long seconds = (remaining + MILLIS_PER_SECOND - 1) / MILLIS_PER_SECOND;
-        return reject(turn, SessionReject.COOLING, "冷却中，请 " + seconds + " 秒后再试");
+        return reject(turn, SessionReject.COOLING, "还有 " + seconds + " 秒冷却");
     }
 
-    private SessionResult reject(Turn turn, SessionReject reject, String detail) {
+    SessionResult reject(Turn turn, SessionReject reject, String detail) {
         return rejectRaw(turn.groupId, reject, detail, turn.now);
     }
 
@@ -704,27 +764,27 @@ public final class SessionService {
     }
 
     /** 群锁内执行的动作。 */
-    private interface LockedAction {
+    interface LockedAction {
 
         SessionResult run(Turn turn);
     }
 
     /** 一次请求的群锁上下文：持有当次时间、请求者与待发布事件。 */
-    private final class Turn {
+    final class Turn {
 
-        private final SessionActor actor;
-        private final long now;
-        private final long groupId;
-        private final List<SessionEvent> events = new ArrayList<SessionEvent>();
+        final SessionActor actor;
+        final long now;
+        final long groupId;
+        final List<SessionEvent> events = new ArrayList<SessionEvent>();
 
-        private Turn(SessionActor actor, long now) {
+        Turn(SessionActor actor, long now) {
             this.actor = actor;
             this.now = now;
             this.groupId = actor.groupId();
         }
 
         /** 读本群活跃局；已过期则先惰性归档，返回归档后的活跃局（无则 null）。 */
-        private SessionRow active() {
+        SessionRow active() {
             SessionRow row = store.findActiveByGroup(groupId);
             int rounds = 0;
             while (row != null && archiver.isExpired(row, now, config)) {
@@ -746,7 +806,7 @@ public final class SessionService {
         }
 
         /** 写后回读：重读本局行再构造快照，避免拿陈旧行对外。 */
-        private SessionSnapshot reload(SessionRow row) {
+        SessionSnapshot reload(SessionRow row) {
             if (row == null) {
                 return SessionSnapshots.none(groupId);
             }
@@ -755,11 +815,11 @@ public final class SessionService {
         }
 
         /** 读取本局成员行（不存在返回 null）。 */
-        private MemberRow member(SessionRow row, long userId) {
+        MemberRow member(SessionRow row, long userId) {
             return findMember(store.loadMembers(row.id()), userId);
         }
 
-        private SessionSnapshot snapshot(SessionRow row) {
+        SessionSnapshot snapshot(SessionRow row) {
             if (row == null) {
                 return SessionSnapshots.none(groupId);
             }

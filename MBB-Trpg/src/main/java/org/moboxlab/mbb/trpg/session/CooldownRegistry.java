@@ -1,7 +1,7 @@
 package org.moboxlab.mbb.trpg.session;
 
-import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * 插件内冷却登记（规格 §5.6）。
@@ -11,7 +11,7 @@ import java.util.Map;
  */
 public final class CooldownRegistry {
 
-    private final Map<String, Long> lastUse = new HashMap<String, Long>();
+    private final Map<String, Long> lastUse = new ConcurrentHashMap<String, Long>();
 
     /** 剩余冷却毫秒数；0 表示可以执行。 */
     public long remainingMillis(String action, long userId, long groupId, long now,
