@@ -5,6 +5,11 @@ import org.moboxlab.moboxbot.API.PluginManager;
 import org.moboxlab.moboxbot.API.Storage.StorageService;
 import org.moboxlab.mbb.trpg.ai.TraceStore;
 import org.moboxlab.mbb.trpg.config.TrpgConfig;
+import org.moboxlab.mbb.trpg.rule.D100RuleSet;
+import org.moboxlab.mbb.trpg.rule.DefaultRandomSource;
+import org.moboxlab.mbb.trpg.rule.RandomSource;
+import org.moboxlab.mbb.trpg.rule.RuleRegistry;
+import org.moboxlab.mbb.trpg.rule.RuleSet;
 import org.moboxlab.mbb.trpg.session.Clock;
 import org.moboxlab.mbb.trpg.session.PluginManagerScheduler;
 import org.moboxlab.mbb.trpg.session.ScheduledTask;
@@ -18,9 +23,9 @@ import org.moboxlab.mbb.trpg.store.TrpgSchemaService;
 /**
  * MBB-Trpg 插件主类。
  *
- * <p>当前职责：加载配置、建表并保持幂等，装配存储实现、审计端口、拉黑名单与归档清理，
- * 并排入每小时清理任务；规则引擎、会话状态机、呈现与指令层由后续切片装配到
- * {@link #onEnable()} 末尾的装配位。</p>
+ * <p>当前职责：加载配置、注册内置规则集并选定生效规则集、建表并保持幂等，装配存储实现、
+ * 审计端口、拉黑名单与归档清理，并排入每小时清理任务；会话状态机、呈现与指令层由后续切片
+ * 装配到 {@link #onEnable()} 末尾的装配位。</p>
  */
 public class TrpgPlugin extends Plugin {
 
@@ -28,6 +33,8 @@ public class TrpgPlugin extends Plugin {
     private boolean trpgEnabled;
     private String disabledReason = "";
 
+    private RuleSet ruleSet;
+    private RandomSource randomSource;
     private SessionStore sessionStore;
     private TraceStore traceStore;
     private BlacklistService blacklistService;
@@ -50,6 +57,9 @@ public class TrpgPlugin extends Plugin {
         if (trpgConfig == null) {
             trpgConfig = TrpgConfig.load(getConfig());
         }
+        // 规则集是编译期 SPI：先注册内置实现，再按配置里的 id 取用。
+        // 注册与取用不依赖数据库，因此放在建表之前，建表失败时规则集依然可用。
+        registerBuiltinRuleSets();
         if (getServer() == null) {
             trpgEnabled = false;
             disabledReason = "服务器未就绪";
@@ -77,6 +87,23 @@ public class TrpgPlugin extends Plugin {
         assembleServices(storage);
         // 后续切片装配位：SessionService、RuleEngine、呈现服务、指令与监听器。
         getLogger().sendInfo("[MBB-Trpg] 已启用，版本 " + getVersion() + "，数据表已就绪");
+    }
+
+    private void registerBuiltinRuleSets() {
+        RuleRegistry.register(new D100RuleSet());
+        randomSource = DefaultRandomSource.INSTANCE;
+        ruleSet = RuleRegistry.getOrDefault(trpgConfig.ruleSetId());
+        if (ruleSet == null) {
+            getLogger().sendError("[MBB-Trpg] 规则集 " + trpgConfig.ruleSetId()
+                    + " 未注册且内置 d100 缺失，检定不可用");
+        } else if (ruleSet.id().equals(trpgConfig.ruleSetId())) {
+            getLogger().sendInfo("[MBB-Trpg] 规则集 " + ruleSet.id() + "（" + ruleSet.displayName()
+                    + "）已就绪");
+        }
+        // 回退告警由 RuleRegistry 统一记录，这里只负责打成插件日志，避免同一件事报两遍。
+        for (String warning : RuleRegistry.warnings()) {
+            getLogger().sendWarn("[MBB-Trpg] " + warning);
+        }
     }
 
     private void assembleServices(StorageService storage) {
@@ -123,6 +150,8 @@ public class TrpgPlugin extends Plugin {
             retentionTask.cancel();
             retentionTask = null;
         }
+        ruleSet = null;
+        randomSource = null;
         sessionStore = null;
         traceStore = null;
         blacklistService = null;
@@ -143,6 +172,16 @@ public class TrpgPlugin extends Plugin {
     /** TRPG 被禁用的原因；可用时为空串。 */
     public String disabledReason() {
         return disabledReason;
+    }
+
+    /** 当前生效的规则集；注册完成后即有值，插件停用后为 null。 */
+    public RuleSet ruleSet() {
+        return ruleSet;
+    }
+
+    /** 生产随机源；注册完成后即有值，插件停用后为 null。 */
+    public RandomSource randomSource() {
+        return randomSource;
     }
 
     /** 会话存储；未启用时为 null。 */
