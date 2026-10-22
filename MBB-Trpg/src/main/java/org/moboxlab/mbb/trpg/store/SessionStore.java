@@ -90,8 +90,13 @@ public interface SessionStore {
     /** 是否在黑名单。 */
     boolean isBlacklisted(long groupId, long userId);
 
-    /** 列出结束时间早于给定时点、可清理的局主键。 */
-    List<Long> listExpiredSessionIds(long endedBefore, int limit);
+    /**
+     * 列出结束时间早于给定时点、可清理的局主键。
+     *
+     * <p>只选 {@code state='ENDED' AND growthSettled=1 AND endedAt < endedBefore}，按 id 升序；
+     * 不做 LIMIT（规格 §7.7 冻结 SQL）。</p>
+     */
+    List<Long> listExpiredSessionIds(long endedBefore);
 
     /** 删除一局日志。 */
     int deleteLogs(long sessionId);

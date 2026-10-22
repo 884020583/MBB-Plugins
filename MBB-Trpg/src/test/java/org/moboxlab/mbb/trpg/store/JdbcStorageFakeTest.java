@@ -4,9 +4,9 @@ import com.alibaba.fastjson.JSONObject;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.moboxlab.mbb.trpg.testutil.TempDirs;
 
 import java.io.File;
-import java.nio.file.Files;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -23,7 +23,7 @@ public class JdbcStorageFakeTest {
 
     @Before
     public void setUp() throws Exception {
-        dir = Files.createTempDirectory("mbb-trpg-fake").toFile();
+        dir = TempDirs.create("mbb-trpg-fake");
         storage = new JdbcStorageFake(new File(dir, "fake.db"));
         storage.update("CREATE TABLE plugin_mbb_trpg_probe (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT NOT NULL)");
     }
@@ -33,7 +33,7 @@ public class JdbcStorageFakeTest {
         if (storage != null) {
             storage.close();
         }
-        deleteRecursively(dir);
+        TempDirs.deleteRecursively(dir);
     }
 
     /** update 的 -1 与 0 必须可区分：-1 表示语句未执行，0 表示无匹配行。 */
@@ -107,18 +107,4 @@ public class JdbcStorageFakeTest {
         }
     }
 
-    private void deleteRecursively(File file) {
-        if (file == null || !file.exists()) {
-            return;
-        }
-        File[] children = file.listFiles();
-        if (children != null) {
-            for (File child : children) {
-                deleteRecursively(child);
-            }
-        }
-        if (!file.delete()) {
-            file.deleteOnExit();
-        }
-    }
 }

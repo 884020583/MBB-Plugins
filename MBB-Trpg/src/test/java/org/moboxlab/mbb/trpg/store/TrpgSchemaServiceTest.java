@@ -4,9 +4,9 @@ import com.alibaba.fastjson.JSONObject;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.moboxlab.mbb.trpg.testutil.TempDirs;
 
 import java.io.File;
-import java.nio.file.Files;
 import java.util.List;
 import java.util.Map;
 
@@ -29,7 +29,7 @@ public class TrpgSchemaServiceTest {
 
     @Before
     public void setUp() throws Exception {
-        dir = Files.createTempDirectory("mbb-trpg-schema").toFile();
+        dir = TempDirs.create("mbb-trpg-schema");
         storage = new JdbcStorageFake(new File(dir, "trpg.db"));
         service = new TrpgSchemaService(storage, null);
     }
@@ -39,7 +39,7 @@ public class TrpgSchemaServiceTest {
         if (storage != null) {
             storage.close();
         }
-        deleteRecursively(dir);
+        TempDirs.deleteRecursively(dir);
     }
 
     /** F1：连续两次 ensureSchema 结果一致，五表八索引都在，且无报错。 */
@@ -230,18 +230,4 @@ public class TrpgSchemaServiceTest {
         return false;
     }
 
-    private void deleteRecursively(File file) {
-        if (file == null || !file.exists()) {
-            return;
-        }
-        File[] children = file.listFiles();
-        if (children != null) {
-            for (File child : children) {
-                deleteRecursively(child);
-            }
-        }
-        if (!file.delete()) {
-            file.deleteOnExit();
-        }
-    }
 }

@@ -1,6 +1,7 @@
 package org.moboxlab.mbb.trpg.store;
 
 import org.moboxlab.moboxbot.API.PluginLogger;
+import org.moboxlab.mbb.trpg.session.Clock;
 import org.moboxlab.mbb.trpg.session.ScheduledTask;
 import org.moboxlab.mbb.trpg.session.Scheduler;
 
@@ -11,9 +12,9 @@ import java.util.List;
  * 归档清理服务：删除过期已结算局与过期 AI 审计行。
  *
  * <p>清理顺序固定为 text_log → member → session，避免出现子表孤儿。子表 DELETE 返回
- * 0 视为"本局没有可删的行"（上一轮已删或本来就没有），继续往下走；只有返回 -1 才
- * 中止本局、不删父行，留待下一轮重试。父行 DELETE 返回 0 视为状态已变或已被删除，
- * 计入跳过。</p>
+ * -1（语句未执行、状态未知）或删除 0 行但按库里内容预期应有行时，都中止本局、不删父行，
+ * 留待下一轮重试；库里本来就没有该子表的行（例如一局从未写过日志，或上一轮已删过日志）
+ * 时，0 行属于正常结果，继续往下走。父行 DELETE 返回 0 视为状态已变或已被删除，计入跳过。</p>
  *
  * <p>未结算（growthSettled = 0）的 ENDED 局永不清理；黑名单不随局清理。</p>
  */
@@ -25,8 +26,6 @@ public final class TrpgRetentionService {
     public static final int DEFAULT_TRACE_KEEP_HOURS = 168;
     /** 审计默认保留行数。 */
     public static final int DEFAULT_TRACE_KEEP_ROWS = 5000;
-    /** 单轮最多处理的局数，避免一次清理占用过久。 */
-    public static final int MAX_CANDIDATES_PER_RUN = 200;
     /** 每小时执行一次。 */
     public static final long HOURLY_PERIOD_MILLIS = 60L * 60L * 1000L;
 
@@ -35,21 +34,27 @@ public final class TrpgRetentionService {
 
     private final SessionStore store;
     private final PluginLogger logger;
+    private final Clock clock;
     private final long sessionRetentionMillis;
     private final long traceRetentionMillis;
     private final int traceKeepRows;
 
-    public TrpgRetentionService(SessionStore store, PluginLogger logger) {
-        this(store, logger, DEFAULT_SESSION_DAYS, DEFAULT_TRACE_KEEP_HOURS, DEFAULT_TRACE_KEEP_ROWS);
+    public TrpgRetentionService(SessionStore store, PluginLogger logger, Clock clock) {
+        this(store, logger, clock, DEFAULT_SESSION_DAYS, DEFAULT_TRACE_KEEP_HOURS,
+                DEFAULT_TRACE_KEEP_ROWS);
     }
 
-    public TrpgRetentionService(SessionStore store, PluginLogger logger, int sessionDays,
+    public TrpgRetentionService(SessionStore store, PluginLogger logger, Clock clock, int sessionDays,
                                 int traceKeepHours, int traceMaxRows) {
         if (store == null) {
             throw new IllegalArgumentException("存储不能为空");
         }
+        if (clock == null) {
+            throw new IllegalArgumentException("时间端口不能为空");
+        }
         this.store = store;
         this.logger = logger;
+        this.clock = clock;
         this.sessionRetentionMillis = Math.max(1, sessionDays) * DAY_MILLIS;
         this.traceRetentionMillis = Math.max(1, traceKeepHours) * HOUR_MILLIS;
         this.traceKeepRows = Math.max(1, traceMaxRows);
@@ -63,28 +68,27 @@ public final class TrpgRetentionService {
         return scheduler.runTimer(new Runnable() {
             @Override
             public void run() {
-                runOnce(System.currentTimeMillis());
+                runOnce(clock.nowMillis());
             }
         }, HOURLY_PERIOD_MILLIS, HOURLY_PERIOD_MILLIS);
     }
 
     /** 执行一轮清理；不抛异常，结果通过 {@link Result} 返回。 */
     public Result runOnce(long now) {
-        int candidates = 0;
+        List<Long> expired;
+        try {
+            expired = store.listExpiredSessionIds(now - sessionRetentionMillis);
+        } catch (RuntimeException e) {
+            warn("查询过期局失败：" + e.getMessage());
+            expired = Collections.emptyList();
+        }
+        if (expired == null) {
+            expired = Collections.emptyList();
+        }
+
         int purged = 0;
         int aborted = 0;
         int skipped = 0;
-
-        List<Long> expired = Collections.emptyList();
-        try {
-            expired = store.listExpiredSessionIds(now - sessionRetentionMillis, MAX_CANDIDATES_PER_RUN);
-            if (expired == null) {
-                expired = Collections.emptyList();
-            }
-        } catch (RuntimeException e) {
-            warn("查询过期局失败：" + e.getMessage());
-        }
-        candidates = expired.size();
         for (Long id : expired) {
             if (id == null) {
                 continue;
@@ -99,9 +103,8 @@ public final class TrpgRetentionService {
             }
         }
 
-        int traceExpired = 0;
-        int traceTrimmed = 0;
         boolean traceFailed = false;
+        int traceExpired = 0;
         try {
             traceExpired = store.deleteAiTraceBefore(now - traceRetentionMillis);
             if (traceExpired < 0) {
@@ -112,6 +115,7 @@ public final class TrpgRetentionService {
             traceFailed = true;
             warn("清理过期审计失败：" + e.getMessage());
         }
+        int traceTrimmed = 0;
         try {
             traceTrimmed = store.deleteAiTraceOverflow(traceKeepRows);
             if (traceTrimmed < 0) {
@@ -123,12 +127,7 @@ public final class TrpgRetentionService {
             warn("截断超量审计失败：" + e.getMessage());
         }
 
-        if (traceExpired < 0) {
-            traceExpired = -1;
-        }
-        if (traceTrimmed < 0) {
-            traceTrimmed = -1;
-        }
+        int candidates = expired.size();
         if (purged > 0 || traceExpired > 0 || traceTrimmed > 0) {
             info("清理完成：候选局 " + candidates + "，已清理 " + purged + "，跳过 " + skipped
                     + "，中止 " + aborted + "；过期审计 " + traceExpired + " 行，超量审计 "
@@ -144,16 +143,29 @@ public final class TrpgRetentionService {
     /** 返回 1 已清理、0 跳过、-1 中止。 */
     private int purgeSession(long sessionId) {
         try {
+            long lastSeq = store.maxLogSeq(sessionId);
             int logs = store.deleteLogs(sessionId);
             if (logs < 0) {
                 warn("删除局 " + sessionId + " 的日志失败，本轮中止该局，下一轮重试");
                 return -1;
             }
-            int members = store.deleteMembers(sessionId);
-            if (members < 0) {
+            if (logs == 0 && lastSeq > 0L) {
+                warn("局 " + sessionId + " 预期有日志却删除 0 行，本轮中止该局，下一轮重试");
+                return -1;
+            }
+
+            List<MemberRow> members = store.loadMembers(sessionId);
+            boolean membersExpected = members != null && !members.isEmpty();
+            int memberRows = store.deleteMembers(sessionId);
+            if (memberRows < 0) {
                 warn("删除局 " + sessionId + " 的成员失败，本轮中止该局，下一轮重试");
                 return -1;
             }
+            if (memberRows == 0 && membersExpected) {
+                warn("局 " + sessionId + " 预期有成员却删除 0 行，本轮中止该局，下一轮重试");
+                return -1;
+            }
+
             int session = store.deleteSession(sessionId);
             if (session < 0) {
                 warn("删除局 " + sessionId + " 的主行失败，下一轮重试");

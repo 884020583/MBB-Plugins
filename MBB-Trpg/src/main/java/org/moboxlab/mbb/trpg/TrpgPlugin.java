@@ -5,6 +5,7 @@ import org.moboxlab.moboxbot.API.PluginManager;
 import org.moboxlab.moboxbot.API.Storage.StorageService;
 import org.moboxlab.mbb.trpg.ai.TraceStore;
 import org.moboxlab.mbb.trpg.config.TrpgConfig;
+import org.moboxlab.mbb.trpg.session.Clock;
 import org.moboxlab.mbb.trpg.session.PluginManagerScheduler;
 import org.moboxlab.mbb.trpg.session.ScheduledTask;
 import org.moboxlab.mbb.trpg.store.BlacklistService;
@@ -80,16 +81,23 @@ public class TrpgPlugin extends Plugin {
 
     private void assembleServices(StorageService storage) {
         SqlSessionStore store = new SqlSessionStore(storage, getLogger());
+        Clock clock = new Clock() {
+            @Override
+            public long nowMillis() {
+                return System.currentTimeMillis();
+            }
+        };
         sessionStore = store;
         traceStore = new SqlTraceStore(store);
         blacklistService = new BlacklistService(store);
-        retentionService = new TrpgRetentionService(store, getLogger(),
+        retentionService = new TrpgRetentionService(store, getLogger(), clock,
                 trpgConfig.retentionSessionDays(), trpgConfig.aiTraceKeepHours(),
                 trpgConfig.aiTraceMaxRows());
 
-        // 启动先清一轮，再交给定时任务按小时执行
+        // 启动顺序按规格 §6.5：建表 → 成长与摘要补做 → 清理。补做属于后续切片，
+        // 落地后要插在下面这一行之前，保证先结算再清理。
         try {
-            TrpgRetentionService.Result result = retentionService.runOnce(System.currentTimeMillis());
+            TrpgRetentionService.Result result = retentionService.runOnce(clock.nowMillis());
             getLogger().sendInfo("[MBB-Trpg] 启动清理完成：" + result);
         } catch (RuntimeException e) {
             getLogger().sendWarn("[MBB-Trpg] 启动清理异常，已跳过：" + e.getMessage());

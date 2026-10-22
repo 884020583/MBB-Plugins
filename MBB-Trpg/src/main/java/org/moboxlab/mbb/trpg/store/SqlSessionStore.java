@@ -43,7 +43,7 @@ public final class SqlSessionStore implements SessionStore {
             + " WHERE state = 'ENDED' AND growthSettled = 0 ORDER BY id ASC";
     private static final String SQL_LIST_EXPIRED = "SELECT id FROM "
             + TrpgSchemaService.TABLE_SESSION
-            + " WHERE state = 'ENDED' AND growthSettled = 1 AND endedAt < ? ORDER BY id ASC LIMIT ?";
+            + " WHERE state = 'ENDED' AND growthSettled = 1 AND endedAt < ? ORDER BY id ASC";
 
     private static final String SQL_INSERT_SESSION = "INSERT INTO "
             + TrpgSchemaService.TABLE_SESSION
@@ -344,14 +344,14 @@ public final class SqlSessionStore implements SessionStore {
 
     @Override
     public List<BlacklistRow> listBlacklist(long groupId) {
-        List<BlacklistRow> rows = new ArrayList<BlacklistRow>();
+        List<BlacklistRow> entries = new ArrayList<BlacklistRow>();
         for (JSONObject row : rows(storage.query(SQL_LIST_BLACKLIST, groupId))) {
             Long id = row.getLong("id");
-            rows.add(new BlacklistRow(id == null ? 0L : id.longValue(), longOf(row, "groupID"),
+            entries.add(new BlacklistRow(id == null ? 0L : id.longValue(), longOf(row, "groupID"),
                     longOf(row, "userID"), longOf(row, "operatorID"), stringOf(row, "reason"),
                     longOf(row, "createTime")));
         }
-        return rows;
+        return entries;
     }
 
     @Override
@@ -360,12 +360,9 @@ public final class SqlSessionStore implements SessionStore {
     }
 
     @Override
-    public List<Long> listExpiredSessionIds(long endedBefore, int limit) {
+    public List<Long> listExpiredSessionIds(long endedBefore) {
         List<Long> ids = new ArrayList<Long>();
-        if (limit <= 0) {
-            return ids;
-        }
-        for (JSONObject row : rows(storage.query(SQL_LIST_EXPIRED, endedBefore, limit))) {
+        for (JSONObject row : rows(storage.query(SQL_LIST_EXPIRED, endedBefore))) {
             Long id = row.getLong("id");
             if (id != null) {
                 ids.add(id);

@@ -3,10 +3,9 @@ package org.moboxlab.mbb.trpg.store;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.moboxlab.mbb.trpg.testutil.TempDirs;
 
 import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -22,8 +21,8 @@ public class BlacklistServiceTest {
     private BlacklistService service;
 
     @Before
-    public void setUp() throws IOException {
-        tempDir = Files.createTempDirectory("mbb-trpg-blacklist").toFile();
+    public void setUp() {
+        tempDir = TempDirs.create("mbb-trpg-blacklist");
         storage = new JdbcStorageFake(new File(tempDir, "trpg.db"));
         new TrpgSchemaService(storage, null).ensureSchema();
         store = new SqlSessionStore(storage, null);
@@ -33,7 +32,7 @@ public class BlacklistServiceTest {
     @After
     public void tearDown() {
         storage.close();
-        deleteRecursively(tempDir);
+        TempDirs.deleteRecursively(tempDir);
     }
 
     @Test
@@ -80,16 +79,4 @@ public class BlacklistServiceTest {
         assertTrue(service.list(9L).isEmpty());
     }
 
-    private static void deleteRecursively(File file) {
-        if (file == null || !file.exists()) {
-            return;
-        }
-        File[] children = file.listFiles();
-        if (children != null) {
-            for (File child : children) {
-                deleteRecursively(child);
-            }
-        }
-        file.delete();
-    }
 }

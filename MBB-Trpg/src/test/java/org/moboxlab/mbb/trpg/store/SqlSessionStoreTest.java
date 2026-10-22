@@ -4,10 +4,9 @@ import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
 import org.moboxlab.mbb.trpg.session.SessionState;
+import org.moboxlab.mbb.trpg.testutil.TempDirs;
 
 import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
@@ -32,8 +31,8 @@ public class SqlSessionStoreTest {
     private SqlSessionStore store;
 
     @Before
-    public void setUp() throws IOException {
-        tempDir = Files.createTempDirectory("mbb-trpg-store").toFile();
+    public void setUp() {
+        tempDir = TempDirs.create("mbb-trpg-store");
         dbFile = new File(tempDir, "trpg.db");
         storage = new JdbcStorageFake(dbFile);
         new TrpgSchemaService(storage, null).ensureSchema();
@@ -43,7 +42,7 @@ public class SqlSessionStoreTest {
     @After
     public void tearDown() {
         storage.close();
-        deleteRecursively(tempDir);
+        TempDirs.deleteRecursively(tempDir);
     }
 
     @Test
@@ -160,6 +159,9 @@ public class SqlSessionStoreTest {
         long endedUnsettled = store.insertSession(fullSession(4L, SessionState.RUNNING));
         store.casTransition(endedUnsettled, SessionState.RUNNING, SessionState.ENDED, 0L, 6000L,
                 "结束", false, "", 6000L);
+        long endedSettledLater = store.insertSession(fullSession(5L, SessionState.RUNNING));
+        store.casTransition(endedSettledLater, SessionState.RUNNING, SessionState.ENDED, 0L, 6500L,
+                "结束", true, "", 6500L);
 
         List<SessionRow> active = store.loadActiveSessions();
         assertEquals(2, active.size());
@@ -170,12 +172,14 @@ public class SqlSessionStoreTest {
         assertEquals("只有未结算的 ENDED 局需要补结算", 1, unsettled.size());
         assertEquals(endedUnsettled, unsettled.get(0).id());
 
-        List<Long> expired = store.listExpiredSessionIds(7000L, 10);
-        assertEquals(1, expired.size());
+        List<Long> expired = store.listExpiredSessionIds(7000L);
+        assertEquals(2, expired.size());
         assertEquals(endedSettled, expired.get(0).longValue());
+        assertEquals("按 id 升序", endedSettledLater, expired.get(1).longValue());
         assertTrue("未结算局永远不进入清理候选",
-                store.listExpiredSessionIds(7000L, 10).indexOf(endedUnsettled) < 0);
-        assertEquals("limit 应生效", 0, store.listExpiredSessionIds(7000L, 0).size());
+                store.listExpiredSessionIds(7000L).indexOf(endedUnsettled) < 0);
+        assertEquals("冻结 SQL 不带 LIMIT：候选统一返回全部",
+                2, store.listExpiredSessionIds(Long.MAX_VALUE).size());
     }
 
     @Test
@@ -385,16 +389,4 @@ public class SqlSessionStoreTest {
                 "stop", "{}", false, preview, createTime);
     }
 
-    private static void deleteRecursively(File file) {
-        if (file == null || !file.exists()) {
-            return;
-        }
-        File[] children = file.listFiles();
-        if (children != null) {
-            for (File child : children) {
-                deleteRecursively(child);
-            }
-        }
-        file.delete();
-    }
 }

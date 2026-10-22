@@ -37,7 +37,13 @@ public final class BlacklistService {
         return store.isBlacklisted(groupId, userId);
     }
 
-    /** 解除拉黑；返回 false 表示删除失败。 */
+    /**
+     * 解除拉黑。
+     *
+     * @return true 只在确实删掉一行时为真；false 表示没有删到行——成员本就不在名单（幂等），
+     *         或主程序语句未执行（-1）。两者对调用方都是「该成员已不在名单」的同一结果，
+     *         需要区分时再读一次 {@link #contains}
+     */
     public boolean remove(long groupId, long userId) {
         return store.deleteBlacklist(groupId, userId) > 0;
     }

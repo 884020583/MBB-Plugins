@@ -5,11 +5,11 @@ import org.junit.Before;
 import org.junit.Test;
 import org.moboxlab.mbb.trpg.session.ScheduledTask;
 import org.moboxlab.mbb.trpg.session.SessionState;
+import org.moboxlab.mbb.trpg.testutil.FakeClock;
 import org.moboxlab.mbb.trpg.testutil.FakeScheduler;
+import org.moboxlab.mbb.trpg.testutil.TempDirs;
 
 import java.io.File;
-import java.io.IOException;
-import java.nio.file.Files;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -34,20 +34,22 @@ public class TrpgRetentionServiceTest {
     private JdbcStorageFake storage;
     private SqlSessionStore store;
     private TrpgRetentionService service;
+    private FakeClock clock;
 
     @Before
-    public void setUp() throws IOException {
-        tempDir = Files.createTempDirectory("mbb-trpg-retention").toFile();
+    public void setUp() {
+        tempDir = TempDirs.create("mbb-trpg-retention");
         storage = new JdbcStorageFake(new File(tempDir, "trpg.db"));
         new TrpgSchemaService(storage, null).ensureSchema();
         store = new SqlSessionStore(storage, null);
-        service = new TrpgRetentionService(store, null);
+        clock = new FakeClock(NOW);
+        service = new TrpgRetentionService(store, null, clock);
     }
 
     @After
     public void tearDown() {
         storage.close();
-        deleteRecursively(tempDir);
+        TempDirs.deleteRecursively(tempDir);
     }
 
     @Test
@@ -120,7 +122,7 @@ public class TrpgRetentionServiceTest {
             }
         };
 
-        TrpgRetentionService.Result result = new TrpgRetentionService(toggling, null).runOnce(NOW);
+        TrpgRetentionService.Result result = new TrpgRetentionService(toggling, null, clock).runOnce(NOW);
 
         assertEquals(1, result.skipped());
         assertEquals(0, result.purged());
@@ -130,7 +132,7 @@ public class TrpgRetentionServiceTest {
 
     @Test
     public void traceKeepsByTimeFirstThenByRowCount() {
-        TrpgRetentionService custom = new TrpgRetentionService(store, null, 30, 168, 5);
+        TrpgRetentionService custom = new TrpgRetentionService(store, null, clock, 30, 168, 5);
         for (int i = 0; i < 2; i++) {
             store.appendAiTrace(trace(1L, NOW - 169L * HOUR));
         }
@@ -147,7 +149,7 @@ public class TrpgRetentionServiceTest {
 
     @Test
     public void traceUnderKeepRowsIsNotDeleted() {
-        TrpgRetentionService custom = new TrpgRetentionService(store, null, 30, 168, 5000);
+        TrpgRetentionService custom = new TrpgRetentionService(store, null, clock, 30, 168, 5000);
         for (int i = 0; i < 3; i++) {
             store.appendAiTrace(trace(1L, NOW - i * 1000L));
         }
@@ -168,7 +170,7 @@ public class TrpgRetentionServiceTest {
             }
         };
 
-        TrpgRetentionService.Result result = new TrpgRetentionService(failing, null).runOnce(NOW);
+        TrpgRetentionService.Result result = new TrpgRetentionService(failing, null, clock).runOnce(NOW);
 
         assertTrue("审计失败应被标记", result.hasFailure());
         assertTrue("审计删除失败应记为 -1", result.traceExpiredRows() < 0);
@@ -177,13 +179,73 @@ public class TrpgRetentionServiceTest {
     }
 
     @Test
+    public void abortsWhenChildDeleteReturnsZeroButLogsExpected() {
+        long sessionId = endedSession(1L, NOW - 31L * DAY, true);
+        store.appendLog(new LogRow(0L, sessionId, 1L, "action", 0L, "旧日志", NOW - 40L * DAY));
+        SessionStore zeroButExpected = new ToggleStore(store) {
+            @Override
+            public int deleteLogs(long ignored) {
+                return 0;
+            }
+        };
+
+        TrpgRetentionService.Result result =
+                new TrpgRetentionService(zeroButExpected, null, clock).runOnce(NOW);
+
+        assertEquals("预期有日志却删除 0 行，必须中止该局", 1, result.aborted());
+        assertEquals(0, result.purged());
+        assertTrue(result.hasFailure());
+        assertNotNull("中止时不得删除父行", store.findSession(sessionId));
+        assertEquals("日志仍在，等下一轮", 1L, countRows(TrpgSchemaService.TABLE_TEXT_LOG, sessionId));
+    }
+
+    @Test
+    public void abortsWhenMemberDeleteReturnsZeroButMembersExpected() {
+        long sessionId = endedSession(1L, NOW - 31L * DAY, true);
+        store.insertMember(member(sessionId, 42L));
+        SessionStore zeroButExpected = new ToggleStore(store) {
+            @Override
+            public int deleteMembers(long ignored) {
+                return 0;
+            }
+        };
+
+        TrpgRetentionService.Result result =
+                new TrpgRetentionService(zeroButExpected, null, clock).runOnce(NOW);
+
+        assertEquals(1, result.aborted());
+        assertEquals(0, result.purged());
+        assertNotNull(store.findSession(sessionId));
+        assertEquals(1L, countRows(TrpgSchemaService.TABLE_MEMBER, sessionId));
+    }
+
+    @Test
+    public void childDeleteOfZeroWithNothingToDeleteIsNotFailure() {
+        long sessionId = endedSession(1L, NOW - 31L * DAY, true);
+
+        TrpgRetentionService.Result result = service.runOnce(NOW);
+
+        assertEquals("没有子表行的局照常清理", 1, result.purged());
+        assertEquals(0, result.aborted());
+        assertFalse(result.hasFailure());
+        assertNull(store.findSession(sessionId));
+    }
+
+    @Test(expected = IllegalArgumentException.class)
+    public void rejectsNullClock() {
+        new TrpgRetentionService(store, null, null);
+    }
+
+    @Test
     public void scheduleHourlyRunsOncePerHour() {
+        long sessionId = endedSession(1L, NOW - 31L * DAY, true);
         FakeScheduler scheduler = new FakeScheduler(0L);
         ScheduledTask task = service.scheduleHourly(scheduler);
 
         assertEquals(1, scheduler.pendingCount());
         assertEquals("首次延迟应为一小时", 0, scheduler.advance(TrpgRetentionService.HOURLY_PERIOD_MILLIS - 1L));
         assertEquals(1, scheduler.advance(1L));
+        assertNull("任务按注入的 Clock 判定过期局", store.findSession(sessionId));
         assertEquals("一秒后仍在下一小时", 0, scheduler.advance(1000L));
         task.cancel();
         assertTrue(task.isCancelled());
@@ -241,18 +303,6 @@ public class TrpgRetentionServiceTest {
         return -1;
     }
 
-    private static void deleteRecursively(File file) {
-        if (file == null || !file.exists()) {
-            return;
-        }
-        File[] children = file.listFiles();
-        if (children != null) {
-            for (File child : children) {
-                deleteRecursively(child);
-            }
-        }
-        file.delete();
-    }
 
     /** 全部方法转给真实存储，子类只覆盖要观察的那一个。 */
     private static class ToggleStore implements SessionStore {
@@ -381,8 +431,8 @@ public class TrpgRetentionServiceTest {
         }
 
         @Override
-        public List<Long> listExpiredSessionIds(long endedBefore, int limit) {
-            return delegate.listExpiredSessionIds(endedBefore, limit);
+        public List<Long> listExpiredSessionIds(long endedBefore) {
+            return delegate.listExpiredSessionIds(endedBefore);
         }
 
         @Override
