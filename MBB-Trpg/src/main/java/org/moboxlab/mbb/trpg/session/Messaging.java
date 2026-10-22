@@ -12,4 +12,6 @@ public interface Messaging {
     boolean sendPrivateText(long userId, String text);
 
     boolean sendGroupImage(long groupId, byte[] image);
+
+    boolean sendPrivateImage(long userId, byte[] image);
 }

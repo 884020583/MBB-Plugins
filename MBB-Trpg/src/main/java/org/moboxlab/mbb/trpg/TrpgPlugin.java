@@ -5,6 +5,12 @@ import org.moboxlab.moboxbot.API.PluginManager;
 import org.moboxlab.moboxbot.API.Storage.StorageService;
 import org.moboxlab.mbb.trpg.ai.TraceStore;
 import org.moboxlab.mbb.trpg.config.TrpgConfig;
+import org.moboxlab.mbb.trpg.present.ImageUtilRenderer;
+import org.moboxlab.mbb.trpg.present.OneBotMessaging;
+import org.moboxlab.mbb.trpg.present.OneBotNameResolver;
+import org.moboxlab.mbb.trpg.present.TrpgLogReportSource;
+import org.moboxlab.mbb.trpg.present.TrpgPresentConfig;
+import org.moboxlab.mbb.trpg.present.TrpgPresenter;
 import org.moboxlab.mbb.trpg.rule.D100RuleSet;
 import org.moboxlab.mbb.trpg.rule.DefaultRandomSource;
 import org.moboxlab.mbb.trpg.rule.RandomSource;
@@ -16,8 +22,6 @@ import org.moboxlab.mbb.trpg.script.ScriptValidator;
 import org.moboxlab.mbb.trpg.session.Clock;
 import org.moboxlab.mbb.trpg.session.PluginManagerScheduler;
 import org.moboxlab.mbb.trpg.session.ScheduledTask;
-import org.moboxlab.mbb.trpg.session.SessionEvent;
-import org.moboxlab.mbb.trpg.session.SessionEventPublisher;
 import org.moboxlab.mbb.trpg.session.SessionService;
 import org.moboxlab.mbb.trpg.session.SessionSnapshot;
 import org.moboxlab.mbb.trpg.session.SessionState;
@@ -34,8 +38,8 @@ import java.util.List;
  * MBB-Trpg 插件主类。
  *
  * <p>当前职责：加载配置、注册内置规则集并选定生效规则集、建表并保持幂等，装配存储实现、
- * 审计端口、拉黑名单、会话状态机与归档清理，按冻结顺序执行启动序列并排入每小时清理任务；
- * 呈现层、检定与场景、指令与监听器由后续切片继续装配。</p>
+ * 审计端口、拉黑名单、会话状态机、呈现层与归档清理，按冻结顺序执行启动序列并排入每小时
+ * 清理任务；检定与场景、指令与监听器由后续切片继续装配。</p>
  */
 public class TrpgPlugin extends Plugin {
 
@@ -52,6 +56,7 @@ public class TrpgPlugin extends Plugin {
     private TrpgRetentionService retentionService;
     private ScheduledTask retentionTask;
     private ScriptCatalog scriptCatalog;
+    private TrpgPresenter presenter;
 
     @Override
     public void onLoad() {
@@ -160,8 +165,15 @@ public class TrpgPlugin extends Plugin {
         sessionStore = store;
         traceStore = new SqlTraceStore(store);
         blacklistService = new BlacklistService(store);
+        OneBotNameResolver nameResolver = new OneBotNameResolver(getServer());
+        presenter = new TrpgPresenter(new TrpgPresentConfig(trpgConfig),
+                new OneBotMessaging(getServer()), new ImageUtilRenderer(), nameResolver,
+                scriptCatalog,
+                new TrpgLogReportSource(store, scriptCatalog, nameResolver,
+                        trpgConfig.retentionSessionDays()),
+                getLogger());
         sessionService = new SessionService(store, scriptCatalog, clock, randomSource, trpgConfig,
-                logOnlyPublisher(), getLogger());
+                presenter, getLogger());
         retentionService = new TrpgRetentionService(store, getLogger(), clock,
                 trpgConfig.retentionSessionDays(), trpgConfig.aiTraceKeepHours(),
                 trpgConfig.aiTraceMaxRows());
@@ -210,35 +222,6 @@ public class TrpgPlugin extends Plugin {
         }
     }
 
-    /**
-     * 会话事件的生产发布器：本切片只写插件日志。
-     *
-     * <p>恢复提示与结束时战报由呈现切片（S6）经 Messaging 异步发送，这里保持无网络调用，
-     * 也不会把发送带进群锁临界区（事件在锁外统一发布）。</p>
-     */
-    private SessionEventPublisher logOnlyPublisher() {
-        return new SessionEventPublisher() {
-            @Override
-            public void publish(SessionEvent event) {
-                if (event == null) {
-                    return;
-                }
-                switch (event.type()) {
-                    case RECOVERED:
-                        getLogger().sendInfo("[MBB-Trpg] 局面待恢复确认：群 " + event.snapshot().groupId()
-                                + "，局 " + event.snapshot().sessionId());
-                        break;
-                    case ENDED:
-                        getLogger().sendInfo("[MBB-Trpg] 局面已结束：群 " + event.snapshot().groupId()
-                                + "，局 " + event.snapshot().sessionId() + "，原因 " + event.endReason());
-                        break;
-                    default:
-                        break;
-                }
-            }
-        };
-    }
-
     @Override
     public void onDisable() {
         if (retentionTask != null) {
@@ -253,6 +236,7 @@ public class TrpgPlugin extends Plugin {
         sessionService = null;
         retentionService = null;
         scriptCatalog = null;
+        presenter = null;
         getLogger().sendInfo("[MBB-Trpg] 已停用");
     }
 
@@ -309,5 +293,10 @@ public class TrpgPlugin extends Plugin {
     /** 剧本库（内置只读）；未启用时为 null。 */
     public ScriptCatalog scriptCatalog() {
         return scriptCatalog;
+    }
+
+    /** 呈现层门面（唯一消息出口）；未启用时为 null。 */
+    public TrpgPresenter presenter() {
+        return presenter;
     }
 }
