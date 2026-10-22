@@ -168,6 +168,8 @@ if ($LASTEXITCODE -ne 0) {
 $testClassNames = @()
 foreach ($file in (Get-ChildItem -LiteralPath $testClassesDir -Recurse -File -Filter *.class)) {
     if ($file.Name -like '*$*') { continue }
+    # 只跑测试类，测试基座（如 JdbcStorageFake）不参与运行
+    if ($file.Name -notlike '*Test.class') { continue }
     $relative = $file.FullName.Substring($testClassesDir.Length).TrimStart('\', '/')
     $testClassNames += ($relative -replace '[\\/]', '.') -replace '\.class$', ''
 }
