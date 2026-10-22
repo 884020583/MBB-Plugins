@@ -45,6 +45,16 @@ public final class DiceExpression {
         return total;
     }
 
+    /** 最大可能值；大失败取理智损失上限时用，常量表达式即常数本身。 */
+    public int maxValue() {
+        return count == 0 ? modifier : count * sides + modifier;
+    }
+
+    /** 最小可能值。 */
+    public int minValue() {
+        return count == 0 ? modifier : count + modifier;
+    }
+
     public int count() {
         return count;
     }
