@@ -4,6 +4,10 @@ import org.moboxlab.moboxbot.API.Plugin;
 import org.moboxlab.moboxbot.API.PluginManager;
 import org.moboxlab.moboxbot.API.Storage.StorageService;
 import org.moboxlab.mbb.trpg.ai.TraceStore;
+import org.moboxlab.mbb.trpg.card.CardGenerator;
+import org.moboxlab.mbb.trpg.command.DiceCommand;
+import org.moboxlab.mbb.trpg.command.TrpgCommand;
+import org.moboxlab.mbb.trpg.command.TrpgCommandService;
 import org.moboxlab.mbb.trpg.config.TrpgConfig;
 import org.moboxlab.mbb.trpg.present.ImageUtilRenderer;
 import org.moboxlab.mbb.trpg.present.OneBotMessaging;
@@ -20,7 +24,11 @@ import org.moboxlab.mbb.trpg.script.BuiltinScriptCatalog;
 import org.moboxlab.mbb.trpg.script.ScriptCatalog;
 import org.moboxlab.mbb.trpg.script.ScriptValidator;
 import org.moboxlab.mbb.trpg.session.Clock;
+import org.moboxlab.mbb.trpg.session.CooldownRegistry;
+import org.moboxlab.mbb.trpg.session.ErrorDedupe;
+import org.moboxlab.mbb.trpg.session.GroupLockRegistry;
 import org.moboxlab.mbb.trpg.session.PluginManagerScheduler;
+import org.moboxlab.mbb.trpg.session.SessionLogService;
 import org.moboxlab.mbb.trpg.session.ScheduledTask;
 import org.moboxlab.mbb.trpg.session.SessionService;
 import org.moboxlab.mbb.trpg.session.SessionSnapshot;
@@ -39,7 +47,7 @@ import java.util.List;
  *
  * <p>当前职责：加载配置、注册内置规则集并选定生效规则集、建表并保持幂等，装配存储实现、
  * 审计端口、拉黑名单、会话状态机、呈现层与归档清理，按冻结顺序执行启动序列并排入每小时
- * 清理任务；检定与场景、指令与监听器由后续切片继续装配。</p>
+ * 清理任务；随后注册 /trpg 与 /r 指令。检定与场景、群监听器由后续切片继续装配。</p>
  */
 public class TrpgPlugin extends Plugin {
 
@@ -57,6 +65,11 @@ public class TrpgPlugin extends Plugin {
     private ScheduledTask retentionTask;
     private ScriptCatalog scriptCatalog;
     private TrpgPresenter presenter;
+    private SessionLogService sessionLogService;
+    private TrpgCommandService commandService;
+    /** 指令层共用登记：同群同类错误 10 秒只回一次、冷却窗口跨指令生效。 */
+    private CooldownRegistry cooldowns;
+    private ErrorDedupe dedupe;
 
     @Override
     public void onLoad() {
@@ -172,8 +185,15 @@ public class TrpgPlugin extends Plugin {
                 new TrpgLogReportSource(store, scriptCatalog, nameResolver,
                         trpgConfig.retentionSessionDays()),
                 getLogger());
+        // 冷却与去重登记跨 /trpg、/r 共用：同群同类错误 10 秒只回一次（§3.2），冷却窗口也不分指令层。
+        cooldowns = new CooldownRegistry();
+        dedupe = new ErrorDedupe();
         sessionService = new SessionService(store, scriptCatalog, clock, randomSource, trpgConfig,
-                presenter, getLogger());
+                presenter, getLogger(), new GroupLockRegistry(clock), cooldowns, dedupe);
+        sessionLogService = new SessionLogService(store, trpgConfig, clock, cooldowns, dedupe, getLogger());
+        commandService = new TrpgCommandService(sessionService, sessionLogService, scriptCatalog,
+                new CardGenerator(randomSource), presenter, nameResolver, trpgConfig, clock, getLogger(),
+                cooldowns, dedupe);
         retentionService = new TrpgRetentionService(store, getLogger(), clock,
                 trpgConfig.retentionSessionDays(), trpgConfig.aiTraceKeepHours(),
                 trpgConfig.aiTraceMaxRows());
@@ -210,15 +230,34 @@ public class TrpgPlugin extends Plugin {
         PluginManager pluginManager = getServer() == null ? null : getServer().getPluginManager();
         if (pluginManager == null) {
             retentionTask = null;
-            getLogger().sendWarn("[MBB-Trpg] 取不到插件管理器，归档清理不会按小时执行");
+            getLogger().sendWarn("[MBB-Trpg] 取不到插件管理器，归档清理与指令注册均不会生效");
             return;
         }
+        registerCommands(pluginManager, clock);
         try {
             retentionTask = retentionService.scheduleHourly(
                     new PluginManagerScheduler(this, pluginManager, getLogger()));
         } catch (RuntimeException e) {
             retentionTask = null;
             getLogger().sendWarn("[MBB-Trpg] 归档清理定时任务注册失败：" + e.getMessage());
+        }
+    }
+
+    /** 注册 /trpg 与 /r；指令层只做解析与委托，所有回执经呈现层发出。 */
+    private void registerCommands(PluginManager pluginManager, Clock clock) {
+        try {
+            pluginManager.registerCommand(this, new TrpgCommand(commandService));
+        } catch (RuntimeException e) {
+            getLogger().sendError("[MBB-Trpg] /trpg 指令注册失败，该指令不可用：" + e.getMessage());
+        }
+        try {
+            pluginManager.registerCommand(this, new DiceCommand(trpgConfig, presenter, randomSource, clock,
+                    cooldowns, dedupe));
+        } catch (RuntimeException e) {
+            getLogger().sendError("[MBB-Trpg] /r 指令注册失败，该指令不可用：" + e.getMessage());
+        }
+        if (commandService != null) {
+            getLogger().sendInfo("[MBB-Trpg] 指令已注册：/trpg（跑团）、/r 与 /roll（掷骰）");
         }
     }
 
@@ -237,6 +276,10 @@ public class TrpgPlugin extends Plugin {
         retentionService = null;
         scriptCatalog = null;
         presenter = null;
+        sessionLogService = null;
+        commandService = null;
+        cooldowns = null;
+        dedupe = null;
         getLogger().sendInfo("[MBB-Trpg] 已停用");
     }
 
@@ -298,5 +341,15 @@ public class TrpgPlugin extends Plugin {
     /** 呈现层门面（唯一消息出口）；未启用时为 null。 */
     public TrpgPresenter presenter() {
         return presenter;
+    }
+
+    /** 日志回看服务；未启用时为 null。 */
+    public SessionLogService sessionLogService() {
+        return sessionLogService;
+    }
+
+    /** 指令服务；未启用时为 null。 */
+    public TrpgCommandService commandService() {
+        return commandService;
     }
 }

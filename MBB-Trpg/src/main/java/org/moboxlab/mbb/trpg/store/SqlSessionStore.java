@@ -35,6 +35,9 @@ public final class SqlSessionStore implements SessionStore {
             + ") ORDER BY id DESC LIMIT 1";
     private static final String SQL_FIND_SESSION = "SELECT * FROM "
             + TrpgSchemaService.TABLE_SESSION + " WHERE id = ?";
+    private static final String SQL_FIND_LATEST_ARCHIVED_BY_GROUP = "SELECT * FROM "
+            + TrpgSchemaService.TABLE_SESSION
+            + " WHERE groupID = ? AND state = 'ENDED' AND endedAt >= ? ORDER BY id DESC LIMIT 1";
     private static final String SQL_LOAD_ACTIVE_SESSIONS = "SELECT * FROM "
             + TrpgSchemaService.TABLE_SESSION + " WHERE state IN (" + ACTIVE_STATES
             + ") ORDER BY id ASC";
@@ -185,6 +188,12 @@ public final class SqlSessionStore implements SessionStore {
     @Override
     public SessionRow findSession(long sessionId) {
         return readSession(storage.queryOne(SQL_FIND_SESSION, sessionId));
+    }
+
+    @Override
+    public SessionRow findLatestArchivedByGroup(long groupId, long endedAfter) {
+        return readSession(storage.queryOne(SQL_FIND_LATEST_ARCHIVED_BY_GROUP,
+                Long.valueOf(groupId), Long.valueOf(endedAfter)));
     }
 
     @Override

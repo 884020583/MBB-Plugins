@@ -200,6 +200,7 @@ public class SessionServiceTest extends SessionTestFixture {
         startRunning();
         long sessionId = activeSessionId();
         assertTrue(service.end(actor(KP)).confirmationPending());
+        clock.advance(1000L);
         SessionResult ended = service.end(actor(KP));
         assertTrue(ended.detail(), ended.ok());
         assertEquals("finished", ended.endReason());
@@ -232,6 +233,7 @@ public class SessionServiceTest extends SessionTestFixture {
         startRunning();
         long sessionId = activeSessionId();
         assertTrue(service.end(admin(OTHER)).confirmationPending());
+        clock.advance(1000L);
         SessionResult ended = service.end(admin(OTHER));
         assertTrue(ended.detail(), ended.ok());
         assertEquals("forced", ended.endReason());
@@ -244,6 +246,7 @@ public class SessionServiceTest extends SessionTestFixture {
         long sessionId = activeSessionId();
         setSuccessSkills(sessionId, PLAYER, list(SKILL));
         assertTrue(service.end(actor(KP)).confirmationPending());
+        clock.advance(1000L);
         SessionResult ended = service.end(actor(KP));
         assertTrue(ended.detail(), ended.ok());
         assertEquals("cancelled", ended.endReason());
@@ -262,6 +265,7 @@ public class SessionServiceTest extends SessionTestFixture {
         long sessionId = activeSessionId();
         storage.failUpdateContaining("SET state = ?, startedAt = ?", 1);
         assertTrue(service.end(actor(KP)).confirmationPending());
+        clock.advance(1000L);
 
         SessionResult failed = service.end(actor(KP));
         assertTrue("CAS 返回 -1 时按存储失败上报", failed.storageFailed());
@@ -281,6 +285,7 @@ public class SessionServiceTest extends SessionTestFixture {
         storage.failUpdateContaining("SET cardJSON = ?", 1);
 
         assertTrue(service.end(actor(KP)).confirmationPending());
+        clock.advance(1000L);
         SessionResult ended = service.end(actor(KP));
         assertTrue(ended.detail(), ended.ok());
         SessionRow archived = row(sessionId);
@@ -298,8 +303,10 @@ public class SessionServiceTest extends SessionTestFixture {
         startRunning();
         long sessionId = activeSessionId();
         assertTrue(service.end(actor(KP)).confirmationPending());
+        clock.advance(1000L);
         assertTrue("管理员的确认窗口与 KP 互不合并",
                 service.end(admin(OTHER)).confirmationPending());
+        clock.advance(1000L);
 
         SessionResult forced = service.end(admin(OTHER));
         assertTrue(forced.detail(), forced.ok());
@@ -321,6 +328,7 @@ public class SessionServiceTest extends SessionTestFixture {
     public void startCooldownBlocksImmediateRestart() {
         startSession();
         assertTrue(service.end(actor(KP)).confirmationPending());
+        clock.advance(1000L);
         assertTrue(service.end(actor(KP)).ok());
         SessionResult blocked = start();
         assertTrue(blocked.rejected());
@@ -444,6 +452,7 @@ public class SessionServiceTest extends SessionTestFixture {
                 });
         startRunning();
         assertTrue(service.end(actor(KP)).confirmationPending());
+        clock.advance(1000L);
         assertTrue(service.end(actor(KP)).ok());
         assertFalse("结束事件必须在锁外发布", lockedAtPublish.isEmpty());
         for (Boolean locked : lockedAtPublish) {
@@ -532,6 +541,7 @@ public class SessionServiceTest extends SessionTestFixture {
             clock.advance(1L);
         }
         assertTrue(service.end(actor(KP)).confirmationPending());
+        clock.advance(1000L);
         SessionResult ended = service.end(actor(KP));
         assertTrue(ended.detail(), ended.ok());
         String summary = row(sessionId).summary();
@@ -544,6 +554,7 @@ public class SessionServiceTest extends SessionTestFixture {
         startRunning();
         long sessionId = activeSessionId();
         assertTrue(service.end(actor(KP)).confirmationPending());
+        clock.advance(1000L);
         assertTrue(service.end(actor(KP)).ok());
         String summary = row(sessionId).summary();
         assertEquals(0, ending(2).requiredClueIds().size());

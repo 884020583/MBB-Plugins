@@ -22,6 +22,14 @@ public interface SessionStore {
     /** 按主键查局。 */
     SessionRow findSession(long sessionId);
 
+    /**
+     * 查本群最近一局已归档局（state = ENDED 且 endedAt >= endedAfter），无则 null。
+     *
+     * <p>供只读日志回看定位「最近一局」：活跃局由调用方先查，这里只做归档兜底；
+     * 窗口由调用方按保留天数换算后传入，本方法不解释时间语义。</p>
+     */
+    SessionRow findLatestArchivedByGroup(long groupId, long endedAfter);
+
     /** 新建局，返回自增主键；0 表示未插入或取键失败，调用方回读确认。 */
     long insertSession(SessionRow row);
 
