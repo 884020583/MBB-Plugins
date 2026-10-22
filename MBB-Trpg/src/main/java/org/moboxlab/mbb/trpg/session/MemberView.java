@@ -1,6 +1,7 @@
 package org.moboxlab.mbb.trpg.session;
 
 import org.moboxlab.mbb.trpg.store.CardData;
+import org.moboxlab.mbb.trpg.store.MemberRow;
 
 import java.util.ArrayList;
 import java.util.Collections;
@@ -32,6 +33,15 @@ public final class MemberView {
         this.card = card == null ? CardData.empty() : card;
         this.successSkills = Collections.unmodifiableList(successSkills == null
                 ? new ArrayList<String>() : new ArrayList<String>(successSkills));
+    }
+
+    /** 由存储行构造视图。 */
+    public static MemberView of(MemberRow row) {
+        if (row == null) {
+            throw new IllegalArgumentException("成员行不能为空");
+        }
+        return new MemberView(row.userId(), row.joinedAt(), row.leftAt(), row.takenOver(),
+                row.madnessUntil(), row.card(), row.successSkills());
     }
 
     public long userId() {
