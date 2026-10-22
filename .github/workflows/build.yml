@@ -19,7 +19,9 @@ jobs:
       - name: Checkout MoBoxBot
         uses: actions/checkout@v4
         with:
-          repository: ${{ github.repository_owner }}/MoBoxBot
+          # 上游主程序固定为 MossCG/MoBoxBot：本仓库的 fork 下没有同名主程序仓库，
+          # 用 github.repository_owner 会在 fork 里 checkout 失败
+          repository: MossCG/MoBoxBot
           path: MoBoxBot
 
       - name: Setup Java 8
@@ -35,6 +37,10 @@ jobs:
       - name: Build plugins
         shell: powershell
         run: .\build-all.ps1 -Bot .\MoBoxBot\out\MoBoxBot.jar
+
+      - name: Run MBB-Trpg tests
+        shell: powershell
+        run: .\MBB-Trpg\build.ps1 -Bot .\MoBoxBot\out\MoBoxBot.jar -Test
 
       - name: Package release archive
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
