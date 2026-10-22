@@ -6,6 +6,11 @@ param(
 
 $ErrorActionPreference = "Stop"
 
+# Windows PowerShell 5.1 在 Stop 策略下会把原生命令写到 stderr 的输出当成终止性错误
+# （NativeCommandError），而 javac / java 在打印版本号或提示时就会写 stderr。
+# 下面每处调用原生命令前临时放宽为 Continue，只按 $LASTEXITCODE 判定成败。
+$nativeErrorAction = $ErrorActionPreference
+
 $pluginName = "MBB-Trpg"
 $root = Split-Path -Parent $MyInvocation.MyCommand.Path
 $srcJava = Join-Path $root "src\main\java"
@@ -33,7 +38,9 @@ if (-not $resolvedBuild.StartsWith($resolvedRoot, [System.StringComparison]::Ord
 }
 
 # Java 8 字节码：javac 9 及以上需要 --release 8，CI 的 javac 8 不认该参数
+$ErrorActionPreference = "Continue"
 $javacVersionText = (& javac -version 2>&1 | Out-String).Trim()
+$ErrorActionPreference = $nativeErrorAction
 $releaseArgs = @()
 if ($javacVersionText -match "javac\s+(\d+)") {
     $javacMajor = [int]$Matches[1]
@@ -56,8 +63,11 @@ if ($javaFiles.Count -eq 0) {
     exit 1
 }
 Write-Host ("编译源码：" + $javaFiles.Count + " 个文件")
+$ErrorActionPreference = "Continue"
 & javac -encoding UTF-8 @releaseArgs -cp $Bot -d $classesDir $javaFiles
-if ($LASTEXITCODE -ne 0) {
+$compileExit = $LASTEXITCODE
+$ErrorActionPreference = $nativeErrorAction
+if ($compileExit -ne 0) {
     Write-Host "编译失败，已中止。"
     exit 1
 }
@@ -68,9 +78,12 @@ if (Test-Path -LiteralPath $srcResources) {
 
 if (Test-Path -LiteralPath $jarPath) { Remove-Item -LiteralPath $jarPath -Force }
 Push-Location $classesDir
+$ErrorActionPreference = "Continue"
 & jar cf $jarPath .
+$jarExit = $LASTEXITCODE
+$ErrorActionPreference = $nativeErrorAction
 Pop-Location
-if ($LASTEXITCODE -ne 0) {
+if ($jarExit -ne 0) {
     Write-Host "打包失败，已中止。"
     exit 1
 }
@@ -159,8 +172,11 @@ if ($testJavaFiles.Count -eq 0) {
 New-Item -ItemType Directory -Force -Path $testClassesDir | Out-Null
 $testClassPath = $Bot + ";" + $classesDir + ";" + ($testJars -join ";")
 Write-Host ("编译测试源码：" + $testJavaFiles.Count + " 个文件")
+$ErrorActionPreference = "Continue"
 & javac -encoding UTF-8 @releaseArgs -cp $testClassPath -d $testClassesDir $testJavaFiles
-if ($LASTEXITCODE -ne 0) {
+$testCompileExit = $LASTEXITCODE
+$ErrorActionPreference = $nativeErrorAction
+if ($testCompileExit -ne 0) {
     Write-Host "测试源码编译失败，已中止。"
     exit 1
 }
@@ -180,10 +196,13 @@ if ($testClassNames.Count -eq 0) {
 
 $runClassPath = $testClassPath + ";" + $testClassesDir
 Write-Host ("运行测试：" + ($testClassNames -join ", "))
+$ErrorActionPreference = "Continue"
 & java -cp $runClassPath org.junit.runner.JUnitCore @testClassNames
-if ($LASTEXITCODE -ne 0) {
+$testRunExit = $LASTEXITCODE
+$ErrorActionPreference = $nativeErrorAction
+if ($testRunExit -ne 0) {
     Write-Host "测试未通过，已中止。"
-    exit $LASTEXITCODE
+    exit $testRunExit
 }
 Write-Host ("测试全部通过：" + $testClassNames.Count + " 个测试类")
 exit 0
