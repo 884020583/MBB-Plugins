@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.1.1.0.0013 | 2026-10-23 | `MBB-Trpg` 存储与归档切片：新增 `SqlSessionStore`（五表读写、CAS 迁移、日志与审计字符截断，主程序返回码原样透传）、`BlacklistService`（群级拉黑，重复拉黑收敛为一行）、`SqlTraceStore`（审计端口实现）与 `TrpgRetentionService`（注入时间端口，启动清一轮并按整点清理过期已结算局与过期/超量审计；未结算局永不清理，子表预期有行却删除 0 行同样中止本局）；新增 `PluginManagerScheduler` 把定时端口适配到主程序秒级调度；插件启用时完成上述服务装配。 |
 | V0.1.0.0.2151 | 2026-10-22 | `MBB-Trpg` 插件骨架落地：新增插件骨架、注入端口与值对象、44 项配置读取、五表八索引幂等建表与补列、测试基座与插件级单测；本版只做初始化，指令与规则引擎在后续版本开放。 |
 | V0.5.69.0.0908 | 2026-10-17 | `MBB-Roleplay` 新增安全与防注入：`RoleplaySafetyService` 拦截系统提示词诱导、越狱指令和现实隐私索取，命中后不进入路由和回复链路；长期记忆写入前做同样的安全检查，阻止被诱导内容污染记忆；新增 `safetyGuardEnable`、`promptInjectionGuardEnable`、`privacyGuardEnable` 配置。 |
 | V0.5.68.0.0907 | 2026-10-17 | `MBB-Roleplay` 新增拟人节奏：发送前按回复长度、深夜时段和群注意力计算打字延迟，加入随机抖动和延迟上限，让回复更像真人输入；新增 `pacingEnable`、`pacingBaseMs`、`pacingPerCharMs`、`pacingMaxMs`、`pacingNightMultiplier`、`pacingActiveMultiplier`、`pacingActiveThreshold`、`pacingNightStartHour`、`pacingNightEndHour` 配置。 |

@@ -90,8 +90,13 @@ public interface SessionStore {
     /** 是否在黑名单。 */
     boolean isBlacklisted(long groupId, long userId);
 
-    /** 列出结束时间早于给定时点、可清理的局主键。 */
-    List<Long> listExpiredSessionIds(long endedBefore, int limit);
+    /**
+     * 列出结束时间早于给定时点、可清理的局主键。
+     *
+     * <p>只选 {@code state='ENDED' AND growthSettled=1 AND endedAt < endedBefore}，按 id 升序；
+     * 不做 LIMIT（规格 §7.7 冻结 SQL）。</p>
+     */
+    List<Long> listExpiredSessionIds(long endedBefore);
 
     /** 删除一局日志。 */
     int deleteLogs(long sessionId);
@@ -104,6 +109,13 @@ public interface SessionStore {
 
     /** 追加 AI 审计行，返回自增主键；0 表示失败。 */
     long appendAiTrace(AiTraceRow row);
+
+    /**
+     * 读最近审计行（按 id 倒序）。
+     *
+     * <p>{@code sessionId <= 0} 时只按群过滤；{@code limit <= 0} 时不查库、返回空表。</p>
+     */
+    List<AiTraceRow> listAiTrace(long groupId, long sessionId, int limit);
 
     /** 删除创建时间早于给定时点的审计行。 */
     int deleteAiTraceBefore(long createTime);
