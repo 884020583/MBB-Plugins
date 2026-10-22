@@ -44,6 +44,7 @@ public final class FakeMessaging implements Messaging {
     private int failNextGroupText;
     private int failNextPrivateText;
     private int failNextGroupImage;
+    private int failNextPrivateImage;
 
     @Override
     public boolean sendGroupText(long groupId, String text) {
@@ -75,6 +76,16 @@ public final class FakeMessaging implements Messaging {
         return true;
     }
 
+    @Override
+    public boolean sendPrivateImage(long userId, byte[] image) {
+        if (failNextPrivateImage > 0) {
+            failNextPrivateImage--;
+            return false;
+        }
+        sent.add(new SentMessage("private-image", userId, null, image));
+        return true;
+    }
+
     /** 注入接下来的群文本发送失败次数。 */
     public void failNextGroupText(int times) {
         this.failNextGroupText = times;
@@ -88,6 +99,11 @@ public final class FakeMessaging implements Messaging {
     /** 注入接下来的群图片发送失败次数。 */
     public void failNextGroupImage(int times) {
         this.failNextGroupImage = times;
+    }
+
+    /** 注入接下来的私聊图片发送失败次数。 */
+    public void failNextPrivateImage(int times) {
+        this.failNextPrivateImage = times;
     }
 
     /** 全部发送记录，按发送顺序。 */

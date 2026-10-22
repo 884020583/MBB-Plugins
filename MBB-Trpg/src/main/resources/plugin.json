@@ -1,6 +1,6 @@
 {
   "name": "MBB-Trpg",
-  "version": "V0.1.4.0.0221",
+  "version": "V0.1.5.0.0253",
   "apiVersion": "0.3",
   "main": "org.moboxlab.mbb.trpg.TrpgPlugin",
   "author": "MoBoxLab",
