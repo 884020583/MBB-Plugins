@@ -36,9 +36,9 @@ jobs:
         shell: powershell
         run: .\build-all.ps1 -Bot .\MoBoxBot\out\MoBoxBot.jar
 
-      - name: Run tests
+      - name: Run MBB-Trpg tests
         shell: powershell
-        run: .\build-all.ps1 -Bot .\MoBoxBot\out\MoBoxBot.jar -RunTests
+        run: .\MBB-Trpg\build.ps1 -Bot .\MoBoxBot\out\MoBoxBot.jar -Test
 
       - name: Package release archive
         if: github.event_name == 'push' && github.ref == 'refs/heads/master'
