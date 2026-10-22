@@ -338,7 +338,7 @@ QQ 侧的私聊失败分三种，回退口径按顺序试：
 | `TrpgMessageSplitter` | 按 §6.1 拆分与折叠 | 纯函数，单测 |
 | `TrpgImageTemplates` | 情景卡 / 战报 / 脚本页的 `List<String>` 组装 + `wrapForImage` | 纯函数，单测 |
 | `TrpgPresenter` | 统一出口：模板 → 格式化 → 拆分 → 图片渲染（调 `ImageUtil`）→ 发送 → 失败回退 | 用一个 `FakeSender` 测 |
-| `TrpgPresentConfig` | 配置读取（`maxChars`、`splitMax`、`imageEnable`、`style`） | 读默认值 |
+| `TrpgPresentConfig` | 配置读取（`groupMaxChars`、`privateMaxChars`、`splitMax`、`sceneImage`、`reportImage`、`imageMaxLines`、`style`） | 读默认值 |
 
 ### 8.2 配置项（`config.yml` 内 `presentation` 节）
 
