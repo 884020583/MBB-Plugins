@@ -125,7 +125,7 @@ public final class SessionService {
         this.reader = new SessionReader(store, archiver, locks, clock, config, publisher, logger,
                 this::isRecovered);
         this.cardService = new SessionCardService(this, store, cooldowns, config);
-        this.playService = new SessionPlayService(this, store, catalog, config, logger);
+        this.playService = new SessionPlayService(this, store, catalog, config);
         this.checkService = new SessionCheckService(this, store, catalog, random, config, logger);
     }
 
@@ -247,6 +247,11 @@ public final class SessionService {
                     return reject(turn, SessionReject.STATE_UNAVAILABLE,
                             "本群已开局，进行中加入需由 KP 邀请");
                 }
+                Script script = loadScript(row.scriptId());
+                if (script != null && insideCount(row, actor.userId()) >= script.maxPlayers()) {
+                    return reject(turn, SessionReject.MEMBER_STATE,
+                            "本局人数已满（" + script.maxPlayers() + " 人）");
+                }
                 MemberRow existing = turn.member(row, actor.userId());
                 if (existing != null && existing.leftAt() <= 0L) {
                     return reject(turn, SessionReject.MEMBER_STATE, "你已在局内");
@@ -257,8 +262,9 @@ public final class SessionService {
                 }
                 long now = turn.now;
                 if (existing != null) {
+                    // 重新入局同时清掉代管标记（§6.1）：代管只对被代管的本次在场有效。
                     int affected = store.updateMember(existing.toBuilder()
-                            .leftAt(0L).updateTime(now).build());
+                            .leftAt(0L).takenOver(false).updateTime(now).build());
                     if (affected < 0) {
                         return SessionResult.storageFailure("重新入局写入未生效");
                     }
@@ -555,7 +561,10 @@ public final class SessionService {
                     return SessionResult.ok(turn.snapshot(row), "KP 未变更");
                 }
                 boolean settleGrowth = row.state() == SessionState.RUNNING;
-                return finish(turn, archiver.archive(row, "kp_left", settleGrowth, turn.now), "KP 已离群");
+                // 招募期离群按取消归档、进行中才记 kp_left（§7.7 endReason 口径）。
+                String endReason = settleGrowth ? END_REASON_KP_LEFT : END_REASON_CANCELLED;
+                return finish(turn, archiver.archive(row, endReason, settleGrowth, turn.now),
+                        "KP 已离群");
             }
         });
     }
@@ -854,6 +863,14 @@ public final class SessionService {
         return null;
     }
 
+    /** 本局在场人数（可排除某人，供人数上限与回执使用）。 */
+    int insideCount(SessionRow row, long excludedUserId) {
+        if (row == null) {
+            return 0;
+        }
+        return insideCountExcluding(store.loadMembers(row.id()), excludedUserId);
+    }
+
     private static int insideCountExcluding(List<MemberRow> members, long excludedUserId) {
         int count = 0;
         for (MemberRow member : members) {
@@ -879,6 +896,12 @@ public final class SessionService {
             logger.sendError("[MBB-Trpg] " + message);
         }
     }
+
+    /** 进行中 KP 离群的归档原因。 */
+    static final String END_REASON_KP_LEFT = "kp_left";
+
+    /** 招募期取消的归档原因。 */
+    static final String END_REASON_CANCELLED = "cancelled";
 
     /** 群锁内执行的动作。 */
     interface LockedAction {

@@ -168,7 +168,9 @@ public class TrpgKpCommandTest {
         clock.advance(ACTION_GAP_MILLIS);
 
         assertTrue(run(kpSender(), "take", mention(PLAYER)));
-        assertTrue(groupText(), groupText().contains("【接管 · 小满】"));
+        // 词表把【接管】钉死为 KP 交接，代管玩家回合并入【提示】。
+        assertTrue(groupText(), groupText().contains("【提示】"));
+        assertTrue(groupText(), groupText().contains("已记录代管：小满"));
         clock.advance(ACTION_GAP_MILLIS);
 
         assertTrue(run(kpSender(), "skip", mention(PLAYER), "挂机太久"));

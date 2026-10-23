@@ -243,7 +243,10 @@ public class SessionPlayServiceTest extends SessionTestFixture {
         SessionResult result = service.skip(actor(KP), PLAYER, "挂机太久");
 
         assertTrue("跳过应成功：" + result.detail(), result.ok());
-        assertTrue(hasLog(sessionId, "skip", "挂机太久"));
+        // 日志要能定位到被跳过的人，所以带上用户号与原因。
+        String content = skipLogContent(sessionId);
+        assertTrue("跳过日志应带用户号：" + content, content.startsWith(String.valueOf(PLAYER)));
+        assertTrue("跳过日志应带原因：" + content, content.contains("挂机太久"));
     }
 
     @Test
@@ -288,6 +291,15 @@ public class SessionPlayServiceTest extends SessionTestFixture {
             assertNotNull("剧本应定义该线索：" + clueKey, clue);
             assertFalse(clue.unlockedText().trim().isEmpty());
         }
+    }
+
+    private String skipLogContent(long sessionId) {
+        for (LogRow row : store.listLogs(sessionId, 200, 0)) {
+            if ("skip".equals(row.eventType())) {
+                return row.content();
+            }
+        }
+        return "";
     }
 
     private boolean hasLog(long sessionId, String eventType, String content) {

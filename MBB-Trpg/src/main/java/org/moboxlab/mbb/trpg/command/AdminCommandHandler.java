@@ -6,8 +6,10 @@ import java.util.EnumMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.locks.Lock;
 
 import org.moboxlab.mbb.trpg.present.TrpgMessageTemplates;
+import org.moboxlab.mbb.trpg.present.TrpgTitles;
 import org.moboxlab.mbb.trpg.script.Script;
 import org.moboxlab.mbb.trpg.script.ScriptInfo;
 import org.moboxlab.mbb.trpg.session.SessionActor;
@@ -49,12 +51,18 @@ final class AdminCommandHandler {
 
     static void script(TrpgCommandContext context, SessionActor actor, String[] params) {
         String action = arg(params, 1);
+        String lower = action.toLowerCase(Locale.ROOT);
+        boolean libraryAction = "list".equals(lower) || "show".equals(lower)
+                || "import".equals(lower) || "delete".equals(lower) || "gen".equals(lower);
+        // 判定顺序固定为权限先于参数（§5.4）：库管理先卡 BOT_ADMIN，再校验具体参数。
+        if (libraryAction && !requireBotAdmin(context, actor)) {
+            return;
+        }
         if (action.isEmpty()) {
             context.rejectError(actor, "script-argument", "参数不对：缺少剧本 ID 或库管理动作",
                     "发送 /trpg help 查看用法。");
             return;
         }
-        String lower = action.toLowerCase(Locale.ROOT);
         if ("list".equals(lower)) {
             listScripts(context, actor, params);
             return;
@@ -64,9 +72,7 @@ final class AdminCommandHandler {
             return;
         }
         if ("import".equals(lower) || "delete".equals(lower) || "gen".equals(lower)) {
-            context.rejectNotice(actor, "script-" + lower,
-                    "剧本" + ("import".equals(lower) ? "导入" : "delete".equals(lower) ? "删除" : "生成")
-                            + UPCOMING_NEXT);
+            context.rejectNotice(actor, "script-" + lower, "剧本" + scriptActionLabel(lower) + UPCOMING_NEXT);
             return;
         }
         // 其余情况按剧本 ID 处理：换本局剧本只允许群内、由局面层判定 KP 与招募期。
@@ -78,15 +84,24 @@ final class AdminCommandHandler {
         if (!context.accept(actor, result)) {
             return;
         }
-        context.reply(actor, TrpgMessageTemplates.scriptChanged(context.loadScript(action)));
+        context.reply(actor, TrpgMessageTemplates.scriptChanged(
+                context.loadScript(result.snapshot() == null ? action : result.snapshot().scriptId())));
+    }
+
+    /** 库管理动作的中文名（导入 / 删除 / 生成）。 */
+    private static String scriptActionLabel(String lower) {
+        if ("import".equals(lower)) {
+            return "导入";
+        }
+        if ("delete".equals(lower)) {
+            return "删除";
+        }
+        return "生成";
     }
 
     private static void listScripts(TrpgCommandContext context, SessionActor actor, String[] params) {
-        if (!requireBotAdmin(context, actor)) {
-            return;
-        }
         List<ScriptInfo> infos = new ArrayList<ScriptInfo>();
-        java.util.concurrent.locks.Lock lock = context.catalog().acquireReadLock();
+        Lock lock = context.catalog().acquireReadLock();
         lock.lock();
         try {
             List<ScriptInfo> all = context.catalog().list();
@@ -108,9 +123,6 @@ final class AdminCommandHandler {
     }
 
     private static void showScript(TrpgCommandContext context, SessionActor actor, String[] params) {
-        if (!requireBotAdmin(context, actor)) {
-            return;
-        }
         String scriptId = arg(params, 2);
         if (scriptId.isEmpty()) {
             context.rejectError(actor, "script-show", "参数不对：缺少剧本 ID",
@@ -128,7 +140,15 @@ final class AdminCommandHandler {
 
     static void blacklist(TrpgCommandContext context, SessionActor actor, String[] params) {
         if (context.blacklist() == null) {
-            context.rejectError(actor, "blacklist-unavailable", "黑名单服务不可用", PERMISSION_NEXT);
+            context.rejectError(actor, "blacklist-unavailable", "黑名单服务不可用，请稍后重试",
+                    "可以稍后再发送一次。");
+            return;
+        }
+        // 判定顺序固定为权限先于参数（§5.4）：群内要群管理员，私聊要 BOT_ADMIN。
+        if (actor.inGroup() ? !actor.groupAdmin() : !actor.botAdmin()) {
+            context.rejectError(actor, "blacklist-permission",
+                    actor.inGroup() ? "只有群管理员能管理本群黑名单" : "私聊解封仅限 BOT_ADMIN 或 OWNER",
+                    PERMISSION_NEXT);
             return;
         }
         String action = arg(params, 1).toLowerCase(Locale.ROOT);
@@ -150,9 +170,9 @@ final class AdminCommandHandler {
 
     private static void addToBlacklist(TrpgCommandContext context, SessionActor actor,
                                        String[] params) {
-        if (!actor.inGroup() || !actor.groupAdmin()) {
-            context.rejectError(actor, "blacklist-permission", "只有群管理员能管理本群黑名单",
-                    PERMISSION_NEXT);
+        if (!actor.inGroup()) {
+            context.rejectError(actor, "blacklist-permission", "拉黑只能在群内进行",
+                    "私聊用法：/trpg blacklist remove <群号> <QQ>");
             return;
         }
         long target = TrpgCommandService.parseUserId(arg(params, 2));
@@ -179,19 +199,9 @@ final class AdminCommandHandler {
         long groupId;
         long target;
         if (actor.inGroup()) {
-            if (!actor.groupAdmin()) {
-                context.rejectError(actor, "blacklist-permission", "只有群管理员能管理本群黑名单",
-                        PERMISSION_NEXT);
-                return;
-            }
             groupId = actor.groupId();
             target = TrpgCommandService.parseUserId(arg(params, 2));
         } else {
-            if (!actor.botAdmin()) {
-                context.rejectError(actor, "blacklist-permission", "私聊解封仅限 BOT_ADMIN 或 OWNER",
-                        PERMISSION_NEXT);
-                return;
-            }
             Long parsedGroup = longValue(arg(params, 2));
             groupId = parsedGroup == null ? 0L : parsedGroup.longValue();
             target = TrpgCommandService.parseUserId(arg(params, 3));
@@ -204,7 +214,13 @@ final class AdminCommandHandler {
         boolean removed = context.blacklist().remove(groupId, target);
         String name = context.nameOf(groupId, target);
         if (!removed) {
-            context.rejectNotice(actor, "blacklist-absent", "对方不在该群黑名单中：" + name);
+            // false 有两种来源：本来就不在名单，或 -1 语句未执行。再读一次名单区分。
+            if (context.blacklist().contains(groupId, target)) {
+                context.rejectError(actor, "blacklist-write", "解封失败，请稍后重试",
+                        "可以再发送一次重试。");
+            } else {
+                context.rejectNotice(actor, "blacklist-absent", "对方不在该群黑名单中：" + name);
+            }
             return;
         }
         context.reply(actor, TrpgMessageTemplates.notice(
@@ -212,13 +228,15 @@ final class AdminCommandHandler {
     }
 
     private static void listBlacklist(TrpgCommandContext context, SessionActor actor) {
-        if (!actor.inGroup() || !actor.groupAdmin()) {
-            context.rejectError(actor, "blacklist-permission", "只有群管理员能查看本群黑名单",
-                    PERMISSION_NEXT);
+        if (!actor.inGroup()) {
+            context.rejectError(actor, "blacklist-permission", "黑名单列表只能在群内查看",
+                    "私聊用法：/trpg blacklist remove <群号> <QQ>");
             return;
         }
         List<BlacklistRow> rows = context.blacklist().list(actor.groupId());
-        StringBuilder message = new StringBuilder("本群黑名单（" + rows.size() + " 人）");
+        // 名单可能超过【提示】的 120 字上限，这里按群内正文上限由拆分器处理，不套 notice 模板。
+        StringBuilder message = new StringBuilder(TrpgTitles.of(TrpgTitles.NOTICE))
+                .append('\n').append("本群黑名单（").append(rows.size()).append(" 人）");
         if (rows.isEmpty()) {
             message.append("：暂无。");
         } else {
@@ -229,7 +247,7 @@ final class AdminCommandHandler {
                 }
             }
         }
-        context.reply(actor, TrpgMessageTemplates.notice(message.toString()));
+        context.reply(actor, message.toString());
     }
 
     private static boolean requireBotAdmin(TrpgCommandContext context, SessionActor actor) {

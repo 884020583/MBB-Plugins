@@ -1,6 +1,7 @@
 package org.moboxlab.mbb.trpg.session;
 
 import java.util.List;
+import java.util.Locale;
 
 import org.moboxlab.mbb.trpg.config.TrpgConfig;
 import org.moboxlab.mbb.trpg.rule.CheckResult;
@@ -166,7 +167,7 @@ final class SessionCheckService {
         }
         int bonusDice = 0;
         int penaltyDice = 0;
-        String diceKind = rawDiceKind == null ? "" : rawDiceKind.trim().toLowerCase();
+        String diceKind = rawDiceKind == null ? "" : rawDiceKind.trim().toLowerCase(Locale.ROOT);
         if (diceKind.isEmpty()) {
             diceCount = 0;
         } else if ("bp".equals(diceKind) || "b".equals(diceKind)) {
@@ -200,15 +201,8 @@ final class SessionCheckService {
         } catch (RuleException e) {
             return PlayResult.rejected(SessionResult.storageFailure("检定解析失败，请稍后重试"));
         }
-        if (result.success()) {
-            List<String> merged = SessionPlaySupport.mergeSkill(member.successSkills(), skill);
-            int affected = store.appendSuccessSkills(row.id(), rollerUserId, merged, turn.now);
-            if (affected < 0) {
-                return PlayResult.rejected(SessionResult.storageFailure("成长记录未生效，请稍后重试"));
-            }
-            if (affected == 0) {
-                warn("成长技能写入未生效：session=" + row.id() + "，user=" + rollerUserId);
-            }
+        if (result.success() && !recordGrowth(row, member, skill, turn.now)) {
+            return PlayResult.rejected(SessionResult.storageFailure("成长记录未生效，请稍后重试"));
         }
         sessions.appendLog(row.id(), EVENT_CHECK, turn.actor.userId(),
                 skill + " " + CheckResult.degreeLabel(result.degree()), turn.now);
@@ -319,7 +313,9 @@ final class SessionCheckService {
         long madnessUntil = member.madnessUntil();
         long leftAt = member.leftAt();
         if (permanent) {
+            // 永久疯狂即退场，不再保留临时疯狂的结束时间，避免状态自相矛盾。
             leftAt = turn.now;
+            madnessUntil = 0L;
         } else if (result.sanTriggerInt() && intCheckFailed(card, row.ruleSetId())) {
             maddened = true;
             long hours = random.roll(MADNESS_DIE_FACES);
@@ -472,6 +468,14 @@ final class SessionCheckService {
         } else if (result.outcome() == OpposedOutcome.RIGHT_WIN) {
             winner = rightUserId;
         }
+        if (winner > 0L) {
+            // 对抗胜出方同样计入成长候选（§7.6：成功或作为对抗胜出方使用该技能）。
+            MemberRow winnerMember = winner == leftUserId ? left : turn.member(row, winner);
+            String winnerSkill = winner == leftUserId ? leftSkill : rightLabel;
+            if (winnerMember != null && !recordGrowth(row, winnerMember, winnerSkill, turn.now)) {
+                return PlayResult.rejected(SessionResult.storageFailure("成长记录未生效，请稍后重试"));
+            }
+        }
         sessions.appendLog(row.id(), EVENT_OPPOSED, turn.actor.userId(),
                 leftSkill + " vs " + rightLabel + " "
                         + CheckResult.degreeLabel(result.left().degree()), turn.now);
@@ -485,6 +489,19 @@ final class SessionCheckService {
                 SessionPlaySupport.clamp(leftStored.intValue(), SKILL_MIN, SKILL_MAX), rightTarget,
                 result.left().degree(), result.right().degree(), winner,
                 tieBreakLabel(result.decidedBy()), hints));
+    }
+
+    /** 把技能记入成长候选（检定成功或对抗胜出，§7.6）；写入失败返回 false。 */
+    private boolean recordGrowth(SessionRow row, MemberRow member, String skill, long now) {
+        List<String> merged = SessionPlaySupport.mergeSkill(member.successSkills(), skill);
+        int affected = store.appendSuccessSkills(row.id(), member.userId(), merged, now);
+        if (affected < 0) {
+            return false;
+        }
+        if (affected == 0) {
+            warn("成长技能写入未生效：session=" + row.id() + "，user=" + member.userId());
+        }
+        return true;
     }
 
     /** 奖惩骰说明：把被取用的十位骰写清楚，便于桌面上核对。 */

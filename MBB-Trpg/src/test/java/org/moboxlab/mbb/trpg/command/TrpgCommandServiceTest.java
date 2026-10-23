@@ -103,7 +103,8 @@ public class TrpgCommandServiceTest {
     @Test
     public void helpListsAllImplementedCommands() {
         assertTrue(run(kpSender(), "help"));
-        String text = lastGroupText();
+        // 指令多到超过群内单条上限时由拆分器续页，断言要看整段回执。
+        String text = groupText();
         assertTrue(text, text.contains("【帮助】"));
         assertTrue(text, text.contains("start / 开团"));
         assertTrue(text, text.contains("pc reroll / 重掷"));

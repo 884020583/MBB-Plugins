@@ -116,12 +116,16 @@ final class KpCommandHandler {
         int index = 1;
         long targetUserId = 0L;
         String first = arg(params, index);
-        if (isUserToken(first)) {
+        // 只有提及形式才算「代谁掷」，纯数字留给技能名，避免 /trpg check 60 侦查 把 60 当玩家。
+        if (isMentionToken(first)) {
             long parsed = TrpgCommandService.parseUserId(first);
-            if (parsed > 0L) {
-                targetUserId = parsed;
-                index++;
+            if (parsed <= 0L) {
+                context.rejectError(actor, "check-target", "参数不对：无法识别玩家 " + first,
+                        "用法：/trpg check <技能> 或 /trpg check <@玩家> <技能>");
+                return;
             }
+            targetUserId = parsed;
+            index++;
         }
         String skill = arg(params, index);
         String diceKind = arg(params, index + 1);
@@ -141,7 +145,9 @@ final class KpCommandHandler {
     }
 
     static void opposed(TrpgCommandContext context, SessionActor actor, String[] params) {
-        long leftUserId = TrpgCommandService.parseUserId(arg(params, 1));
+        String leftToken = arg(params, 1);
+        // 左侧必须是提及形式：纯数字在这里不是玩家号，按「缺少对抗双方」拒绝。
+        long leftUserId = isMentionToken(leftToken) ? TrpgCommandService.parseUserId(leftToken) : -1L;
         String leftSkill = arg(params, 2);
         int index = "vs".equalsIgnoreCase(arg(params, 3)) ? 4 : 3;
         String rightToken = arg(params, index);
@@ -179,17 +185,9 @@ final class KpCommandHandler {
         }
         SessionOutcomes.San detail = played.detail();
         String rollerName = context.nameOf(actor.groupId(), detail.rollerUserId());
-        StringBuilder message = new StringBuilder(TrpgMessageTemplates.san(TrpgCheckView.san(
+        context.reply(actor, TrpgMessageTemplates.san(TrpgCheckView.san(
                 rollerName, detail.rolled(), detail.target(), detail.degree(), detail.sanBefore(),
-                detail.sanAfter())));
-        if (detail.permanent()) {
-            message.append("\n理智归零，该角色永久疯狂并退场。");
-        } else if (detail.maddened()) {
-            message.append("\n临时性疯狂，症状持续到 ")
-                    .append(TrpgMessageTemplates.dateTime(detail.madnessUntil()))
-                    .append("。");
-        }
-        context.reply(actor, message.toString());
+                detail.sanAfter()), detail.permanent(), detail.maddened(), detail.madnessUntil()));
         sendKpHint(context, played.result().snapshot().kpUserId(), "理智", detail.triggerHint());
     }
 
@@ -257,11 +255,8 @@ final class KpCommandHandler {
         if (!context.accept(actor, result)) {
             return;
         }
-        context.reply(actor, TrpgMessageTemplates.host(isOnWord(word)));
-    }
-
-    private static boolean isOnWord(String word) {
-        return "on".equalsIgnoreCase(word) || "开".equals(word);
+        // 以局面服务写回后的状态为准，避免指令层再维护一份开关词表。
+        context.reply(actor, TrpgMessageTemplates.host(result.snapshot().aiEnabled()));
     }
 
     /** 触发器提示只私聊 KP；发送失败不重试，也不回退到群内。 */
@@ -288,17 +283,6 @@ final class KpCommandHandler {
             return false;
         }
         return token.startsWith("<@") || token.startsWith("[CQ:at");
-    }
-
-    /** 参数是否看起来是用户标识（提及或纯数字）。 */
-    private static boolean isUserToken(String token) {
-        if (token == null || token.isEmpty()) {
-            return false;
-        }
-        if (token.startsWith("<@") || token.startsWith("[CQ:at")) {
-            return true;
-        }
-        return intValue(token, -1) > 0;
     }
 
     private static String arg(String[] params, int index) {

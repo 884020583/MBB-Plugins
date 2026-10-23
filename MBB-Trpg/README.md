@@ -34,8 +34,8 @@ S7 已落地的指令层 A 继续保留：
 - `TrpgCommand`（`/trpg`）与 `DiceCommand`（`/r`、`/roll`）：主类只做转发，框架权限一律 `EVERYONE`，
   真正的权限、状态与冷却判定全在 `SessionService`。
 - `TrpgSubcommand`：主名与中文别名（`start / 开团`、`pc reroll / 重掷`、`pc set / 微调` 等）
-  只在这一处定义，指令分派、帮助列表与拒绝话术共用；未实现子命令先回「将在后续版本启用」。
-- 生命周期与只读：`start` / `join` / `leave` / `begin` / `end`（二次确认按「群 + 发起者」计）/
+  只在这一处定义，指令分派、帮助列表与拒绝话术共用；本片起全部子命令均已启用。
+- 生命周期与只读：`start` / `join` / `leave` / `begin` / `end`（二次确认按「群 + 局 + 发起者」计）/
   `resume` / `status` / `help` / `pc` / `pc reroll` / `pc set` / `log`；命令层只解析与委托，
   不写库、不持状态，一条指令只回一条回执，拒绝话术统一走 `TrpgPresenter` 的【错误】模板。
 - 指令分派用 `TrpgSubcommandHandler` 注册表 + `TrpgCommandContext`（共享冷却、错误去重、

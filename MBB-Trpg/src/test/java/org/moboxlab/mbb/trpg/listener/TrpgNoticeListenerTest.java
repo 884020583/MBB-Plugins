@@ -140,7 +140,8 @@ public class TrpgNoticeListenerTest {
         listener.onNotice(notice("group_decrease", KP));
 
         assertEquals(SessionState.ENDED, store.findSession(sessionId).state());
-        assertEquals("kp_left", store.findSession(sessionId).endReason());
+        // 招募期 KP 离群按 T7 记 cancelled（§5.3），进行中才是 kp_left。
+        assertEquals("cancelled", store.findSession(sessionId).endReason());
     }
 
     private long startRunning() {

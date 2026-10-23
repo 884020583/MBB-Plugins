@@ -28,11 +28,11 @@ public enum TrpgSubcommand {
     OPPOSED("opposed", "对抗", "<@A> <技能> vs <@B> <技能或目标值>", true, true),
     SAN("san", "理智", "<@玩家> <X/Y>", true, true),
     ADJUST("adjust", "调整", "<@玩家> <技能> <±值>", true, true),
-    INVITE("invite", "邀请", "<@玩家>", true, true),
+    INVITE("invite", "邀请", "<QQ>", true, true),
     TAKE("take", "接管", "<@玩家>", true, true),
     SKIP("skip", "跳过", "<@玩家> [原因]", true, true),
     SCRIPT("script", "剧本", "[list|show|import|delete|gen] ...", false, true),
-    BLACKLIST("blacklist", "黑名单", "add|remove|list", false, true),
+    BLACKLIST("blacklist", "黑名单", "add|remove|list（私聊 remove <群号> <QQ>）", false, true),
     AI("ai", "AI 主持", "on|off", true, true);
 
     private final String primary;

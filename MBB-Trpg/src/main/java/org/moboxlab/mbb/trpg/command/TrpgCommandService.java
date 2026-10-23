@@ -11,6 +11,7 @@ import org.moboxlab.moboxbot.API.PluginLogger;
 import org.moboxlab.mbb.trpg.card.CardGenerator;
 import org.moboxlab.mbb.trpg.config.TrpgConfig;
 import org.moboxlab.mbb.trpg.present.TrpgNameResolver;
+import org.moboxlab.mbb.trpg.present.TrpgMessageTemplates;
 import org.moboxlab.mbb.trpg.present.TrpgPresenter;
 import org.moboxlab.mbb.trpg.script.ScriptCatalog;
 import org.moboxlab.mbb.trpg.session.Clock;
@@ -109,6 +110,11 @@ public final class TrpgCommandService {
             return false;
         }
         SessionActor actor = actorOf(sender);
+        if (actor.inGroup() && context.blacklist() != null
+                && context.blacklist().contains(actor.groupId(), actor.userId())) {
+            // 黑名单命中：静默丢弃，不处理、不刷新局内活动、不产生任何回执（§5.4）。
+            return true;
+        }
         if (actor.inGroup()) {
             // 局内活动节流由 SessionService 内部按 60 秒窗口判定，这里忽略返回值。
             context.sessions().touchActivity(actor.groupId(), actor.userId());
@@ -129,11 +135,6 @@ public final class TrpgCommandService {
             context.rejectError(actor, KEY_PRIVATE, "请在群内使用", PRIVATE_NEXT);
             return true;
         }
-        if (actor.inGroup() && context.blacklist() != null
-                && context.blacklist().contains(actor.groupId(), actor.userId())) {
-            // 黑名单命中：静默丢弃，不产生任何回执（§6.2）。
-            return true;
-        }
         TrpgSubcommandHandler handler = handlers.get(subcommand);
         if (!subcommand.implemented() || handler == null) {
             context.rejectNotice(actor, KEY_UPCOMING, "该指令将在后续版本启用：" + subcommand.label());
@@ -146,7 +147,7 @@ public final class TrpgCommandService {
     private void runHelp(SessionActor actor, String[] params) {
         TrpgSubcommandHandler help = handlers.get(TrpgSubcommand.HELP);
         if (help == null) {
-            context.reply(actor, org.moboxlab.mbb.trpg.present.TrpgMessageTemplates.notice("帮助暂不可用"));
+            context.reply(actor, TrpgMessageTemplates.notice("帮助暂不可用"));
             return;
         }
         help.handle(context, actor, params);

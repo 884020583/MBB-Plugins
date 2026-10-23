@@ -17,8 +17,6 @@ import org.moboxlab.mbb.trpg.store.MemberRow;
 import org.moboxlab.mbb.trpg.store.SessionRow;
 import org.moboxlab.mbb.trpg.store.SessionStore;
 
-import org.moboxlab.moboxbot.API.PluginLogger;
-
 /**
  * 局面流程动作（规格 §6.1 的 KP 子集）：场景推进、技能调整、邀请、接管、跳过与换剧本。
  *
@@ -53,10 +51,9 @@ final class SessionPlayService {
     private final SessionStore store;
     private final ScriptCatalog catalog;
     private final TrpgConfig config;
-    private final PluginLogger logger;
 
     SessionPlayService(SessionService sessions, SessionStore store, ScriptCatalog catalog,
-                       TrpgConfig config, PluginLogger logger) {
+                       TrpgConfig config) {
         if (sessions == null) {
             throw new IllegalArgumentException("局面服务不能为空");
         }
@@ -73,7 +70,6 @@ final class SessionPlayService {
         this.store = store;
         this.catalog = catalog;
         this.config = config;
-        this.logger = logger;
     }
 
     /** 推进到指定场景并解锁本场景尚未解锁的线索（§6.1 scene）。 */
@@ -162,7 +158,7 @@ final class SessionPlayService {
                 newClueKeys, hints));
     }
 
-    /** 技能检定（§6.1 check）：本人或 KP 代掷，成功技能记入成长集合。 */
+    /** 技能调整（§6.1 adjust）：KP 改成员技能，越界拒绝并记日志。 */
     PlayResult<SessionOutcomes.Adjust> adjust(SessionActor actor, final long targetUserId,
                                               final String rawSkill, final String rawDelta) {
         final SessionActor request = SessionService.requireActor(actor);
@@ -291,6 +287,11 @@ final class SessionPlayService {
         if (existing != null && existing.leftAt() <= 0L) {
             return sessions.reject(turn, SessionReject.MEMBER_STATE, "对方已在局内");
         }
+        Script script = sessions.loadScript(row.scriptId());
+        if (script != null && sessions.insideCount(row, targetUserId) >= script.maxPlayers()) {
+            return sessions.reject(turn, SessionReject.MEMBER_STATE,
+                    "本局人数已满（" + script.maxPlayers() + " 人）");
+        }
         SessionResult cooling = sessions.cooling(ACTION_INVITE, turn,
                 config.defaultCooldownSeconds());
         if (cooling != null) {
@@ -410,7 +411,7 @@ final class SessionPlayService {
             return sessions.reject(turn, SessionReject.BAD_ARGUMENT, "参数不对：缺少目标玩家");
         }
         MemberRow member = turn.member(row, targetUserId);
-        if (member == null) {
+        if (member == null || member.leftAt() > 0L) {
             return sessions.reject(turn, SessionReject.MEMBER_STATE, "目标不在本局内");
         }
         SessionResult cooling = sessions.cooling(ACTION_SKIP, turn, config.defaultCooldownSeconds());
@@ -418,7 +419,10 @@ final class SessionPlayService {
             return cooling;
         }
         String reason = rawReason == null ? "" : rawReason.trim();
-        sessions.appendLog(row.id(), EVENT_SKIP, turn.actor.userId(), reason, turn.now);
+        // 日志带上被跳过的人，/trpg log 才能定位到具体成员。
+        String content = reason.isEmpty() ? String.valueOf(targetUserId)
+                : targetUserId + " " + reason;
+        sessions.appendLog(row.id(), EVENT_SKIP, turn.actor.userId(), content, turn.now);
         sessions.markCooldown(ACTION_SKIP, turn);
         return SessionResult.ok(turn.snapshot(row), "已记录跳过");
     }
@@ -473,7 +477,7 @@ final class SessionPlayService {
         return SessionResult.ok(turn.reload(row), "本局剧本已切换为《" + script.name() + "》");
     }
 
-    /** 取本局剧本；缺失返回 null（调用方按不可用处理）。 */
+    /** 按进入的场景与本次解锁的线索聚合触发器提示（§4.4 trigger）。 */
     private static String sceneHint(Script script, String sceneId, List<String> newClueKeys) {
         if (script == null) {
             return "";
@@ -495,9 +499,4 @@ final class SessionPlayService {
         return SessionPlaySupport.joinHints(hints);
     }
 
-    private void warn(String message) {
-        if (logger != null) {
-            logger.sendWarn("[MBB-Trpg] " + message);
-        }
-    }
 }

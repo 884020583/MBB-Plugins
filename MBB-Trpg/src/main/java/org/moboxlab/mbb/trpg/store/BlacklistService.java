@@ -7,7 +7,8 @@ import java.util.List;
  * 群级拉黑名单服务：唯一实现直连 {@link SessionStore}。
  *
  * <p>拉黑是群内约束，不占群锁、不改变局面状态；重复拉黑靠唯一约束收敛为一行，
- * 名单永久保留，不随局清理。指令入口在后续切片接入，这里只提供读写语义。</p>
+ * 名单永久保留，不随局清理。指令入口见 command 包的 AdminCommandHandler，
+ * 消息入口的静默拦截见 listener 包的 TrpgListener。</p>
  */
 public final class BlacklistService {
 

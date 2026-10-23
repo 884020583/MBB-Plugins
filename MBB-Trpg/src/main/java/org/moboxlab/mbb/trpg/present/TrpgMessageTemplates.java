@@ -46,7 +46,6 @@ public final class TrpgMessageTemplates {
     private static final int LIMIT_SAN = 200;
     private static final int LIMIT_GROWTH = 300;
     private static final int LIMIT_ADJUST = 160;
-    private static final int LIMIT_TAKE = 120;
     private static final int LIMIT_SCRIPT_CHANGED = 200;
     private static final int LIMIT_TRIGGER = 200;
     private static final int LIMIT_AI_NARRATION = 300;
@@ -61,7 +60,7 @@ public final class TrpgMessageTemplates {
     private static final int LIMIT_SCRIPT_LIBRARY = 500;
     private static final int LIMIT_STATUS = 400;
     private static final int LIMIT_LOG = 900;
-    private static final int LIMIT_HELP = 500;
+    private static final int LIMIT_HELP = 900;
 
     private TrpgMessageTemplates() {
     }
@@ -200,12 +199,29 @@ public final class TrpgMessageTemplates {
 
     /** 理智检定。 */
     public static String san(TrpgCheckView view) {
+        return san(view, false, false, 0L);
+    }
+
+    /**
+     * 理智检定，附带疯狂结局。
+     *
+     * @param permanent    是否理智归零、永久疯狂并退场
+     * @param maddened     是否临时性疯狂
+     * @param madnessUntil 临时性疯狂的结束时间（毫秒）
+     */
+    public static String san(TrpgCheckView view, boolean permanent, boolean maddened,
+                             long madnessUntil) {
         StringBuilder body = new StringBuilder();
         body.append(TrpgTitles.of(TrpgTitles.SAN, view.rollerName())).append('\n');
         body.append("1D100 = ").append(view.rolled()).append(" / ").append(view.target())
                 .append(' ').append(degreeClause(view)).append('\n');
         body.append("SAN ").append(view.sanBefore()).append(" → ").append(view.sanAfter())
                 .append("（损失 ").append(view.sanLoss()).append("）");
+        if (permanent) {
+            body.append("\n理智归零，该角色永久疯狂并退场。");
+        } else if (maddened) {
+            body.append("\n临时性疯狂，症状持续到 ").append(dateTime(madnessUntil)).append('。');
+        }
         return limit(body.toString(), LIMIT_SAN);
     }
 
@@ -247,10 +263,15 @@ public final class TrpgMessageTemplates {
                 LIMIT_ADJUST);
     }
 
-    /** KP 代管某一成员的行动。 */
+    /**
+     * KP 代管某一成员的行动。
+     *
+     * <p>词表里的【接管】冻结为 KP 交接（原 KP → 新 KP），代管玩家回合并入【提示】，
+     * 避免同一个标题承载两种语义。</p>
+     */
     public static String takeoverAction(String name) {
-        return limit(TrpgTitles.of(TrpgTitles.TAKE, name) + "\n"
-                + "KP 接管了该成员的回合，本局由其代掷。", LIMIT_TAKE);
+        return limit(TrpgTitles.of(TrpgTitles.NOTICE) + "\n已记录代管：" + name
+                + "。KP 会代该成员掷骰。", LIMIT_NOTICE);
     }
 
     /** 跳过回执：只记日志，不改角色卡。 */
