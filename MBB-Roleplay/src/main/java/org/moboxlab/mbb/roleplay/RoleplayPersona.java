@@ -16,6 +16,12 @@ import java.util.Map;
  * 角色设定
  */
 public class RoleplayPersona {
+    public static class SpeechPattern {
+        public String when = "";
+        public String style = "";
+        public List<String> keywords = new ArrayList<>();
+    }
+
     public static class StudentProfile {
         public String name = "";
         public String school = "";
@@ -36,6 +42,7 @@ public class RoleplayPersona {
     public String speechStyle = "";
     public String behavior = "";
     public List<String> catchphrases = new ArrayList<>();
+    public List<SpeechPattern> speechPatterns = new ArrayList<>();
     public List<String> aliases = new ArrayList<>();
     public List<String> memes = new ArrayList<>();
     public List<String> interests = new ArrayList<>();
@@ -67,6 +74,7 @@ public class RoleplayPersona {
             persona.speechStyle = safe(json.getString("speechStyle"),"");
             persona.behavior = safe(json.getString("behavior"),"");
             persona.catchphrases = readList(json.getJSONArray("catchphrases"));
+            persona.speechPatterns = readSpeechPatterns(json.getJSONArray("speechPatterns"));
             persona.aliases = readList(json.getJSONArray("aliases"));
             persona.memes = readList(json.getJSONArray("memes"));
             if (persona.aliases.isEmpty()) {
@@ -119,13 +127,25 @@ public class RoleplayPersona {
                 +(club.isEmpty() ? "" : "社团："+club+"\n")
                 +"性格："+personality+"\n"
                 +"说话方式："+speechStyle+"\n"
-                +(catchphrases.isEmpty() ? "" : "口癖："+String.join("、",catchphrases)+"\n")
                 +(aliases.isEmpty() ? "" : "称呼："+String.join("、",aliases)+"\n")
                 +(memes.isEmpty() ? "" : "了解的梗："+String.join("；",memes)+"\n")
                 +(relationships.isEmpty() ? "" : "关系："+String.join("；",relationships)+"\n")
                 +(terminology.isEmpty() ? "" : "专有名词："+String.join("；",terminology)+"\n")
                 +(storyMemory.isEmpty() ? "" : "剧情记忆："+String.join("；",storyMemory)+"\n")
                 +"行为规则："+behavior+"\n";
+    }
+
+    public String speechRuleText(String messageText) {
+        if (speechPatterns.isEmpty()) return "";
+        String text = messageText == null ? "" : messageText.toLowerCase();
+        List<String> selected = new ArrayList<>();
+        for (SpeechPattern pattern : speechPatterns) {
+            if (pattern == null || pattern.style.trim().isEmpty()) continue;
+            if (!pattern.keywords.isEmpty() && !matchesAny(text,pattern.keywords)) continue;
+            selected.add("- 当"+safe(pattern.when,"当前场景")+"时："+pattern.style.trim());
+            if (selected.size() >= 2) break;
+        }
+        return selected.isEmpty() ? "" : "本轮命中的场景语气规则：\n"+String.join("\n",selected)+"\n";
     }
 
     /** 角色自己的外貌 */
@@ -221,6 +241,29 @@ public class RoleplayPersona {
             }
         }
         return result;
+    }
+
+    private static List<SpeechPattern> readSpeechPatterns(JSONArray array) {
+        List<SpeechPattern> result = new ArrayList<>();
+        if (array == null) return result;
+        for (Object value : array) {
+            if (!(value instanceof JSONObject)) continue;
+            JSONObject json = (JSONObject)value;
+            SpeechPattern pattern = new SpeechPattern();
+            pattern.when = safe(json.getString("when"),"");
+            pattern.style = safe(json.getString("style"),"");
+            pattern.keywords = readList(json.getJSONArray("keywords"));
+            if (!pattern.style.trim().isEmpty()) result.add(pattern);
+        }
+        return result;
+    }
+
+    private static boolean matchesAny(String text,List<String> keywords) {
+        for (String keyword : keywords) {
+            if (keyword != null && !keyword.trim().isEmpty()
+                    && text.contains(keyword.trim().toLowerCase())) return true;
+        }
+        return false;
     }
 
     private static void mergeSharedStudents(Plugin plugin,RoleplayPersona persona) {

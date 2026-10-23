@@ -10,7 +10,7 @@ persona 支持任意作品角色或原创角色，常用字段包括：
 
 - 名称、别名、身份
 - 世界观、学园、组织、阵营或势力
-- 外貌、性格、说话方式、口癖
+- 外貌、性格、说话方式和场景语气规则
 - 人物关系、专有名词、剧情记忆
 - 行为边界、互动规则和情绪基线
 
@@ -143,10 +143,13 @@ routerMaxTokens: 2400
 routerReasoningEffort: "none"
 styleEnable: true
 styleMaxChars: 60
+styleLongReplyEnable: false
 styleProfile: ""
 styleMaxTokens: 1200
 styleReasoningEffort: "low"
 styleProactiveEnable: false
+styleFailureThreshold: 2
+styleFailureCooldownSecond: 600
 replyImageMaxTokens: 4000
 replySegmentMaxChars: 30
 replySplitPunctuation: "。！？!?；;，、：,:～~…"
@@ -167,6 +170,29 @@ replyReviewMaxTokens: 1200
 replyReviewReasoningEffort: "none"
 replyReviewTimeoutSecond: 60
 replyReviewMinScore: 70
+toolEnable: true
+toolMaxSteps: 8
+toolMaxCalls: 16
+toolResultMaxChars: 16000
+toolLiveMessageMax: 10
+toolLoopMaxMillis: 90000
+toolCallMaxMillis: 20000
+toolMemoryInjectItems: 8
+toolMemoryInjectMaxChars: 6000
+toolMemoryKeepHours: 72
+toolMemoryMaxRows: 500
+workspaceEnable: true
+workspaceMaxReadChars: 32000
+workspaceMaxWriteChars: 64000
+workspaceMaxFilesPerList: 200
+workspaceMaxTotalBytes: 67108864
+webEnable: true
+webWhitelist: "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com"
+webTimeoutSecond: 15
+webMaxBytes: 262144
+webMaxChars: 12000
+contextHardLimitEnable: false
+promptTotalChars: 120000
 pacingEnable: true
 pacingBaseMs: 350
 pacingPerCharMs: 25
@@ -241,13 +267,30 @@ quietReplyEnable: true
 
 `replyReviewEnable` 默认 `true`。角色回复在发送前会经过 `RoleplayReplyReviewService` 复核：检查是否像角色、是否有 AI 味、总结腔、说教、重复或过长；分数低于 `replyReviewMinScore` 且模型给出 `rewrite` 时使用改写文本。`replyReviewProfile` 留空时使用 `aiProfile`。
 
+`toolEnable` 默认 `true`，通过 `MBB-AI` 的 OpenAI `tools/tool_calls` 执行有限工具循环。
+`toolMaxSteps` 和 `toolMaxCalls` 限制单轮循环次数；工具期间新消息并入上下文受
+`toolLiveMessageMax` 限制。`toolLoopMaxMillis` 与 `toolCallMaxMillis` 分别限制整轮和单工具耗时，
+`toolMemoryInject*` 控制下一轮按相关性注入的工具结果上下文。`workspaceEnable` 开放角色的私有工作区
+`plugins/MBB-Roleplay/data/`，读写大小和列表数量分别由 `workspaceMaxReadChars`、
+`workspaceMaxWriteChars`、`workspaceMaxFilesPerList` 控制。具体工具见
+[工具调用、工作区与交流节拍](tools.md)。
+
+`webEnable` 开放受限网页读取工具，只允许 `webWhitelist` 中的域名及其子域名。
+`contextHardLimitEnable` 默认关闭，关闭时不按 `promptTotalChars` 截断动态资料；
+只有显式打开本地硬预算时才使用该上限。
+
+超长回复默认不再交给小模型风格层，而是由大模型回复复核处理。只有显式设置
+`styleLongReplyEnable: true` 时，超过 `styleMaxChars` 的回复才会先触发风格层。
+风格层连续出现 `styleFailureThreshold` 次无效改写后会熔断
+`styleFailureCooldownSecond` 秒，期间直接使用执行层原文。
+
 `traceEnable` 默认 `true`，按群记录路由与回复 trace，保留 `traceKeepHours` 小时，最多 `traceMaxRows` 行；`/role trace` 查看。`evalEnable` 默认 `true`，`/role eval` 运行内置或 `evals/roleplay-evals.json` 自定义评测集，`evalProfile` 留空时使用 `aiProfile`。
 
 `threadEnable` 默认 `true`，按群维护会话线程、参与者、上一位发言者和角色是否被等待回应；`threadWindowSecond` 控制多久没有新消息后视为新线程。
 
 `memoryConflictResolveEnable` 默认 `true`。写入新长期记忆时，如果同群、同类型、同用户下存在相反极性的高重合旧记忆，会把旧记忆标记为 `archived` 并记录 `supersededBy`，不直接删除；`/role memory conflicts` 可查看。
 
-`pacingEnable` 默认 `true`。发送前按回复长度、深夜时段和群注意力计算拟人打字延迟，`pacingMaxMs` 控制上限；深夜使用 `pacingNightMultiplier`，群活跃时使用 `pacingActiveMultiplier`。
+`pacingEnable` 默认 `true`。发送前按回复长度、深夜时段和群注意力计算拟人打字延迟，`pacingMaxMs` 控制上限；深夜使用 `pacingNightMultiplier`，群活跃时使用 `pacingActiveMultiplier`。角色可以在正文中换行表达连续节拍，节拍间隔由 `replyBeatBaseDelayMs`、`replyBeatPerCharMs` 和 `replyBeatMaxDelayMs` 控制。
 
 `safetyGuardEnable` 默认 `true`，拦截系统提示词诱导、越狱指令和现实隐私索取；`promptInjectionGuardEnable` 和 `privacyGuardEnable` 可分别关闭。长期记忆写入也会经过同样的安全检查。
 

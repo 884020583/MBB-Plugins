@@ -82,7 +82,8 @@ public class RoleplayPokeService {
         decision.reason = "被戳一戳："+hint;
         if (service.config().pokeBackEnable && allowPokeBack) decision.actions.add("poke-back");
         String content = "[戳一戳] "+userName+" 戳了你一下。本轮建议："+hint;
-        JSONObject result = service.reply(groupID,userID,userName,content,false,relationship,null,decision);
+        JSONObject result = service.reply(groupID,userID,userName,content,false,relationship,null,
+                decision,0L,selfID);
         if (result == null || !result.getBooleanValue("status")) {
             service.emotionService().afterTurn(groupID,userID,userName,relationship,content,
                     emotionEvent,true,false);

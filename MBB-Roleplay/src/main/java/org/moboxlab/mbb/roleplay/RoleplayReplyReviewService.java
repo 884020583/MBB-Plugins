@@ -37,6 +37,7 @@ public class RoleplayReplyReviewService {
             input.put("message",service.safe(content));
             input.put("reply",service.safe(reply));
             input.put("addressed",decision == null ? "" : service.safe(decision.addressed));
+            input.put("speechRules",service.persona().speechRuleText(content));
             messages.add(service.message("user",input.toJSONString()));
             JSONObject params = new JSONObject(true);
             String profile = service.safe(service.config().replyReviewProfile).isEmpty()
@@ -61,7 +62,14 @@ public class RoleplayReplyReviewService {
             result.reason = service.shortText(service.safe(parsed.getString("reason")),120);
             String rewrite = service.safe(parsed.getString("rewrite")).trim();
             if (!rewrite.isEmpty() && !"<SKIP>".equalsIgnoreCase(rewrite)) {
-                result.text = rewrite;
+                String rejectReason = RoleplayReplyTextValidator.rejectReason(reply,rewrite);
+                if (rejectReason.isEmpty()) {
+                    result.text = rewrite;
+                } else {
+                    service.plugin().getLogger().sendWarn("[复核] 群"+groupID+" 丢弃改写："
+                            +rejectReason+" 原文="+service.shortText(reply,80)
+                            +" 改写="+service.shortText(rewrite,80));
+                }
             }
             if (!result.pass) {
                 service.plugin().getLogger().sendInfo("[复核] 群"+groupID+" 分数="+result.score
@@ -81,8 +89,10 @@ public class RoleplayReplyReviewService {
                 +"角色核心：\n"+persona.coreText()+"\n"
                 +"角色说话方式：\n"+persona.speechStyle+"\n"
                 +"检查回复是否像该角色、是否有明显 AI 味、是否总结/说教/客服腔、是否重复啰嗦、"
-                +"是否与当前消息有关、是否超过普通 QQ 聊天长度。\n"
+                +"是否与当前消息有关、是否超过普通 QQ 聊天长度，以及是否像剧情台词、舞台动作或旁白。\n"
+                +"如果有 speechRules，只检查命中的场景规则，不要额外补口癖或剧情内容。\n"
                 +"输出格式：{\"pass\":true,\"score\":0,\"reason\":\"\",\"rewrite\":\"\"}。\n"
-                +"只有确实需要改写时才填 rewrite；改写必须保持原意和角色语气，不要增加新事实，不要 Markdown。";
+                +"只有确实需要改写时才填 rewrite；改写必须保持原意和角色语气，不要增加新事实，"
+                +"不要角色名前缀、括号动作、心理旁白、镜头描写或 Markdown。";
     }
 }

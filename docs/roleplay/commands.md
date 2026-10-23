@@ -1,5 +1,7 @@
 # MBB-Roleplay 指令
 
+所有标注 `<QQ>` 的参数都可以直接在群里艾特目标成员代替，例如 `/role blacklist add @某位群友 刷屏`。
+
 ## 指令
 
 | 指令 | 权限 | 说明 |
@@ -12,15 +14,15 @@
 | `/role config` | `BOT_ADMIN` | 查看配置文件与补全状态 |
 | `/role config repair` | `BOT_ADMIN` | 手动补全缺失配置项 |
 | `/role blacklist list` | `BOT_ADMIN` | 查看当前群黑名单 |
-| `/role blacklist add <QQ> [原因]` | `BOT_ADMIN` | 将用户加入当前群黑名单，后续过滤其消息和戳一戳，不删除已有用户记忆 |
-| `/role blacklist remove <QQ>` | `BOT_ADMIN` | 将用户移出当前群黑名单 |
+| `/role blacklist add <QQ\|@群友> [原因]` | `BOT_ADMIN` | 将用户加入当前群黑名单，后续过滤其消息和戳一戳，不删除已有用户记忆 |
+| `/role blacklist remove <QQ\|@群友>` | `BOT_ADMIN` | 将用户移出当前群黑名单 |
 | `/role blacklist clear` | `BOT_ADMIN` | 清空当前群黑名单 |
 | `/role quiet on` / `off` | `BOT_ADMIN` | 开关当前群免打扰名单，默认开启 |
 | `/role quiet list` | `BOT_ADMIN` | 查看当前群免打扰名单 |
-| `/role quiet add [QQ]` | `EVERYONE` | 把自己加入当前群免打扰名单，填 QQ 添加他人需要 `BOT_ADMIN` |
-| `/role quiet remove [QQ]` | `EVERYONE` | 把自己移出当前群免打扰名单，填 QQ 移除他人需要 `BOT_ADMIN` |
+| `/role quiet add [QQ\|@群友]` | `EVERYONE` | 把自己加入当前群免打扰名单，指定他人需要 `BOT_ADMIN` |
+| `/role quiet remove [QQ\|@群友]` | `EVERYONE` | 把自己移出当前群免打扰名单，指定他人需要 `BOT_ADMIN` |
 | `/role quiet clear` | `BOT_ADMIN` | 清空当前群免打扰名单 |
-| `/role help [分类]` | `EVERYONE` | 按分类查看完整命令，分类：basic / quiet / blacklist / emotion / memory / role / content / feedback |
+| `/role help [分类]` | `EVERYONE` | 按分类查看完整命令，分类：basic / quiet / blacklist / emotion / memory / role / content / feedback / tool / learn / train |
 | `/role feedback [reset]` | `BOT_ADMIN` | 查看主动发言被接话统计，reset 重置当前群统计 |
 | `/role expression list [状态]` | `BOT_ADMIN` | 查看表达候选，状态：pending / approved / rejected |
 | `/role expression promote <ID>` | `BOT_ADMIN` | 通过表达候选并允许注入提示词 |
@@ -29,25 +31,38 @@
 | `/role review [now]` | `BOT_ADMIN` | 手动触发当前群每日复盘 |
 | `/role attention [reset]` | `BOT_ADMIN` | 查看或重置当前群注意力 |
 | `/role trace [条数]` | `BOT_ADMIN` | 查看当前群最近的对话 trace，包含路由指向、技能、原因、回复和 token |
+| `/role tool stats` | `BOT_ADMIN` | 查看当前群工具调用统计 |
+| `/role tool test` | `BOT_ADMIN` | 检查工具 schema、参数校验、工作区路径隔离和网页白名单限制 |
+| `/role tool trace [条数]` | `BOT_ADMIN` | 查看最近工具调用、用户和时间 |
+| `/role tool clear` | `BOT_ADMIN` | 清空当前群持久化的工具结果上下文 |
 | `/role eval list` | `BOT_ADMIN` | 查看内置评测用例 |
 | `/role eval run <id\|all>` | `BOT_ADMIN` | 运行指定评测用例或全部评测 |
+| `/role learn [备注]` | `BOT_ADMIN` | 回复某条消息再发，采集那条消息和前后文到训练语料；不带引用时采集最近一条群消息 |
+| `/role learn stats` | `BOT_ADMIN` | 查看累计采集的语料数量 |
+| `/role learn recent [条数]` | `BOT_ADMIN` | 查看最近采集的语料记录 |
+| `/role train` | `BOT_ADMIN` | 查看风格层模型服务与训练状态 |
+| `/role train corpus [条数]` | `BOT_ADMIN` | 把上次截止到现在的新群消息导出，并基于当前 adapter 继续训练；成功后推进截止时间 |
+| `/role train fresh [条数]` | `BOT_ADMIN` | 从最早群消息开始导出，丢弃 adapter 链并从底座新开一轮训练 |
+| `/role train learn` | `BOT_ADMIN` | 用 `/role learn` 采集的特挑语料提交训练 |
+| `/role train cutoff [时间\|reset]` | `BOT_ADMIN` | 查看、设置或重置训练截止时间 |
+| `/role train reload` | `BOT_ADMIN` | 让 MBB-Model 重新加载 adapter |
 
 `/role quiet add` 和 `/role quiet remove` 允许普通群员自助使用；`/role` 的其他子命令仍然需要 `BOT_ADMIN`。
 
-| `/role member [QQ]` | `BOT_ADMIN` | 查看角色对某个群员的个人印象，不填 QQ 则看自己 |
-| `/role member clear <QQ>` | `BOT_ADMIN` | 清空对某个群员的个人印象 |
+| `/role member [QQ\|@群友]` | `BOT_ADMIN` | 查看角色对某个群员的个人印象，不填参数则看自己 |
+| `/role member clear <QQ\|@群友>` | `BOT_ADMIN` | 清空对某个群员的个人印象 |
 | `/role mood [页码]` | `BOT_ADMIN` | 以图片查看当前群情绪和情绪事件 |
 | `/role mood reset` | `OWNER` | 将当前群情绪重置到角色基线 |
-| `/role emotion [QQ] [页码]` | `BOT_ADMIN` | 以图片查看指定用户的关系、情绪原因和变化记录 |
-| `/role emotion reset [QQ]` | `BOT_ADMIN` | 重置自己或指定用户的关系状态，重置他人需要 owner |
+| `/role emotion [QQ\|@群友] [页码]` | `BOT_ADMIN` | 以图片查看指定用户的关系、情绪原因和变化记录 |
+| `/role emotion reset [QQ\|@群友]` | `BOT_ADMIN` | 重置自己或指定用户的关系状态，重置他人需要 owner |
 | `/role emotion log [页码]` | `BOT_ADMIN` | 以图片查看当前群的情绪事件流水 |
-| `/role emotion affinity set <QQ> <0-100>` | `BOT_ADMIN` | 强制设置指定用户的好感度 |
-| `/role emotion reason set <QQ> <原因>` | `OWNER` | 手动设置指定用户的情绪原因 |
-| `/role emotion reason clear <QQ>` | `OWNER` | 清空指定用户的情绪原因 |
+| `/role emotion affinity set <QQ\|@群友> <0-100>` | `BOT_ADMIN` | 强制设置指定用户的好感度 |
+| `/role emotion reason set <QQ\|@群友> <原因>` | `OWNER` | 手动设置指定用户的情绪原因 |
+| `/role emotion reason clear <QQ\|@群友>` | `OWNER` | 清空指定用户的情绪原因 |
 | `/role bot` | `BOT_ADMIN` | 查看机器人互聊设置 |
 | `/role bot chance <0.3-1>` | `BOT_ADMIN` | 设置其他角色机器人的接话概率 |
 | `/role bot max <1-10>` | `BOT_ADMIN` | 设置无人插话时的连续回应上限 |
-| `/role bot qq ...` | `BOT_ADMIN` | 查看、增删或清空其他角色机器人 QQ |
+| `/role bot qq ...` | `BOT_ADMIN` | 查看、增删或清空其他角色机器人 QQ，增删时可艾特机器人 |
 | `/role bot name ...` | `BOT_ADMIN` | 查看、增删、重置或清空名称识别关键词 |
 | `/role memory [页码]` | `BOT_ADMIN` | 以图片查看当前群短期记忆和长期记忆 |
 | `/role memory merge` | `BOT_ADMIN` | 手动整理合并当前群长期记忆，完成后反馈结果 |

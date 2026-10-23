@@ -14,6 +14,7 @@ public class SpeechCorpusEntry {
     public String text = "";
     public String emotion = "neutral";
     public String scene = "group_chat";
+    public String register = "story";
     public String source = "";
     public double weight = 1.0;
     public int spoiler = 0;
@@ -24,6 +25,12 @@ public class SpeechCorpusEntry {
     public void buildIndex() {
         normalized = normalize(text);
         bigrams = bigrams(normalized);
+    }
+
+    public boolean isQqRegister() {
+        return "qq".equalsIgnoreCase(register)
+                || "chat".equalsIgnoreCase(register)
+                || "group_chat".equalsIgnoreCase(register);
     }
 
     public static String normalize(String text) {

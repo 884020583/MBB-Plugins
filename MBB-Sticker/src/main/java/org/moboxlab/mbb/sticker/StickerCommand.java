@@ -172,7 +172,7 @@ public class StickerCommand extends BotCommand {
             sender.sendMessage("没有找到表情包 ID："+args[2]);
             return;
         }
-        File file = StickerLibrary.fromFileUri(entry.file);
+        File file = library.resolveFile(entry.file);
         if (file == null || !file.exists()) {
             sender.sendMessage("表情包文件不存在，无法重新识别。");
             return;

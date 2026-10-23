@@ -77,6 +77,7 @@ public class RoleplayService {
     private final RoleplayTextUtils textUtils;
     private final RoleplayJsonUtils jsonUtils;
     private final RoleplayImageContextService imageContextService;
+    private final RoleplayHubService hubService;
     private final RoleplayStickerService stickerService;
     private final RoleplayAddressService addressService;
     private final RoleplayRateLimitService rateLimitService;
@@ -97,7 +98,12 @@ public class RoleplayService {
     private final RoleplayRoutingService routingService;
     private final RoleplayPromptMaterialService promptMaterialService;
     private final RoleplayMessageContentService contentService;
+    private final RoleplayLearnService learnService;
+    private final RoleplayModelClient modelClient;
+    private final RoleplayTrainService trainService;
     private final RoleplaySkillRegistry skillRegistry;
+    private final RoleplayToolLoopService toolLoopService;
+    private final RoleplayToolMemoryService toolMemoryService;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
     private volatile RoleplayConfig config;
@@ -214,6 +220,7 @@ public class RoleplayService {
     static class RecentImage {
         final JSONObject data;
         final long expireAt;
+        volatile String hubKey = "";
         volatile String summary = "";
 
         RecentImage(JSONObject data,long expireAt) {
@@ -293,6 +300,7 @@ public class RoleplayService {
         this.textUtils = new RoleplayTextUtils(this);
         this.jsonUtils = new RoleplayJsonUtils();
         this.imageContextService = new RoleplayImageContextService(this);
+        this.hubService = new RoleplayHubService(this);
         this.stickerService = new RoleplayStickerService(this);
         this.addressService = new RoleplayAddressService(this);
         this.rateLimitService = new RoleplayRateLimitService(this);
@@ -313,7 +321,12 @@ public class RoleplayService {
         this.routingService = new RoleplayRoutingService(this);
         this.promptMaterialService = new RoleplayPromptMaterialService(this);
         this.contentService = new RoleplayMessageContentService(this);
+        this.learnService = new RoleplayLearnService(this);
+        this.modelClient = new RoleplayModelClient(this);
+        this.trainService = new RoleplayTrainService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
+        this.toolMemoryService = new RoleplayToolMemoryService(plugin,config);
+        this.toolLoopService = new RoleplayToolLoopService(this,config);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
     }
@@ -331,6 +344,7 @@ public class RoleplayService {
         replyFeedbackService.init();
         expressionService.init();
         traceService.init();
+        toolMemoryService.init();
         threadService.init();
         attentionService.reload(config);
         executorService.ensureTurnExecutor();
@@ -354,6 +368,8 @@ public class RoleplayService {
         threadService.reload(config);
         attentionService.reload(config);
         dailyReviewService.reload(config);
+        toolLoopService.reload(config);
+        toolMemoryService.reload(config);
         executorService.ensureTurnExecutor();
         executorService.ensureBackgroundExecutor();
         dailyReviewService.ensureTask();
@@ -383,6 +399,8 @@ public class RoleplayService {
      * 这样连续快速发言不会被逐条排队，旧消息也不会挤掉新消息。
      */
     public void handle(GroupMessageEvent event) {
+        // /role learn 需要拿到完整事件（含引用段），所以在进入合批和路由之前先拦截
+        if (learnService.handleCommand(event)) return;
         batchScheduler.handle(event);
     }
 
@@ -557,6 +575,22 @@ public class RoleplayService {
         return replyExecutor;
     }
 
+    RoleplayHubService hubService() {
+        return hubService;
+    }
+
+    RoleplayLearnService learnService() {
+        return learnService;
+    }
+
+    RoleplayModelClient modelClient() {
+        return modelClient;
+    }
+
+    RoleplayTrainService trainService() {
+        return trainService;
+    }
+
     RoleplayRateLimitService rateLimitService() {
         return rateLimitService;
     }
@@ -579,6 +613,14 @@ public class RoleplayService {
 
     RoleplayStyler styler() {
         return styler;
+    }
+
+    RoleplayToolLoopService toolLoopService() {
+        return toolLoopService;
+    }
+
+    RoleplayToolMemoryService toolMemoryService() {
+        return toolMemoryService;
     }
 
     RoleplayRouter router() {
@@ -1333,22 +1375,24 @@ public class RoleplayService {
     }
 
     public void shutdown() {
+        toolLoopService.shutdown();
         executorService.shutdown();
     }
 
 
     JSONObject reply(long groupID,long userID,String userName,String content,
                      boolean otherRoleBot,String relationship,RecentImage imageContext,
-                     RoleplayRouteDecision decision) {
+                     RoleplayRouteDecision decision,long messageID,long selfID) {
         return replyGenerationService.reply(groupID,userID,userName,content,otherRoleBot,
-                relationship,imageContext,decision);
+                relationship,imageContext,decision,messageID,selfID);
     }
 
     JSONObject reply(long groupID,long userID,String userName,String content,
                      boolean otherRoleBot,String relationship,RecentImage imageContext,
-                     RoleplayRouteDecision decision,String batchText,int batchCount) {
+                     RoleplayRouteDecision decision,String batchText,int batchCount,
+                     long messageID,long selfID) {
         return replyGenerationService.reply(groupID,userID,userName,content,otherRoleBot,
-                relationship,imageContext,decision,batchText,batchCount);
+                relationship,imageContext,decision,batchText,batchCount,messageID,selfID);
     }
 
 

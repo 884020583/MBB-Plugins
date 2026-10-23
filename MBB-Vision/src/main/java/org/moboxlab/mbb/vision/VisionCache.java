@@ -102,6 +102,22 @@ public class VisionCache {
         return storage().update("DELETE FROM `"+TABLE+"`");
     }
 
+    /**
+     * 按最近命中时间倒序导出缓存，供 MBB-BotHub 回填共享识图缓存
+     */
+    public List<JSONObject> recent(int limit) {
+        int size = limit <= 0 ? 200 : Math.min(limit,2000);
+        List<JSONObject> rows = storage().query("SELECT * FROM `"+TABLE+"` "
+                + "ORDER BY `lastHitAt` DESC LIMIT "+size);
+        List<JSONObject> result = new java.util.ArrayList<>();
+        if (rows == null) return result;
+        for (JSONObject row : rows) {
+            if (row == null) continue;
+            result.add(toResult(row,true));
+        }
+        return result;
+    }
+
     public JSONObject toResult(JSONObject row,boolean cached) {
         JSONObject result = new JSONObject(true);
         result.put("status",true);

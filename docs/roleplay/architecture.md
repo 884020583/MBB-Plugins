@@ -155,11 +155,12 @@ routerReasoningEffort: "none"
 会被转换成同一批技能调用。
 
 **资料预算**：角色核心、外貌、学生名录、学生详细设定、长期/全局/短期记忆、最近发言、
-台词示例各自独立成项，常驻项必带，其余按路由点名的 id 注入，总量受 `promptTotalChars`
-限制。上限存在的意义是防止某一份资料把整条提示词撑爆。
+工具结果和台词示例各自独立成项，常驻项必带，其余按路由点名的 id 注入。默认关闭本地硬预算，
+避免角色在搜索和多轮工具任务中被过早截断；需要限制时可显式开启。
 
 ```yaml
-promptTotalChars: 26000
+contextHardLimitEnable: false
+promptTotalChars: 120000
 ```
 
 **风格层**：默认不调用，先用本地规则判断回复是否带 AI 味。命中超长、破折号、Markdown
@@ -171,7 +172,10 @@ promptTotalChars: 26000
 ```yaml
 styleEnable: true
 styleMaxChars: 60
+styleLongReplyEnable: false   #超长回复默认交给大模型复核
 styleProactiveEnable: false   #主动发言时是否也触发风格层
+styleFailureThreshold: 2      #连续无效改写后熔断
+styleFailureCooldownSecond: 600
 ```
 
 

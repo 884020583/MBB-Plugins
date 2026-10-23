@@ -32,11 +32,12 @@ public class RoleplayMessageSender {
         RoleplayConfig config = service.config();
         boolean quote = config.quoteReplyEnable
                 && (quoteRequired || quoteSuggested) && quoteMessageID > 0;
-        int count = Math.min(segments.size(),config.replyMaxSegments);
+        int count = Math.min(segments.size(),config.replyBeatMaxSegments);
         for (int i = 0; i < count; i++) {
             sendSingleMessage(client,groupID,selfID,userID,segments.get(i),quote && i == 0,
                     quoteMessageID);
-            if (i + 1 < count && !service.sleepQuietly(250L)) return;
+            if (i + 1 < count && !service.sleepQuietly(
+                    service.getPacingService().beatDelayMillis(groupID,segments.get(i + 1)))) return;
         }
     }
 

@@ -35,6 +35,21 @@ MoBoxBot 表情包收录、标签检索与发送插件。
 | `/sticker remove <ID>` | `BOT_ADMIN` | 删除表情包 |
 | `/sticker reload` | `BOT_ADMIN` | 重载数据 |
 
+## 存储
+
+表情包图片放在插件目录的 `stickers/` 下，`stickers.json` 里存的是**相对路径**：
+
+```json
+{ "file": "stickers/sticker-20261019013247-0779.jpg" }
+```
+
+这样整个插件文件夹可以随便搬家，图片不会集体失效。目录外的文件仍然存 `file://` 绝对路径。
+旧版本存的 `file://` 绝对路径在加载时自动转换；如果插件目录已经搬过家，会按文件名到
+`stickers/` 里回找一份。对外的 `MBB-Sticker` 服务（`random` 等）始终返回可用的绝对
+`file://` 地址，调用方不需要关心存储格式。
+
+`stickers.json` 使用带换行缩进的 JSON 保存，方便人工查看和改动。
+
 ## 标签规则
 
 默认使用小写英文 snake_case：

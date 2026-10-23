@@ -27,6 +27,24 @@ public class RoleplayTextUtils {
         return value == null ? "" : value;
     }
 
+    static long jsonPositiveLong(JSONObject object,String key) {
+        if (object == null || key == null || key.trim().isEmpty()) return 0L;
+        Object value = object.get(key);
+        if (value == null) return 0L;
+        if (value instanceof Number) {
+            long number = ((Number)value).longValue();
+            return number > 0 ? number : 0L;
+        }
+        String text = String.valueOf(value).trim();
+        if (text.isEmpty() || "all".equalsIgnoreCase(text)) return 0L;
+        try {
+            long number = Long.parseLong(text);
+            return number > 0 ? number : 0L;
+        } catch (Exception e) {
+            return 0L;
+        }
+    }
+
     String shortText(String text,int maxChars) {
         String value = safe(text).replace("\n"," ").trim();
         if (value.length() <= maxChars) return value;

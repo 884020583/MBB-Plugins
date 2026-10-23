@@ -85,6 +85,7 @@ public class RoleplayReminderService {
                     +"，原文："+shortText(content,120));
             return true;
         }
+        if (!claimReminder(groupID,userID,result.remindTime,result.task,"user")) return true;
         long id = storage().insert("INSERT INTO `"+TABLE+"` "
                         + "(`groupID`,`userID`,`userName`,`relation`,`target`,`context`,`task`,`remindTime`,`createdAt`,`status`) "
                         + "VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -127,6 +128,7 @@ public class RoleplayReminderService {
                         + "AND `target`=? AND `status`='pending' LIMIT 1",
                 groupID,userID,remindTime,value,targetValue);
         if (exists != null) return true;
+        if (!claimReminder(groupID,userID,remindTime,value,targetValue)) return true;
         long id = storage().insert("INSERT INTO `"+TABLE+"` "
                         + "(`groupID`,`userID`,`userName`,`relation`,`target`,`context`,`task`,`remindTime`,`createdAt`,`status`) "
                         + "VALUES (?,?,?,?,?,?,?,?,?,?)",
@@ -363,6 +365,16 @@ public class RoleplayReminderService {
                     +safe(e.getMessage()));
             return null;
         }
+    }
+
+    /**
+     * 跨进程去重：同群、同人、同时间、同内容的提醒只允许一个 bot 真正创建。
+     * 另一个 bot 认领失败时直接当作「已经有人建过」，不再重复确认。
+     */
+    private boolean claimReminder(long groupID,long userID,long remindTime,String task,String target) {
+        if (service == null) return true;
+        String key = "reminder|"+groupID+"|"+userID+"|"+remindTime+"|"+safe(target)+"|"+safe(task).trim();
+        return service.hubService().claimTask(key);
     }
 
     private boolean mightBeReminder(String content) {

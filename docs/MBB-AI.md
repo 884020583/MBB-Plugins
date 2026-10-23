@@ -33,6 +33,23 @@ JSONObject result = service.call("chat",params);
 | `usage` | 查看请求、Token、耗时和趋势统计 |
 | `reload` | 重载 AI 配置 |
 
+### 原生工具调用
+
+`chat` 参数可以透传 OpenAI 兼容工具协议：
+
+```json
+{
+  "tools": [{"type":"function","function":{"name":"example","description":"...","parameters":{}}}],
+  "tool_choice": "auto",
+  "parallel_tool_calls": false
+}
+```
+
+模型返回 `tool_calls` 时，结果会带上原始 `toolCalls` 数组。调用方需要把 assistant 的
+`tool_calls` 和后续 `role=tool`、`tool_call_id` 消息原样追加到下一轮 `messages`。
+
+带 `tools` 的请求默认绕过 MBB-AI 本地缓存；普通文本请求仍按原配置缓存。
+
 ## 配置
 
 `config.yml`：
@@ -85,6 +102,59 @@ logRequestContent: false
 `insecureTls` 默认 `false`。置为 `true` 后跳过 HTTPS 证书链和主机名校验，只用于自建网关、TLS 拦截代理或证书与域名不匹配的服务器环境。遇到 `No name matching <域名> found` 这类报错时，优先改用证书实际覆盖的域名；确实没有别的办法再打开它，因为它会让中间人攻击无法被发现。
 
 不要把真实密钥提交到仓库。
+
+## 本地风格层 profile
+
+配合 `MBB-Model`（本地 Qwen3-1.7B 风格层服务）使用时，加一个 `local` profile 指向它：
+
+```json
+"local": {
+  "provider": "openai",
+  "baseUrl": "http://127.0.0.1:8770/v1",
+  "apiKey": "local",
+  "model": "Qwen3-1.7B",
+  "temperature": 0.7,
+  "maxTokens": 256,
+  "timeoutSeconds": 180,
+  "reasoningEffort": "",
+  "insecureTls": false,
+  "headers": {
+    "User-Agent": "MoBoxBot/0.1 (+https://github.com/MossCG/MoBoxBot)",
+    "Accept-Language": "zh-CN,zh;q=0.9,en;q=0.8"
+  }
+}
+```
+
+几个字段的取值理由：
+
+| 字段 | 取值 | 说明 |
+|---|---|---|
+| `baseUrl` | `http://127.0.0.1:8770/v1` | 插件会自动补 `/chat/completions`，正好对上 MBB-Model 的路由 |
+| `apiKey` | `local` | **插件要求 apiKey 非空**，本地服务默认不校验，填个占位值即可。如果 MBB-Model 的 `server.token` 配了值，这里改成 `env:MBB_MODEL_TOKEN` |
+| `model` | `Qwen3-1.7B` | 和 MBB-Model 实际加载的目录名一致，方便日志辨认 |
+| `temperature` | `0.7` | 风格改写要稳定，比默认的 0.9 低 |
+| `maxTokens` | `256` | 只改写一两句话，1024 纯属浪费 |
+| `timeoutSeconds` | `180` | 首次调用要加载模型（约 23 秒），训练期间推理也会变慢 |
+| `reasoningEffort` | `""` | Qwen3 的思考模式在服务端已经关掉，这里不要再发这个字段 |
+
+**不要把云端密钥填进这个 profile**。本地服务不需要真密钥，把 opencode 之类的 key 放进来
+既没用又容易跟着配置文件一起泄露。
+
+配好之后，在 `MBB-Roleplay` 的 `config.yml` 里把风格层指过去：
+
+```yaml
+styleEnable: true
+styleProfile: "local"
+styleMaxTokens: 256
+styleReasoningEffort: ""
+```
+
+这两个值要注意：`styleMaxTokens` 默认是 1200，对本地 1.7B 只做一句改写来说太大，会白等时间；
+`styleReasoningEffort` 默认是 `low`，Qwen3 的思考模式已经在 MBB-Model 侧关掉，这里留空不要再发。
+Roleplay 传的 `styleMaxTokens` 会覆盖 profile 里的 `maxTokens`，所以两边保持一致更省心。
+
+其他层（路由、生成、记忆、识图、提醒）继续用 `default` profile，不受影响。
+本地服务没起来时风格改写会失败，但角色回复本身照常——风格层是可选增强，不是必经链路。
 
 ## 调用约定
 

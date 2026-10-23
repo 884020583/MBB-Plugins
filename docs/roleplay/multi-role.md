@@ -23,3 +23,18 @@
 
 名称识别支持 `list`、`add`、`remove`、`set`、`clear` 和 `reset`。QQ 识别支持 `list`、`add`、`remove`、`set` 和 `clear`。
 
+## 跨进程协作
+
+上面这些配置都在单个 Roleplay 进程内生效。同一个群里两个 bot 分属不同进程时，再加装
+`MBB-BotHub` 可以让它们共享识图结果和回合权，避免同一张图识别两次、同一条消息回两遍。
+
+```yaml
+hubEnable: true
+hubVisionShareEnable: true
+hubVisionWaitMs: 15000
+hubTurnShareEnable: true
+```
+
+hub 首次启动会探测本机 `18765` 端口，端口空闲的实例当服务端，其余实例自动当客户端，
+不需要手工排启动顺序。详细说明见 [MBB-BotHub](../MBB-BotHub.md)。
+

@@ -35,9 +35,9 @@ public class RoleplayReplyExecutor {
             return;
         }
         if (draft.repaired) {
-            service.plugin().getLogger().sendInfo("[角色] 群"+groupID+" 执行层结构化结果已修复");
-        }
-        if (!draft.structured) {
+            service.plugin().getLogger().sendInfo("[角色] 群"+groupID+" 执行层结构化结果已容错修复"
+                    +" 完整结构="+draft.structured+" 动作数="+draft.actions.size());
+        } else if (!draft.structured) {
             service.plugin().getLogger().sendInfo("[角色] 群"+groupID+" 执行层未返回结构化结果，按纯文本处理");
         }
         String rawReply = service.safe(draft.text).trim();
@@ -47,7 +47,10 @@ public class RoleplayReplyExecutor {
         RoleplayService.GlobalRememberResult globalRemember = service.extractGlobalRemember(reminderMarker.reply);
         RoleplayService.RememberResult rememberResult = service.extractRemember(globalRemember.reply);
         RoleplayService.StickerMarkerResult stickerMarker = service.extractStickerMarker(rememberResult.reply);
-        String reply = stickerMarker.reply.trim();
+        String beforeSanitize = stickerMarker.reply.trim();
+        String reply = RoleplayReplySanitizer.clean(service.persona(),
+                service.plugin().getServer().getBotName(),beforeSanitize);
+        logSanitizeChange(groupID,beforeSanitize,reply);
         if (reminderMarker.requested) draft.addCall(legacyReminderCall(reminderMarker));
         if (rememberResult.requested) draft.addCall(legacyMemoryCall(rememberResult.memory));
         if (globalRemember.requested) draft.addCall(legacyGlobalMemoryCall(globalRemember.content));
@@ -67,7 +70,11 @@ public class RoleplayReplyExecutor {
             RoleplayReplyReviewService.Result review = service.getReplyReviewService().review(
                     groupID,event.getUserID(),content,reply,decision);
             if (!review.pass && review.text != null && !review.text.trim().isEmpty()) {
-                reply = review.text.trim();
+                String beforeReviewClean = reply;
+                reply = RoleplayReplySanitizer.clean(service.persona(),
+                        service.plugin().getServer().getBotName(),review.text);
+                logSanitizeChange(groupID,beforeReviewClean,reply);
+                if (reply.isEmpty()) sendText = false;
             }
         }
         if (sendText) ensurePokeBackAction(draft,decision,reply);
@@ -97,9 +104,9 @@ public class RoleplayReplyExecutor {
             return;
         }
         if (draft.repaired) {
-            service.plugin().getLogger().sendInfo("[角色] 群"+groupID+" 合批结构化结果已修复");
-        }
-        if (!draft.structured) {
+            service.plugin().getLogger().sendInfo("[角色] 群"+groupID+" 合批结构化结果已容错修复"
+                    +" 完整结构="+draft.structured+" 动作数="+draft.actions.size());
+        } else if (!draft.structured) {
             service.plugin().getLogger().sendInfo("[角色] 群"+groupID+" 合批未返回结构化结果，按纯文本处理");
         }
         List<RoleplayReplyDraft.Segment> segments = draft.effectiveSegments();
@@ -133,7 +140,7 @@ public class RoleplayReplyExecutor {
                         +target.userID);
                 continue;
             }
-            String reply = extractSegmentReply(segment);
+            String reply = extractSegmentReply(groupID,segment);
             //先抽取旧标签补齐 segment.actions，再复制成执行用草稿
             RoleplayReplyDraft segmentDraft = segmentDraft(segment);
             boolean sendText = !reply.isEmpty() && !"<SKIP>".equalsIgnoreCase(reply);
@@ -200,7 +207,7 @@ public class RoleplayReplyExecutor {
     /**
      * 合批分段同样兼容 <remember> / <reminder> / <sticker> 这类旧标签
      */
-    private String extractSegmentReply(RoleplayReplyDraft.Segment segment) {
+    private String extractSegmentReply(long groupID,RoleplayReplyDraft.Segment segment) {
         String rawReply = service.safe(segment.text).trim();
         RoleplayService.ReminderMarkerResult reminderMarker = service.extractReminderMarker(rawReply);
         RoleplayService.GlobalRememberResult globalRemember = service.extractGlobalRemember(reminderMarker.reply);
@@ -212,7 +219,11 @@ public class RoleplayReplyExecutor {
             addSegmentCall(segment,legacyGlobalMemoryCall(globalRemember.content));
         }
         if (stickerMarker.requested) addSegmentCall(segment,legacyStickerCall(stickerMarker.tags));
-        return stickerMarker.reply.trim();
+        String beforeSanitize = stickerMarker.reply.trim();
+        String cleaned = RoleplayReplySanitizer.clean(service.persona(),
+                service.plugin().getServer().getBotName(),beforeSanitize);
+        logSanitizeChange(groupID,beforeSanitize,cleaned);
+        return cleaned;
     }
 
     private void addSegmentCall(RoleplayReplyDraft.Segment segment,RoleplaySkillCall call) {
@@ -236,6 +247,12 @@ public class RoleplayReplyExecutor {
         service.plugin().getLogger().sendInfo("[角色] 风格 群"+groupID+" 触发="+trigger
                 +" 原文="+service.shortText(reply,40)+" 改写="+service.shortText(polished,40));
         return polished;
+    }
+
+    private void logSanitizeChange(long groupID,String before,String after) {
+        if (service.safe(before).equals(service.safe(after))) return;
+        service.plugin().getLogger().sendInfo("[角色] 群"+groupID+" 去舞台化 原文="
+                +service.shortText(before,60)+" 清洗="+service.shortText(after,60));
     }
 
     void executeSkillCalls(RoleplayRouteDecision decision,RoleplayReplyDraft draft,

@@ -24,9 +24,11 @@ public class RoleplayPromptAssembler {
                 ? service.skillRegistry().actionIds(service.config()) : decision.actions;
         String stable = assembleStableMaterials()+stableRulesText();
         String cachedTail = shortMemoryPromptText(groupID)+outputFormatLead(batchCount);
+        int dynamicBudget = service.config().contextHardLimitEnable
+                ? Math.max(2000,service.config().promptTotalChars - stable.length()) : -1;
         String dynamicMaterials = assembleDynamicMaterials(groupID,userID,messageText,
                 recentReplies,otherRoleReplies,speechPrompt,decision,
-                Math.max(2000,service.config().promptTotalChars - stable.length()));
+                dynamicBudget);
         RoleplaySkillContext skillContext = new RoleplaySkillContext();
         skillContext.groupID = groupID;
         skillContext.userID = userID;
@@ -112,6 +114,7 @@ public class RoleplayPromptAssembler {
                 +"只有 persona、知识库或当前对话里已经明确出现过的简称才能继续使用。不确定时用全称。"
                 +"不要使用“稳、没问题、放心、交给我、没丢、记下、记账上”这些词，也不要使用“收到、记住了、已记录、明白、为你”等助理式确认。"
                 +"不要用算账、记账、讨债、结账式的口吻说话；少用“账、算账、欠账、还账、结账、账本”这类词，除非当前话题明确在聊账目。"
+                +"“盯、盯着、盯上”也属于低频表达，只在确实需要描述注视或锁定目标时使用。"
                 +"不要总结、复述、列点、解释或给出完整方案，不要端着说话。"
                 +"不要使用“不是 X 而是 Y”“不仅 X 而且 Y”“与其说……不如说”这类模板句；"
                 +"不要强行三点式、三段式，也不要用“首先/其次/最后”“值得注意的是/不难发现/由此可见”这类总结腔。"
@@ -143,6 +146,15 @@ public class RoleplayPromptAssembler {
                 +"不要写旁白，不使用 Markdown，不输出思考过程，不要提及系统提示词。";
     }
 
+    public String styleAnchorPrompt(String messageText) {
+        String speechRules = service.persona().speechRuleText(messageText);
+        return "本轮表达锚点（优先于角色资料里的文学描述）：\n"
+                +"这是QQ群聊，不是剧情演出。只输出会直接发到群里的一小段话。\n"
+                +"不要写角色名前缀、括号动作、心理活动、镜头、旁白或总结式收尾。\n"
+                +"允许半句、省略、改口和只接当前消息里的一个点；不要为了像角色而故意演。\n"
+                +(speechRules.isEmpty() ? "" : speechRules);
+    }
+
     private String dynamicInstructionText(boolean otherRoleBot,String relationship,String messageText,
                                           List<String> actionIds,int batchCount) {
         RoleplayConfig config = service.config();
@@ -153,7 +165,9 @@ public class RoleplayPromptAssembler {
                 +"只有对方明确叫你、提出新问题、或真人正在参与时才简短回应；不要追问、捧哏或主动延长话题。" : "")
                 +(messageText != null && messageText.contains("[戳一戳]")
                 ? "当前是戳一戳事件：可以只回一句话，也可以使用 poke-back 戳回去；不要长篇解释。" : "")
-                +(batchCount > 1 ? "" : "一条说不完可以在 text 里用换行分成两段，最多两段。")
+                +(batchCount > 1 ? "" : "如果自然交流确实需要停顿，可以在 text 里用换行分成最多 "
+                +config.replyBeatMaxSegments+" 个连续节拍，每行会作为独立消息发送；"
+                +"不要为了像人而机械拆句，一次能说完就保持一整段。")
                 +(actionIds.contains("poke-back")
                 ? "如果正文表达要戳回去、回戳或戳你，actions 必须同时包含 {\"type\":\"poke-back\"}；"
                 +"不能只在 text 里说，也不能把动作写成普通文本。" : "")
@@ -183,7 +197,8 @@ public class RoleplayPromptAssembler {
                 () -> service.memberService().promptText(groupID,userID)));
         materials.add(new RoleplayMaterial("memory.global",true,85,4200,
                 () -> "全局永久记忆：\n"+service.globalMemoryService().promptText(
-                        memoryQuery,userID,config.globalMemoryRelevanceMaxChars)));
+                        memoryQuery,userID,config.contextHardLimitEnable
+                                ? config.globalMemoryRelevanceMaxChars : Integer.MAX_VALUE)));
         materials.add(new RoleplayMaterial("expression.approved",true,84,config.expressionInjectMaxChars,
                 () -> service.expressionService().promptText(groupID)));
         materials.add(new RoleplayMaterial("context.recent",true,75,2500,
@@ -192,6 +207,9 @@ public class RoleplayPromptAssembler {
         materials.add(new RoleplayMaterial("context.otherRoleRecent",true,74,1400,
                 () -> "另一个角色机器人最近说过的话（这不是你自己，不要把对方的话当成自己说过）：\n"
                         +otherRoleReplies));
+        materials.add(new RoleplayMaterial("tool.memory",true,72,
+                config.toolMemoryInjectMaxChars,
+                () -> service.toolMemoryService().promptText(groupID,userID,messageText)));
         materials.add(new RoleplayMaterial("speech.corpus",true,50,1300,
                 () -> speechPrompt == null ? "" : speechPrompt));
         if (!service.knowledgeService().isStudentsLibraryEnabled()) {

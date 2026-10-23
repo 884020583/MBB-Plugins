@@ -83,7 +83,8 @@ public class StickerService implements PluginService {
         JSONObject result = new JSONObject(true);
         result.put("status",true);
         result.put("id",entry.id);
-        result.put("file",entry.file);
+        //对外始终给可用的绝对 file:// 地址，存盘用相对路径
+        result.put("file",library.toUri(entry.file));
         JSONArray tagArray = new JSONArray();
         tagArray.addAll(entry.tags);
         result.put("tags",tagArray);

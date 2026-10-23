@@ -6,9 +6,12 @@ import org.moboxlab.moboxbot.API.Command.CommandPermission;
 import org.moboxlab.moboxbot.API.Command.CommandSender;
 import org.moboxlab.moboxbot.API.Util.ImageUtil;
 
+import java.text.SimpleDateFormat;
 import java.util.ArrayList;
+import java.util.Date;
 import java.util.LinkedHashSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Set;
 
 /**
@@ -146,6 +149,79 @@ public class RoleplayFeedbackCommandHandler {
             }
         }
         sender.sendMessage(builder.toString());
+    }
+
+    void handleTool(CommandSender sender,String[] args) {
+        long groupID = sender.getGroupID();
+        if (groupID <= 0) {
+            sender.sendMessage("请在群聊中使用。");
+            return;
+        }
+        String action = args.length > 2 ? args[2].toLowerCase(Locale.ROOT) : "stats";
+        if ("test".equals(action)) {
+            JSONObject test = command.service().toolLoopService().registry()
+                    .selfTest(command.service().config());
+            StringBuilder builder = new StringBuilder(test.getBooleanValue("status")
+                    ? "工具自检通过：" : "工具自检发现问题：")
+                    .append("\n检查工具：").append(test.getIntValue("checked"));
+            JSONArray issues = test.getJSONArray("issues");
+            if (issues != null) {
+                for (Object issue : issues) builder.append("\n- ").append(String.valueOf(issue));
+            }
+            builder.append("\n工作区隔离：")
+                    .append(test.getJSONObject("workspace").getBooleanValue("status") ? "通过" : "未启用或失败")
+                    .append("\n网页白名单：")
+                    .append(test.getJSONObject("web").getBooleanValue("status") ? "通过" : "未启用或失败");
+            sender.sendMessage(builder.toString());
+            return;
+        }
+        if ("clear".equals(action)) {
+            int count = command.service().toolMemoryService().clear(groupID);
+            sender.sendMessage("当前群工具结果上下文已清空，共删除 "+count+" 条。");
+            return;
+        }
+        if ("trace".equals(action)) {
+            int limit = args.length > 3 ? command.parsePage(args,3) : 10;
+            JSONArray rows = command.service().toolMemoryService().recent(groupID,limit);
+            if (rows.isEmpty()) {
+                sender.sendMessage("当前群还没有工具调用记录。");
+                return;
+            }
+            StringBuilder builder = new StringBuilder("最近工具调用：");
+            for (Object object : rows) {
+                JSONObject item = (JSONObject)object;
+                builder.append("\n#").append(item.getLongValue("id"))
+                        .append(" ").append(formatToolTime(item.getLongValue("createTime")))
+                        .append(" ").append(item.getString("toolName"))
+                        .append(" 用户=").append(item.getLongValue("userID"))
+                        .append(" 摘要=").append(item.getString("summary"));
+            }
+            sender.sendMessage(builder.toString());
+            return;
+        }
+        if (!"stats".equals(action)) {
+            sender.sendMessage("用法：/role tool [stats|test|trace [条数]|clear]");
+            return;
+        }
+        JSONObject stats = command.service().toolMemoryService().stats(groupID);
+        StringBuilder builder = new StringBuilder("工具调用统计：")
+                .append("\n累计记录：").append(stats.getIntValue("count"));
+        JSONArray tools = stats.getJSONArray("tools");
+        if (tools != null) {
+            for (Object object : tools) {
+                JSONObject item = (JSONObject)object;
+                builder.append("\n- ").append(item.getString("tool"))
+                        .append("：").append(item.getIntValue("count"));
+            }
+        }
+        builder.append("\n工具结果最多保留 ")
+                .append(command.service().config().toolMemoryKeepHours).append(" 小时。");
+        sender.sendMessage(builder.toString());
+    }
+
+    private String formatToolTime(long time) {
+        if (time <= 0) return "未知时间";
+        return new SimpleDateFormat("MM-dd HH:mm",Locale.CHINA).format(new Date(time));
     }
 
     void handleEval(CommandSender sender,String[] args) {

@@ -25,6 +25,7 @@ public class RoleplayBatchScheduler {
             service.processGroupMessage(event);
             return;
         }
+        if (service.toolLoopService().captureLiveMessage(event)) return;
         boolean scheduled = false;
         synchronized (service.groupQueueLock) {
             List<GroupMessageEvent> buffer = service.batchBufferMap.get(groupID);

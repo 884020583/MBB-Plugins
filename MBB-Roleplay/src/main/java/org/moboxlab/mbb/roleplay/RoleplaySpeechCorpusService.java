@@ -59,7 +59,8 @@ public class RoleplaySpeechCorpusService {
                 config.speechRetrievalCount,config.speechRetrievalMaxChars);
         if (selected.isEmpty()) return "";
         StringBuilder builder = new StringBuilder(
-                "参考语气示例（只参考表达方式，不要直接照抄，也不要沿用示例里的具体话题、职业内容或项目进度）：\n");
+                "群聊语气示例（只参考长短、停顿和说话态度；不要照抄，不要沿用具体话题、剧情称呼、"
+                        +"职业内容、项目进度或戏剧化节奏）：\n");
         for (SpeechCorpusEntry entry : selected) {
             builder.append("- ").append(entry.text).append("\n");
         }
@@ -87,9 +88,14 @@ public class RoleplaySpeechCorpusService {
         result.put("enabled",config.speechCorpusEnable);
         result.put("count",entries.size());
         result.put("path",corpusPath);
+        int qqCount = 0;
         Set<String> tags = new LinkedHashSet<>();
-        for (SpeechCorpusEntry entry : entries) tags.addAll(entry.tags);
+        for (SpeechCorpusEntry entry : entries) {
+            tags.addAll(entry.tags);
+            if (entry.isQqRegister()) qqCount++;
+        }
         result.put("tagCount",tags.size());
+        result.put("qqCount",qqCount);
         return result;
     }
 
@@ -133,6 +139,8 @@ public class RoleplaySpeechCorpusService {
             //情绪与场景命中给加成：让“什么场合说哪种话”参与排序，而不是只看字面相似
             if (!emotions.isEmpty() && emotions.contains(entry.emotion)) score += 0.2;
             if (!scene.isEmpty() && scene.equals(entry.scene)) score += 0.12;
+            if (entry.isQqRegister()) score += 0.7;
+            else score -= 0.08;
             score += (entry.weight - 1.0) * 0.05;
             if (score >= config.speechRetrievalMinScore) scored.add(new ScoredEntry(entry,score));
         }
@@ -187,13 +195,23 @@ public class RoleplaySpeechCorpusService {
         corpusPath = "";
         if (!config.speechCorpusEnable) return;
         String key = personaKey(config.personaFile);
-        File file = new File(plugin.getDataFolder(),
+        File qqFile = new File(plugin.getDataFolder(),
+                config.speechCorpusDirectory+"/speech-corpus-"+key+"-qq.jsonl");
+        File storyFile = new File(plugin.getDataFolder(),
                 config.speechCorpusDirectory+"/speech-corpus-"+key+".jsonl");
-        corpusPath = file.getAbsolutePath();
-        if (!file.exists()) {
-            plugin.getLogger().sendInfo("[语料] 未找到 "+corpusPath+"，跳过台词检索");
-            return;
+        loadFile(qqFile,"qq");
+        loadFile(storyFile,"story");
+        if (entries.isEmpty()) {
+            plugin.getLogger().sendInfo("[语料] 未找到 "+key+" 的可用台词语料，跳过台词检索");
+        } else {
+            plugin.getLogger().sendInfo("[语料] 已加载 "+entries.size()+" 条台词："+corpusPath);
         }
+    }
+
+    private void loadFile(File file,String defaultRegister) {
+        if (file == null || !file.exists()) return;
+        if (!corpusPath.isEmpty()) corpusPath += ",";
+        corpusPath += file.getAbsolutePath();
         try {
             List<String> lines = Files.readAllLines(file.toPath(),StandardCharsets.UTF_8);
             int lineNumber = 0;
@@ -215,6 +233,8 @@ public class RoleplaySpeechCorpusService {
                 entry.text = safe(json.getString("text")).trim();
                 entry.emotion = safe(json.getString("emotion"));
                 entry.scene = safe(json.getString("scene"));
+                entry.register = safe(json.getString("register"));
+                if (entry.register.isEmpty()) entry.register = defaultRegister;
                 entry.source = safe(json.getString("source"));
                 entry.weight = json.get("weight") == null ? 1.0 : json.getDoubleValue("weight");
                 entry.spoiler = json.getIntValue("spoiler");
@@ -233,9 +253,8 @@ public class RoleplaySpeechCorpusService {
                 entry.buildIndex();
                 entries.add(entry);
             }
-            plugin.getLogger().sendInfo("[语料] 已加载 "+entries.size()+" 条台词："+corpusPath);
         } catch (Exception e) {
-            plugin.getLogger().sendWarn("[语料] 读取失败："+e.getMessage());
+            plugin.getLogger().sendWarn("[语料] 读取 "+file.getName()+" 失败："+e.getMessage());
         }
     }
 
