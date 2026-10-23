@@ -6,7 +6,21 @@ MoBoxBot 的跑团主持插件：在群里开一局 TRPG，提供 CoC 风格 d10
 
 ## 当前阶段
 
-S8 指令层 B 切片：KP 局内推进、剧本库与黑名单、群消息与离群监听。
+S9 AI 契约桩切片：按 §9.10 交付 v1 的「空 AI」——零调用、零审计、不注册定时器。
+
+- `TrpgAiHostService`：只读 `aiHost.*` 配置并判定全局开关，不持有 `AiClient`、`TraceStore`、
+  `Scheduler`，因此「零 AI 调用、零审计写入、无 AI 定时器」是结构性的（验收 I5）。
+- `/trpg ai on|off`：开关词解析（`on`/`开`、`off`/`关`）与权限、状态、冷却判定仍留在
+  `SessionService`；全局关时 `ai on` 按「当前状态不可用」拒绝，全局开时回
+  「AI 主持将在 v1.1 提供」，两种情况都不写 `aiEnabled`、不写审计（验收 I1 / I7）。
+- `ai off` 对 KP、群管理员与机器人管理员恒回执，回【主持】「本局 AI 主持保持关闭。」；
+  无参数或其他词回用法提示（验收 I6）。
+- `status` 的 AI 行按库里的 `aiEnabled` / `aiSuspendedUntil` 投影；v1 桩不写这两列，
+  因此这一行在 v1 恒显「关」（验收 I4）。
+- `SessionService` 实现 `SessionView`（`readSnapshot(群号)`），插件装配时把只读视图交给桩，
+  v1.1 的叙述链路可直接复用而不新增测试缝（§9.11）。
+
+S8 已落地的指令层 B 继续保留：
 
 - `KpCommandHandler` 注册 `scene` / `check` / `opposed` / `san` / `adjust` / `invite` /
   `take` / `skip` / `ai`，`AdminCommandHandler` 注册 `script` / `blacklist`；

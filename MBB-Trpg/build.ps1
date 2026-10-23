@@ -123,13 +123,30 @@ foreach ($lib in $testLibs) {
     }
 
     $tempFile = $target + ".part"
-    Write-Host ("下载测试依赖：" + $lib.Url)
-    try {
-        Invoke-WebRequest -Uri $lib.Url -OutFile $tempFile -UseBasicParsing -TimeoutSec 120
-    } catch {
-        if (Test-Path -LiteralPath $tempFile) { Remove-Item -LiteralPath $tempFile -Force }
+    # Maven Central 在 CI 共享出口上偶发 429 / 5xx：重试三次并退避，全部失败才判定构建失败。
+    $attempts = 3
+    $delays = @(5, 15)
+    $downloaded = $false
+    $lastError = ""
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        Write-Host ("下载测试依赖（第 " + $attempt + "/" + $attempts + " 次）：" + $lib.Url)
+        try {
+            Invoke-WebRequest -Uri $lib.Url -OutFile $tempFile -UseBasicParsing -TimeoutSec 120
+            $downloaded = $true
+            break
+        } catch {
+            $lastError = $_.Exception.Message
+            if (Test-Path -LiteralPath $tempFile) { Remove-Item -LiteralPath $tempFile -Force }
+            if ($attempt -lt $attempts) {
+                $delay = $delays[$attempt - 1]
+                Write-Host ("下载失败，原因：" + $lastError + "；" + $delay + " 秒后重试。")
+                Start-Sleep -Seconds $delay
+            }
+        }
+    }
+    if (-not $downloaded) {
         Write-Host ("下载测试依赖失败：" + $lib.Url)
-        Write-Host ("原因：" + $_.Exception.Message)
+        Write-Host ("原因：" + $lastError)
         Write-Host "请在可联网环境重试，或手工把 jar 放入 out\test-libs 后重跑（内置 sha1 校验会兜底）。"
         exit 1
     }

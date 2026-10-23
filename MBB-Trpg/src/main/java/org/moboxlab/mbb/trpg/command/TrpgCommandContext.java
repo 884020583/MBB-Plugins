@@ -278,6 +278,7 @@ public final class TrpgCommandContext {
         }
         int sceneTotal = script == null ? 0 : script.scenes().size();
         int clueTotal = script == null ? 0 : script.clues().size();
+        // v1 的 AI 契约桩不写 aiEnabled（§9.10），因此这一行在 v1 恒为「关」。
         String aiLine;
         if (!snapshot.aiEnabled()) {
             aiLine = "关";

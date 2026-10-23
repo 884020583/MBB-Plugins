@@ -1,6 +1,8 @@
 package org.moboxlab.mbb.trpg.session;
 
 import org.junit.Test;
+import org.moboxlab.mbb.trpg.ai.TrpgAiHostService;
+import org.moboxlab.mbb.trpg.config.TrpgConfig;
 import org.moboxlab.mbb.trpg.rule.DefaultRandomSource;
 import org.moboxlab.mbb.trpg.store.CardData;
 import org.moboxlab.mbb.trpg.store.LogRow;
@@ -9,7 +11,9 @@ import org.moboxlab.mbb.trpg.store.SessionRow;
 import org.moboxlab.mbb.trpg.testutil.FakeRandom;
 
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.TimeUnit;
 
@@ -492,17 +496,40 @@ public class SessionServiceTest extends SessionTestFixture {
         assertTrue("群管理员不能开 AI", adminOn.rejected());
         assertEquals(SessionReject.NO_PERMISSION, adminOn.reject());
 
+        // v1 契约桩：全局开关关闭时 ai on 按「当前状态不可用」拒绝，且不写 aiEnabled（§9.10）。
         SessionResult kpOn = service.aiState(actor(KP), "on");
-        assertTrue(kpOn.detail(), kpOn.ok());
-        assertTrue(row(activeSessionId()).aiEnabled());
+        assertTrue(kpOn.rejected());
+        assertEquals(SessionReject.STATE_UNAVAILABLE, kpOn.reject());
+        assertTrue(kpOn.detail(), kpOn.detail().contains("当前状态不可用"));
+        assertFalse("v1 桩不写 aiEnabled", row(activeSessionId()).aiEnabled());
 
+        clock.advance(2000L);
         SessionResult adminOff = service.aiState(admin(OTHER), "off");
         assertTrue(adminOff.detail(), adminOff.ok());
+        assertTrue(adminOff.detail(), adminOff.detail().contains("保持关闭"));
         assertFalse(row(activeSessionId()).aiEnabled());
 
         clock.advance(2000L);
         SessionResult kpOff = service.aiState(botAdmin(OTHER), "off");
         assertTrue(kpOff.ok());
+        assertFalse(row(activeSessionId()).aiEnabled());
+    }
+
+    @Test
+    public void aiOnWithGlobalSwitchReportsPlannedWithoutWritingState() {
+        startJoining();
+        Map<String, String> raw = new LinkedHashMap<String, String>();
+        raw.put("aiHost.enabled", "true");
+        TrpgConfig enabled = TrpgConfig.fromValues(raw);
+        SessionService stubbed = new SessionService(store, catalog, clock, DefaultRandomSource.INSTANCE,
+                enabled, collectingPublisher(), null, locks, new CooldownRegistry(), new ErrorDedupe(),
+                new TrpgAiHostService(enabled));
+
+        SessionResult result = stubbed.aiState(actor(KP), "on");
+
+        assertTrue(result.detail(), result.ok());
+        assertTrue(result.detail(), result.detail().contains("v1.1"));
+        assertFalse("v1 桩不写 aiEnabled", row(activeSessionId()).aiEnabled());
     }
 
     @Test

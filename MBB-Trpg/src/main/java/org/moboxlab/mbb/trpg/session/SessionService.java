@@ -7,6 +7,9 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Lock;
 
+import org.moboxlab.mbb.trpg.ai.AiToggle;
+import org.moboxlab.mbb.trpg.ai.SessionView;
+import org.moboxlab.mbb.trpg.ai.TrpgAiHostService;
 import org.moboxlab.mbb.trpg.config.TrpgConfig;
 import org.moboxlab.mbb.trpg.rule.RandomSource;
 import org.moboxlab.mbb.trpg.rule.RuleRegistry;
@@ -31,10 +34,12 @@ import org.moboxlab.moboxbot.API.PluginLogger;
  * 不进入本类。惰性过期（T5 / T6）在读取状态的同一临界区内先执行，且不受请求者权限影响。
  * 所有写操作在群锁内完成，事件在解锁后统一发布（临界区不含网络发送）。</p>
  *
- * <p>场景、邀请、接管、跳过与检定类迁移由 S7 / S8 在此之上落地；本切片只暴露
- * {@code sceneIndex} 与 {@link #aiState(SessionActor, String)} 等子状态写接口。</p>
+ * <p>场景、邀请、接管、跳过与检定类迁移由 S7 / S8 在此之上落地。AI 子状态按 §9.10 的 v1 契约桩
+ * 处理：{@link #aiState(SessionActor, String)} 只做权限、状态与全局开关判定，不写库、不写审计。</p>
+ *
+ * <p>本类同时实现 {@link SessionView}（{@link #readSnapshot(long)}），供 AI 主持桩在 v1.1 取只读快照。</p>
  */
-public final class SessionService {
+public final class SessionService implements SessionView {
 
     private static final int MILLIS_PER_SECOND = 1000;
     private static final String ACTION_START = "start";
@@ -70,6 +75,8 @@ public final class SessionService {
     private final SessionPlayService playService;
     /** 检定、对抗与理智（S8 拆出，避免单类继续膨胀）。 */
     private final SessionCheckService checkService;
+    /** AI 主持契约桩（S9）：v1 只判定全局开关与 /trpg ai 分支，零调用、零审计、不落库。 */
+    private final TrpgAiHostService aiHost;
 
     /** 启动后尚未确认恢复的局（内存事实，不落库）；只包含进行中的局。 */
     private final Set<Long> pendingRecovery = ConcurrentHashMap.newKeySet();
@@ -91,6 +98,19 @@ public final class SessionService {
     public SessionService(SessionStore store, ScriptCatalog catalog, Clock clock, RandomSource random,
                           TrpgConfig config, SessionEventPublisher publisher, PluginLogger logger,
                           GroupLockRegistry locks, CooldownRegistry cooldowns, ErrorDedupe dedupe) {
+        this(store, catalog, clock, random, config, publisher, logger, locks, cooldowns, dedupe, null);
+    }
+
+    /**
+     * 生产装配：额外注入 AI 主持契约桩（S9）。
+     *
+     * <p>桩为 null 时按配置新建一个 v1 桩；桩不持有 AI / 审计 / 定时器端口，
+     * 因此「零调用、零审计、无定时器」是结构性的（§9.10）。</p>
+     */
+    public SessionService(SessionStore store, ScriptCatalog catalog, Clock clock, RandomSource random,
+                          TrpgConfig config, SessionEventPublisher publisher, PluginLogger logger,
+                          GroupLockRegistry locks, CooldownRegistry cooldowns, ErrorDedupe dedupe,
+                          TrpgAiHostService aiHost) {
         if (store == null) {
             throw new IllegalArgumentException("存储端口不能为空");
         }
@@ -127,6 +147,7 @@ public final class SessionService {
         this.cardService = new SessionCardService(this, store, cooldowns, config);
         this.playService = new SessionPlayService(this, store, catalog, config);
         this.checkService = new SessionCheckService(this, store, catalog, random, config, logger);
+        this.aiHost = aiHost == null ? new TrpgAiHostService(config) : aiHost;
     }
 
     /** 请求者不能为空：与构造函数一样用 IllegalArgumentException 表达契约违例。 */
@@ -483,9 +504,12 @@ public final class SessionService {
     }
 
     /**
-     * AI 子状态写接口（供 S9）：KP 可开可关，群管理员只能关，机器人管理员可开可关。
+     * {@code /trpg ai on|off}（§6.1 / §6.3 / §9.2）：KP 可开可关，群管理员只能关，
+     * 机器人管理员可开可关。
      *
-     * <p>招募期与进行中都可调（§6.1 / §6.3 / §9.2）；结束的局不在活跃查询范围。</p>
+     * <p>v1 只判定权限、状态、冷却与全局开关：不写 {@code aiEnabled}、不写审计、
+     * 不注册定时器（§9.10）。全局关时 {@code on} 按「当前状态不可用」拒绝，
+     * 全局开时回「AI 主持将在 v1.1 提供」，{@code off} 恒回保持关闭。</p>
      */
     public SessionResult aiState(SessionActor actor, final String rawWord) {
         if (!requireActor(actor).inGroup()) {
@@ -500,7 +524,7 @@ public final class SessionService {
                     return reject(turn, SessionReject.STATE_UNAVAILABLE, "本群暂无局");
                 }
                 boolean kpActor = actor.userId() == row.kpUserId();
-                Boolean parsed = parseAiWord(rawWord);
+                Boolean parsed = TrpgAiHostService.parseWord(rawWord);
                 if (parsed == null) {
                     if (!kpActor && !actor.botAdmin() && !actor.groupAdmin()) {
                         return reject(turn, SessionReject.NO_PERMISSION,
@@ -509,11 +533,11 @@ public final class SessionService {
                     return reject(turn, SessionReject.BAD_ARGUMENT,
                             "参数不对：AI 主持只支持 on 或 off");
                 }
-                boolean enabled = parsed.booleanValue();
-                boolean allowed = kpActor || actor.botAdmin() || (!enabled && actor.groupAdmin());
+                boolean enabling = parsed.booleanValue();
+                boolean allowed = kpActor || actor.botAdmin() || (!enabling && actor.groupAdmin());
                 if (!allowed) {
                     return reject(turn, SessionReject.NO_PERMISSION,
-                            enabled ? "只有 KP 能开启 AI" : "只有 KP 或群管理员能关闭 AI");
+                            enabling ? "只有 KP 能开启 AI" : "只有 KP 或群管理员能关闭 AI");
                 }
                 if (row.state() != SessionState.RECRUITING && row.state() != SessionState.RUNNING) {
                     return reject(turn, SessionReject.STATE_UNAVAILABLE, "本局不在可调 AI 的状态");
@@ -522,23 +546,21 @@ public final class SessionService {
                 if (cooling != null) {
                     return cooling;
                 }
-                if (row.aiEnabled() == enabled) {
-                    return SessionResult.ok(turn.snapshot(row), enabled ? "AI 已是开启状态" : "AI 已是关闭状态");
+                // v1 桩（§9.10）：不写 aiEnabled、不写审计、不注册定时器，只回固定分支。
+                AiToggle toggle = aiHost.toggle(rawWord);
+                if (toggle == AiToggle.USAGE) {
+                    return reject(turn, SessionReject.BAD_ARGUMENT,
+                            "参数不对：AI 主持只支持 on 或 off");
                 }
-                long now = turn.now;
-                int cas = store.casAiState(row.id(), row.state(), enabled, row.aiSuspendedUntil(),
-                        row.aiFailStreak(), now);
-                if (cas < 0) {
-                    return SessionResult.storageFailure("AI 状态写入未生效，请稍后重试");
+                if (!toggle.accepted()) {
+                    return reject(turn, SessionReject.STATE_UNAVAILABLE,
+                            TrpgAiHostService.DETAIL_UNAVAILABLE);
                 }
-                if (cas == 0) {
-                    SessionRow again = store.findSession(row.id());
-                    if (again == null || again.aiEnabled() != enabled) {
-                        return SessionResult.storageFailure("AI 状态写入未生效，请稍后重试");
-                    }
-                }
-                cooldowns.mark(ACTION_AI, actor.userId(), turn.groupId, now);
-                return SessionResult.ok(turn.reload(row), enabled ? "已开启 AI" : "已关闭 AI");
+                cooldowns.mark(ACTION_AI, actor.userId(), turn.groupId, turn.now);
+                return SessionResult.ok(turn.snapshot(row),
+                        toggle == AiToggle.ON_PLANNED
+                                ? TrpgAiHostService.DETAIL_PLANNED
+                                : TrpgAiHostService.DETAIL_OFF);
             }
         });
     }
@@ -840,18 +862,6 @@ public final class SessionService {
         if (affected != 1) {
             warn("事件日志写入未生效：session=" + sessionId + "，seq=" + seq + "，type=" + eventType);
         }
-    }
-
-    /** 解析 AI 开关词：on/开 为开启，off/关 为关闭，其余返回 null。 */
-    private static Boolean parseAiWord(String rawWord) {
-        String word = rawWord == null ? "" : rawWord.trim();
-        if ("on".equalsIgnoreCase(word) || "开".equals(word)) {
-            return Boolean.TRUE;
-        }
-        if ("off".equalsIgnoreCase(word) || "关".equals(word)) {
-            return Boolean.FALSE;
-        }
-        return null;
     }
 
     private static MemberRow findMember(List<MemberRow> members, long userId) {

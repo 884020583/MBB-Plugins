@@ -139,10 +139,11 @@ public final class TrpgMessageTemplates {
                 + " 移交给 " + newKpName + "。", LIMIT_TAKEN_OVER);
     }
 
-    /** 主持方式提示。 */
-    public static String host(boolean aiEnabled) {
-        return limit(TrpgTitles.of(TrpgTitles.HOST) + "\n当前主持方式："
-                + (aiEnabled ? "AI 叙述" : "人主持（AI 已关闭）") + "。", LIMIT_HOST);
+    /** 主持方式提示：正文由 AI 契约桩给出，v1 恒为关闭口径（§9.10）。 */
+    public static String aiHost(String detail) {
+        String text = detail == null ? "" : detail.trim();
+        return limit(TrpgTitles.of(TrpgTitles.HOST) + "\n"
+                + (text.isEmpty() ? "AI 主持保持关闭。" : text + "。"), LIMIT_HOST);
     }
 
     /** 开局公告。 */
