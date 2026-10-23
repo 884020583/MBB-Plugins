@@ -11,7 +11,17 @@ import java.util.concurrent.locks.Lock;
 import org.moboxlab.mbb.trpg.present.TrpgMessageTemplates;
 import org.moboxlab.mbb.trpg.present.TrpgTitles;
 import org.moboxlab.mbb.trpg.script.Script;
+import org.moboxlab.mbb.trpg.script.ScriptAdmin;
+import org.moboxlab.mbb.trpg.script.ScriptErrorCodes;
+import org.moboxlab.mbb.trpg.script.ScriptException;
+import org.moboxlab.mbb.trpg.script.ScriptGenerationService;
+import org.moboxlab.mbb.trpg.script.ScriptImportMode;
+import org.moboxlab.mbb.trpg.script.ScriptImportResult;
+import org.moboxlab.mbb.trpg.script.ScriptImportService;
 import org.moboxlab.mbb.trpg.script.ScriptInfo;
+import org.moboxlab.mbb.trpg.script.ScriptIssue;
+import org.moboxlab.mbb.trpg.script.ScriptValidationException;
+import org.moboxlab.mbb.trpg.script.ScriptValidationResult;
 import org.moboxlab.mbb.trpg.session.SessionActor;
 import org.moboxlab.mbb.trpg.session.SessionResult;
 import org.moboxlab.mbb.trpg.store.BlacklistRow;
@@ -20,13 +30,16 @@ import org.moboxlab.mbb.trpg.store.BlacklistRow;
  * 库与权限 handler：script（KP 换本局剧本 + 剧本库管理）与 blacklist。
  *
  * <p>剧本库管理只对 BOT_ADMIN / OWNER 开放；黑名单由群管理员管本群，BOT_ADMIN / OWNER
- * 可在私聊按群号远程解封。导入、删除与生成属于后续切片，这里只做识别与「后续启用」回执。</p>
+ * 可在私聊按群号远程解封。S10 起 import / delete / gen 已启用：导入走分段暂存，
+ * 生成异步执行、完成后按会话类型回执。</p>
  */
 final class AdminCommandHandler {
 
     private static final int LIBRARY_PAGE_SIZE = 10;
-    private static final String UPCOMING_NEXT = "将在后续版本启用。";
+    private static final String RETRY_NEXT = "请稍后重试。";
     private static final String PERMISSION_NEXT = "本指令仅限管理员使用。";
+    /** 生成冷却的动作键（与其它指令共用同一份冷却登记）。 */
+    private static final String GEN_ACTION = "script-gen";
 
     private AdminCommandHandler() {
     }
@@ -71,8 +84,16 @@ final class AdminCommandHandler {
             showScript(context, actor, params);
             return;
         }
-        if ("import".equals(lower) || "delete".equals(lower) || "gen".equals(lower)) {
-            context.rejectNotice(actor, "script-" + lower, "剧本" + scriptActionLabel(lower) + UPCOMING_NEXT);
+        if ("import".equals(lower)) {
+            importScript(context, actor, params);
+            return;
+        }
+        if ("delete".equals(lower)) {
+            deleteScript(context, actor, params);
+            return;
+        }
+        if ("gen".equals(lower)) {
+            generateScript(context, actor, params);
             return;
         }
         // 其余情况按剧本 ID 处理：换本局剧本只允许群内、由局面层判定 KP 与招募期。
@@ -88,15 +109,215 @@ final class AdminCommandHandler {
                 context.loadScript(result.snapshot() == null ? action : result.snapshot().scriptId())));
     }
 
-    /** 库管理动作的中文名（导入 / 删除 / 生成）。 */
-    private static String scriptActionLabel(String lower) {
-        if ("import".equals(lower)) {
-            return "导入";
+    /**
+     * /trpg script import [replace]：开始分段导入，或处理 end / cancel 控制字。
+     *
+     * <p>暂存期间的非控制字消息由消息入口直接吞掉，不会走到这里；因此本方法只负责
+     * 「开始一段导入」与「没有暂存时显式发送 end / cancel」的失败回执。</p>
+     */
+    private static void importScript(TrpgCommandContext context, SessionActor actor,
+                                     String[] params) {
+        ScriptAdmin admin = context.scriptAdmin();
+        if (admin == null) {
+            context.rejectError(actor, "script-admin-unavailable", "剧本管理服务不可用，请稍后重试",
+                    RETRY_NEXT);
+            return;
         }
-        if ("delete".equals(lower)) {
-            return "删除";
+        ScriptImportService imports = admin.imports();
+        String sub = arg(params, 2).toLowerCase(Locale.ROOT);
+        long groupId = actor.groupId();
+        long userId = actor.userId();
+        if ("end".equals(sub)) {
+            endImport(context, actor, imports);
+            return;
         }
-        return "生成";
+        if ("cancel".equals(sub)) {
+            cancelImport(context, actor, imports);
+            return;
+        }
+        if (imports.hasPending(groupId, userId)) {
+            context.rejectNotice(actor, "script-import-pending",
+                    "已有一段导入在进行：继续发送剧本内容即可，发 /trpg script import end 结束，"
+                            + "/trpg script import cancel 取消");
+            return;
+        }
+        boolean replace = "replace".equals(sub);
+        if (!sub.isEmpty() && !replace) {
+            context.rejectError(actor, "script-import-argument",
+                    "参数不对：导入只支持 replace", "用法：/trpg script import [replace]");
+            return;
+        }
+        try {
+            imports.begin(groupId, userId, replace ? ScriptImportMode.REPLACE : ScriptImportMode.CREATE);
+            context.reply(actor, TrpgMessageTemplates.scriptImportGuide(
+                    replace ? ScriptImportMode.REPLACE : ScriptImportMode.CREATE,
+                    imports.maxBytes(), context.config().scriptImportIdleMinutes(),
+                    context.config().scriptImportMaxMinutes()));
+        } catch (ScriptException error) {
+            context.rejectError(actor, "script-import", error.code() + "：" + error.getMessage(),
+                    "请稍后重试，或发送 /trpg script import cancel 清理暂存。");
+        }
+    }
+
+    /** 指令层显式 end：暂存期内的正常路径由消息入口处理，这里兜住无暂存与直接发送。 */
+    private static void endImport(TrpgCommandContext context, SessionActor actor,
+                                  ScriptImportService imports) {
+        long groupId = actor.groupId();
+        long userId = actor.userId();
+        try {
+            ScriptImportResult result = imports.end(groupId, userId);
+            context.reply(actor, TrpgMessageTemplates.scriptImportSuccess(result));
+        } catch (ScriptValidationException error) {
+            if (imports.hasPending(groupId, userId)) {
+                ScriptValidationResult validation = error.validation();
+                ScriptIssue first = validation == null || validation.errors().isEmpty()
+                        ? null : validation.errors().get(0);
+                context.reply(actor, TrpgMessageTemplates.scriptImportIssue(
+                        imports.pendingBytes(groupId, userId), imports.maxBytes(), first));
+            } else {
+                context.reply(actor, TrpgMessageTemplates.scriptImportRejected(error.validation()));
+            }
+        } catch (ScriptException error) {
+            context.rejectError(actor, "script-import-end", error.code() + "：" + error.getMessage(),
+                    "发送 /trpg script import 开始一段导入。");
+        }
+    }
+
+    private static void cancelImport(TrpgCommandContext context, SessionActor actor,
+                                     ScriptImportService imports) {
+        try {
+            imports.cancel(actor.groupId(), actor.userId());
+            context.reply(actor, TrpgMessageTemplates.scriptImportCancelled());
+        } catch (ScriptException error) {
+            context.rejectError(actor, "script-import-cancel", error.code() + "：" + error.getMessage(),
+                    "当前没有待取消的导入。");
+        }
+    }
+
+    /** /trpg script delete <id>：仅删除导入剧本，内置与使用中的剧本由剧本库拒绝。 */
+    private static void deleteScript(TrpgCommandContext context, SessionActor actor,
+                                     String[] params) {
+        String scriptId = arg(params, 2);
+        if (scriptId.isEmpty()) {
+            context.rejectError(actor, "script-delete", "参数不对：缺少剧本 ID",
+                    "用法：/trpg script delete <剧本ID>；发送 /trpg script list 查看可用剧本。");
+            return;
+        }
+        ScriptInfo info = context.catalog().info(scriptId);
+        if (info == null) {
+            context.rejectError(actor, "script-missing", "剧本不存在：" + scriptId,
+                    "发送 /trpg script list 查看可用剧本。");
+            return;
+        }
+        try {
+            context.catalog().delete(scriptId);
+            context.reply(actor, TrpgMessageTemplates.scriptDeleted(info));
+        } catch (ScriptException error) {
+            context.rejectError(actor, "script-delete", deleteReason(error), "可换一个剧本，或先结束引用了该剧本的局。");
+        }
+    }
+
+    private static String deleteReason(ScriptException error) {
+        String code = error == null ? "" : error.code();
+        if (ScriptErrorCodes.E_BUILTIN.equals(code)) {
+            return "内置剧本不能删除";
+        }
+        if (ScriptErrorCodes.E_IN_USE.equals(code)) {
+            return "该剧本正被未归档的局引用，请先结束这些局";
+        }
+        if (ScriptErrorCodes.E_NOT_FOUND.equals(code)) {
+            return "剧本不存在或已被删除";
+        }
+        return code + "：" + (error == null ? "删除失败" : error.getMessage());
+    }
+
+    /** /trpg script gen <题材> [人数] [时长]：异步生成，完成后 @ 发起人。 */
+    private static void generateScript(TrpgCommandContext context, SessionActor actor,
+                                       String[] params) {
+        ScriptAdmin admin = context.scriptAdmin();
+        if (admin == null) {
+            context.rejectError(actor, "script-admin-unavailable", "剧本生成服务不可用，请稍后重试",
+                    RETRY_NEXT);
+            return;
+        }
+        String theme = arg(params, 2);
+        if (theme.isEmpty()) {
+            context.rejectError(actor, "script-gen", "参数不对：缺少题材",
+                    "用法：/trpg script gen <题材> [人数 1-20] [时长分钟 15-600]");
+            return;
+        }
+        int players = intOrDefault(arg(params, 3), 3);
+        int minutes = intOrDefault(arg(params, 4), 60);
+        if (players < 1 || players > 20) {
+            context.rejectError(actor, "script-gen-players", "参数不对：人数需在 1-20 之间",
+                    "人数缺省 3，例如 /trpg script gen 雪山山庄 4 90");
+            return;
+        }
+        if (minutes < 15 || minutes > 600) {
+            context.rejectError(actor, "script-gen-minutes", "参数不对：时长需在 15-600 分钟之间",
+                    "时长缺省 60，例如 /trpg script gen 雪山山庄 4 90");
+            return;
+        }
+        long now = context.clock().nowMillis();
+        long cooldownMillis = context.config().scriptGenCooldownSeconds() * 1000L;
+        long remaining = context.cooldowns().remainingMillis(GEN_ACTION, actor.userId(),
+                actor.groupId(), now, cooldownMillis);
+        if (remaining > 0L) {
+            context.rejectNotice(actor, "script-gen-cooldown",
+                    "生成冷却中，还需等待 " + ((remaining + 999L) / 1000L) + " 秒");
+            return;
+        }
+        if (admin.generation().isRunning()) {
+            context.rejectError(actor, "script-gen-busy", "已有一个剧本在生成中，请等它完成后再试",
+                    "生成通常需要几十秒，可以稍后再发送。");
+            return;
+        }
+        context.cooldowns().mark(GEN_ACTION, actor.userId(), actor.groupId(), now);
+        final long groupId = actor.groupId();
+        final long userId = actor.userId();
+        final int finalPlayers = players;
+        final int finalMinutes = minutes;
+        context.reply(actor, TrpgMessageTemplates.scriptGenStarted(theme, players, minutes));
+        try {
+            admin.executor().execute(new Runnable() {
+                @Override
+                public void run() {
+                    deliverGeneration(context, admin.generation(), theme, finalPlayers,
+                            finalMinutes, groupId, userId);
+                }
+            });
+        } catch (RuntimeException error) {
+            context.rejectError(actor, "script-gen-submit", "生成任务提交失败，请稍后重试",
+                    RETRY_NEXT);
+        }
+    }
+
+    /** 异步任务体：只调生成服务并发送结果，不碰局面与库锁。 */
+    private static void deliverGeneration(TrpgCommandContext context, ScriptGenerationService generation,
+                                          String theme, int players, int minutes, long groupId,
+                                          long userId) {
+        String message;
+        try {
+            message = TrpgMessageTemplates.scriptGenResult(
+                    generation.generate(theme, players, minutes, userId));
+        } catch (RuntimeException error) {
+            message = TrpgMessageTemplates.error("剧本生成异常：" + error.getMessage(),
+                    "可换题材重试，或按 /trpg script import 手工导入。");
+        }
+        try {
+            if (groupId > SessionActor.PRIVATE_GROUP_ID) {
+                context.presenter().sendGroupAt(groupId, userId, message);
+            } else {
+                context.presenter().sendPrivate(userId, message);
+            }
+        } catch (RuntimeException error) {
+            // 发送失败只吞掉：结果已写入剧本库，用户可再用 script list 查看。
+        }
+    }
+
+    private static int intOrDefault(String token, int fallback) {
+        Long value = longValue(token);
+        return value == null ? fallback : value.intValue();
     }
 
     private static void listScripts(TrpgCommandContext context, SessionActor actor, String[] params) {

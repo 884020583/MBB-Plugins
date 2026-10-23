@@ -13,6 +13,7 @@ import org.moboxlab.mbb.trpg.config.TrpgConfig;
 import org.moboxlab.mbb.trpg.present.TrpgNameResolver;
 import org.moboxlab.mbb.trpg.present.TrpgMessageTemplates;
 import org.moboxlab.mbb.trpg.present.TrpgPresenter;
+import org.moboxlab.mbb.trpg.script.ScriptAdmin;
 import org.moboxlab.mbb.trpg.script.ScriptCatalog;
 import org.moboxlab.mbb.trpg.session.Clock;
 import org.moboxlab.mbb.trpg.session.CooldownRegistry;
@@ -34,7 +35,7 @@ import org.moboxlab.mbb.trpg.store.BlacklistService;
 public final class TrpgCommandService {
 
     private static final String UNKNOWN_NEXT = "发送 /trpg help 查看可用指令。";
-    private static final String PRIVATE_NEXT = "私聊只支持 help 与 /roll。";
+    private static final String PRIVATE_NEXT = "私聊只支持 help、/roll 与 script 库管理。";
     /** 指令层同类错误的键（与局面层共用去重窗口）。 */
     private static final String KEY_UNKNOWN = "cmd-unknown";
     private static final String KEY_PRIVATE = "cmd-private";
@@ -70,8 +71,21 @@ public final class TrpgCommandService {
                               TrpgConfig config, Clock clock, PluginLogger logger,
                               CooldownRegistry cooldowns, ErrorDedupe dedupe,
                               BlacklistService blacklist) {
+        this(sessions, logs, catalog, cards, presenter, names, config, clock, logger, cooldowns,
+                dedupe, blacklist, null);
+    }
+
+    /**
+     * 生产装配（含黑名单与剧本管理三件套）：S10 之后由插件装配层传入导入 / 生成 / 执行器。
+     */
+    public TrpgCommandService(SessionService sessions, SessionLogService logs, ScriptCatalog catalog,
+                              CardGenerator cards, TrpgPresenter presenter,
+                              TrpgNameResolver names,
+                              TrpgConfig config, Clock clock, PluginLogger logger,
+                              CooldownRegistry cooldowns, ErrorDedupe dedupe,
+                              BlacklistService blacklist, ScriptAdmin scriptAdmin) {
         this.context = new TrpgCommandContext(sessions, logs, catalog, cards, presenter, names, config,
-                clock, logger, cooldowns, dedupe, blacklist);
+                clock, logger, cooldowns, dedupe, blacklist, scriptAdmin);
         Map<TrpgSubcommand, TrpgSubcommandHandler> registered =
                 new EnumMap<TrpgSubcommand, TrpgSubcommandHandler>(TrpgSubcommand.class);
         registered.putAll(LifecycleCommandHandler.handlers());

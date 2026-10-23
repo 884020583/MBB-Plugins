@@ -152,6 +152,24 @@ public final class TrpgPresenter implements SessionEventPublisher {
                 || title.equals(TrpgTitles.of(TrpgTitles.BEGIN));
     }
 
+    /**
+     * 群内发一条消息并 @ 指定成员：用于异步任务把结果只回给发起人。
+     *
+     * <p>超长只折叠，不拆分；@ 只出现在消息开头一次。</p>
+     */
+    public boolean sendGroupAt(long groupId, long userId, String message) {
+        String clean = formatter.clean(message);
+        if (clean.isEmpty()) {
+            return false;
+        }
+        String folded = splitter.fold(titleOf(clean), bodyOf(clean), config.groupMaxChars());
+        boolean sent = messaging.sendGroupAt(groupId, userId, folded);
+        if (!sent) {
+            warn("群消息发送失败（@）：群=" + groupId + "，对象=" + userId);
+        }
+        return sent;
+    }
+
     private boolean splitAndSendGroup(long groupId, String message, boolean allowSplit) {
         String clean = formatter.clean(message);
         if (clean.isEmpty()) {

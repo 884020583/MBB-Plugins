@@ -3,6 +3,7 @@ package org.moboxlab.mbb.trpg;
 import org.moboxlab.moboxbot.API.Plugin;
 import org.moboxlab.moboxbot.API.PluginManager;
 import org.moboxlab.moboxbot.API.Storage.StorageService;
+import org.moboxlab.mbb.trpg.ai.MbbAiClient;
 import org.moboxlab.mbb.trpg.ai.TraceStore;
 import org.moboxlab.mbb.trpg.ai.TrpgAiHostService;
 import org.moboxlab.mbb.trpg.card.CardGenerator;
@@ -24,7 +25,12 @@ import org.moboxlab.mbb.trpg.rule.RandomSource;
 import org.moboxlab.mbb.trpg.rule.RuleRegistry;
 import org.moboxlab.mbb.trpg.rule.RuleSet;
 import org.moboxlab.mbb.trpg.script.BuiltinScriptCatalog;
+import org.moboxlab.mbb.trpg.script.ScriptAdmin;
 import org.moboxlab.mbb.trpg.script.ScriptCatalog;
+import org.moboxlab.mbb.trpg.script.ScriptGenerationService;
+import org.moboxlab.mbb.trpg.script.ScriptImportSessions;
+import org.moboxlab.mbb.trpg.script.ScriptLibrary;
+import org.moboxlab.mbb.trpg.script.ScriptRejectedStore;
 import org.moboxlab.mbb.trpg.script.ScriptValidator;
 import org.moboxlab.mbb.trpg.session.Clock;
 import org.moboxlab.mbb.trpg.session.CooldownRegistry;
@@ -43,7 +49,12 @@ import org.moboxlab.mbb.trpg.store.SqlTraceStore;
 import org.moboxlab.mbb.trpg.store.TrpgRetentionService;
 import org.moboxlab.mbb.trpg.store.TrpgSchemaService;
 
+import java.io.File;
 import java.util.List;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ThreadFactory;
+import java.util.function.LongSupplier;
 
 /**
  * MBB-Trpg 插件主类。
@@ -70,6 +81,12 @@ public class TrpgPlugin extends Plugin {
     private TrpgRetentionService retentionService;
     private ScheduledTask retentionTask;
     private ScriptCatalog scriptCatalog;
+    /** S10：内置 + 导入的组合剧本库；未启用时为 null。 */
+    private ScriptLibrary scriptLibrary;
+    private ScriptValidator scriptValidator;
+    private ScriptAdmin scriptAdmin;
+    /** 生成任务执行器：单线程守护，避免占用主程序调度池。 */
+    private ExecutorService scriptExecutor;
     private TrpgPresenter presenter;
     private SessionLogService sessionLogService;
     private TrpgCommandService commandService;
@@ -158,10 +175,10 @@ public class TrpgPlugin extends Plugin {
      * @return 加载成功返回 true；失败时已设置禁用原因与错误日志
      */
     private boolean assembleScriptCatalog() {
-        BuiltinScriptCatalog catalog;
+        ScriptValidator validator = new ScriptValidator();
+        BuiltinScriptCatalog builtin;
         try {
-            catalog = new BuiltinScriptCatalog(TrpgPlugin.class.getClassLoader(),
-                    new ScriptValidator());
+            builtin = new BuiltinScriptCatalog(TrpgPlugin.class.getClassLoader(), validator);
         } catch (RuntimeException e) {
             trpgEnabled = false;
             disabledReason = "内置剧本未就绪";
@@ -169,11 +186,17 @@ public class TrpgPlugin extends Plugin {
             getLogger().sendError("[MBB-Trpg] 内置剧本加载失败，TRPG 能力已禁用：" + e.getMessage());
             return false;
         }
-        scriptCatalog = catalog;
-        for (String warning : catalog.warnings()) {
+        scriptValidator = validator;
+        // S10：内置库与导入库组合成同一个剧本目录视图；导入文件放 <dataFolder>/scripts。
+        ScriptLibrary library = new ScriptLibrary(builtin, new File(getDataFolder(), "scripts"),
+                validator, trpgConfig.scriptMaxBytes(), getLogger());
+        scriptLibrary = library;
+        scriptCatalog = library;
+        for (String warning : builtin.warnings()) {
             getLogger().sendWarn("[MBB-Trpg] 剧本校验告警：" + warning);
         }
-        getLogger().sendInfo("[MBB-Trpg] 内置剧本已加载，共 " + catalog.size() + " 份");
+        getLogger().sendInfo("[MBB-Trpg] 剧本库已加载，内置 " + builtin.size() + " 份，导入 "
+                + library.importedCount() + " 份");
         return true;
     }
 
@@ -203,17 +226,22 @@ public class TrpgPlugin extends Plugin {
         sessionService = new SessionService(store, scriptCatalog, clock, randomSource, trpgConfig,
                 presenter, getLogger(), new GroupLockRegistry(clock), cooldowns, dedupe,
                 aiHostService);
+        // 剧本删除/替换的引用保护：库先建、局面服务后建，因此在这里补绑引用索引（§8.6）。
+        if (scriptLibrary != null) {
+            scriptLibrary.bindUsageIndex(sessionService);
+        }
         // 只读快照视图交给桩，v1.1 的叙述链路可直接复用（§9.11）。
         aiHostService.bindSessionView(sessionService);
         getLogger().sendInfo("[MBB-Trpg] AI 主持全局开关："
                 + (aiHostService.globallyEnabled() ? "开" : "关")
                 + "（v1 为空实现，不调用 AI、不写审计、不注册定时器）");
         sessionLogService = new SessionLogService(store, trpgConfig, clock, cooldowns, dedupe, getLogger());
+        ScriptImportSessions importSessions = assembleScriptAdmin();
         commandService = new TrpgCommandService(sessionService, sessionLogService, scriptCatalog,
                 new CardGenerator(randomSource), presenter, nameResolver, trpgConfig, clock, getLogger(),
-                cooldowns, dedupe, blacklistService);
-        // 导入暂存服务由 S10 提供，这里先留空：不吞消息，只保留调用点。
-        listener = new TrpgListener(sessionService, blacklistService, null, getLogger());
+                cooldowns, dedupe, blacklistService, scriptAdmin);
+        listener = new TrpgListener(sessionService, blacklistService, importSessions, presenter,
+                getLogger());
         noticeListener = new TrpgNoticeListener(sessionService, getLogger());
         retentionService = new TrpgRetentionService(store, getLogger(), clock,
                 trpgConfig.retentionSessionDays(), trpgConfig.aiTraceKeepHours(),
@@ -265,6 +293,52 @@ public class TrpgPlugin extends Plugin {
         }
     }
 
+    /**
+     * 装配 S10 剧本管理三件套：分段导入暂存、AI 生成与生成执行器。
+     *
+     * <p>任一步失败只让 script 的库管理动作回「暂不可用」，不影响其它 TRPG 能力。</p>
+     *
+     * @return 导入暂存服务，供消息入口拦截分段；装配失败返回 null
+     */
+    private ScriptImportSessions assembleScriptAdmin() {
+        if (scriptLibrary == null || scriptValidator == null) {
+            return null;
+        }
+        try {
+            ScriptRejectedStore rejected = new ScriptRejectedStore(
+                    new File(getDataFolder(), "imports/rejected"),
+                    trpgConfig.scriptRejectedMaxFiles(), getLogger());
+            ScriptImportSessions imports = new ScriptImportSessions(scriptLibrary, scriptValidator,
+                    rejected, trpgConfig.scriptMaxBytes(),
+                    trpgConfig.scriptImportIdleMinutes() * 60_000L,
+                    trpgConfig.scriptImportMaxMinutes() * 60_000L,
+                    trpgConfig.scriptImportMaxSegments(), new LongSupplier() {
+                        @Override
+                        public long getAsLong() {
+                            return System.currentTimeMillis();
+                        }
+                    });
+            ScriptGenerationService generation = new ScriptGenerationService(scriptLibrary,
+                    scriptValidator, new MbbAiClient(this), rejected);
+            scriptExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
+                @Override
+                public Thread newThread(Runnable runnable) {
+                    Thread thread = new Thread(runnable, "MBB-Trpg-剧本生成");
+                    thread.setDaemon(true);
+                    return thread;
+                }
+            });
+            scriptAdmin = new ScriptAdmin(imports, generation, scriptExecutor);
+            getLogger().sendInfo("[MBB-Trpg] 剧本管理已装配（分段导入 + AI 生成）");
+            return imports;
+        } catch (RuntimeException e) {
+            scriptAdmin = null;
+            getLogger().sendWarn("[MBB-Trpg] 剧本管理装配失败，script 库管理动作不可用："
+                    + e.getMessage());
+            return null;
+        }
+    }
+
     /** 注册 /trpg 与 /r；指令层只做解析与委托，所有回执经呈现层发出。 */
     private void registerCommands(PluginManager pluginManager, Clock clock) {
         try {
@@ -305,6 +379,10 @@ public class TrpgPlugin extends Plugin {
             retentionTask.cancel();
             retentionTask = null;
         }
+        if (scriptExecutor != null) {
+            scriptExecutor.shutdownNow();
+            scriptExecutor = null;
+        }
         ruleSet = null;
         randomSource = null;
         sessionStore = null;
@@ -313,6 +391,9 @@ public class TrpgPlugin extends Plugin {
         sessionService = null;
         retentionService = null;
         scriptCatalog = null;
+        scriptLibrary = null;
+        scriptValidator = null;
+        scriptAdmin = null;
         presenter = null;
         sessionLogService = null;
         commandService = null;

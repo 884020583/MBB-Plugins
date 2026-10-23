@@ -9,6 +9,9 @@ public interface Messaging {
 
     boolean sendGroupText(long groupId, String text);
 
+    /** 群内发送并 @ 指定成员（用于异步任务把结果只回给发起人）。 */
+    boolean sendGroupAt(long groupId, long userId, String text);
+
     boolean sendPrivateText(long userId, String text);
 
     boolean sendGroupImage(long groupId, byte[] image);

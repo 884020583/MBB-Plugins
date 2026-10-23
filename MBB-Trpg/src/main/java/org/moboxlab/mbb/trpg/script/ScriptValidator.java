@@ -100,6 +100,20 @@ public final class ScriptValidator {
      * 大小上限按原始字节判断，BOM 计入其中，与 {@link #validate(String)} 口径一致。</p>
      */
     public ScriptValidationResult validate(byte[] content) {
+        return validate(content, false);
+    }
+
+    /**
+     * 校验 AI 生成结果：与导入同一条规则链，唯一区别是允许 {@code gen-} 前缀的 id。
+     *
+     * <p>生成流程在写入前把 id 覆盖为 {@code gen-<时间戳>-<随机>}，该前缀只对生成路径开放；
+     * 作者手工导入仍然是 E_ID。</p>
+     */
+    public ScriptValidationResult validateGenerated(byte[] content) {
+        return validate(content, true);
+    }
+
+    private ScriptValidationResult validate(byte[] content, boolean generatedId) {
         if (content == null) {
             return single(E_PARSE, "$", "剧本内容为空");
         }
@@ -116,11 +130,20 @@ public final class ScriptValidator {
         } catch (CharacterCodingException e) {
             return single(E_PARSE, "$", "剧本内容不是合法的 UTF-8 编码");
         }
-        return validate(text);
+        return validate(text, generatedId);
     }
 
     /** 校验 JSON 文本；BOM 会被剥离，但大小上限仍按含 BOM 的原始字节判断。 */
     public ScriptValidationResult validate(String jsonText) {
+        return validate(jsonText, false);
+    }
+
+    /** 校验 AI 生成的 JSON 文本，允许 {@code gen-} 前缀 id。 */
+    public ScriptValidationResult validateGenerated(String jsonText) {
+        return validate(jsonText, true);
+    }
+
+    private ScriptValidationResult validate(String jsonText, boolean generatedId) {
         if (jsonText == null) {
             return single(E_PARSE, "$", "剧本内容为空");
         }
@@ -144,7 +167,7 @@ public final class ScriptValidator {
         }
         JSONObject json = (JSONObject) root;
         warnUnknownFields(json, TOP_FIELDS, "$", ctx);
-        Script script = buildScript(json, ctx);
+        Script script = buildScript(json, generatedId, ctx);
         if (script == null || ctx.hasErrors()) {
             return ScriptValidationResult.failed(ctx.errors);
         }
@@ -180,7 +203,7 @@ public final class ScriptValidator {
 
     // ===== 顶层与节点 =====
 
-    private Script buildScript(JSONObject json, Ctx ctx) {
+    private Script buildScript(JSONObject json, boolean generatedId, Ctx ctx) {
         int before = ctx.errors.size();
 
         Integer schemaVersion = requiredInt(json, "schemaVersion", "$.schemaVersion", ctx);
@@ -206,7 +229,7 @@ public final class ScriptValidator {
                     + Script.RULE_SET_D100 + "，当前为 " + ruleSet);
         }
         if (id != null) {
-            checkScriptId(id, ctx);
+            checkScriptId(id, generatedId, ctx);
         }
         if (minPlayers != null && maxPlayers != null && maxPlayers.intValue() < minPlayers.intValue()) {
             ctx.error(E_RANGE, "$.maxPlayers", "maxPlayers 不得小于 minPlayers："
@@ -228,12 +251,12 @@ public final class ScriptValidator {
                 checks, triggers, endings);
     }
 
-    private void checkScriptId(String id, Ctx ctx) {
+    private void checkScriptId(String id, boolean generatedId, Ctx ctx) {
         if (!ELEMENT_ID.matcher(id).matches()) {
             ctx.error(E_ID, "$.id", "剧本 id 必须匹配 " + ELEMENT_ID_REGEX + "：" + id);
             return;
         }
-        if (id.startsWith("gen-")) {
+        if (!generatedId && id.startsWith("gen-")) {
             ctx.error(E_ID, "$.id", "剧本 id 不得以 gen- 开头（该前缀保留给生成剧本）：" + id);
         }
         if (RESERVED_IDS.contains(id.toLowerCase())) {

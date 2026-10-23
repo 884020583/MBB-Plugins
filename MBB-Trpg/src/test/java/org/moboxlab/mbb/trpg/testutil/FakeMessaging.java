@@ -45,6 +45,22 @@ public final class FakeMessaging implements Messaging {
     private int failNextPrivateText;
     private int failNextGroupImage;
     private int failNextPrivateImage;
+    private int failNextGroupAt;
+
+    @Override
+    public boolean sendGroupAt(long groupId, long userId, String text) {
+        if (failNextGroupAt > 0) {
+            failNextGroupAt--;
+            return false;
+        }
+        sent.add(new SentMessage("group-at:" + userId, groupId, text, null));
+        return true;
+    }
+
+    /** 注入接下来的群内 @ 发送失败次数。 */
+    public void failNextGroupAt(int times) {
+        this.failNextGroupAt = times;
+    }
 
     @Override
     public boolean sendGroupText(long groupId, String text) {
