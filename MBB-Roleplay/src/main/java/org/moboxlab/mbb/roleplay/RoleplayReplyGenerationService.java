@@ -73,6 +73,19 @@ public class RoleplayReplyGenerationService {
         } else {
             userMessage.put("content",userText);
         }
+        String anchorInput = batchCount > 1
+                ? service.safe(batchText)+"\n"+service.safe(content) : service.safe(content);
+        messages.add(service.message("system",
+                service.promptAssembler().styleAnchorPrompt(anchorInput)));
+        if (service.config().toolEnable) {
+            messages.add(service.message("system",
+                    "你可以调用本轮提供的工具。需要事实、历史、记忆或角色私有文件时先调用工具，"
+                            +"不要在结果返回前声称已经完成。工具结果返回后可以继续调用工具，"
+                            +"也可以直接输出最终回复；确实不需要回复时调用 end_turn。"
+                            +"工具执行期间收到的新消息会和工具结果一起提供，需要一并考虑。"
+                            +"workspace_* 只能操作 plugins/MBB-Roleplay/data 内的文件，"
+                            +"不能读取或修改外部路径。"));
+        }
         messages.add(userMessage);
         JSONObject params = new JSONObject(true);
         params.put("profile",service.config().aiProfile);
@@ -81,9 +94,16 @@ public class RoleplayReplyGenerationService {
                 : Math.max(service.config().replyMaxTokens,service.config().replyImageMaxTokens));
         params.put("reasoningEffort",service.config().replyReasoningEffort);
         params.put("sessionId","roleplay-"+groupID+"-"+service.contextToken(groupID));
-        params.put("messages",messages);
+        RoleplayToolContext toolContext = new RoleplayToolContext();
+        toolContext.groupID = groupID;
+        toolContext.userID = userID;
+        toolContext.userName = userName == null ? "" : userName;
+        toolContext.relationship = relationship == null ? "" : relationship;
+        toolContext.message = content == null ? "" : content;
+        toolContext.channel = "group";
+        toolContext.privacy = "group";
         long startTime = System.currentTimeMillis();
-        JSONObject response = ai.call("chat",params);
+        JSONObject response = service.toolLoopService().run(groupID,toolContext,messages,params);
         long elapsed = System.currentTimeMillis() - startTime;
         RoleplayAiLog.log(service.plugin().getLogger(),"回复",groupID,response,elapsed);
         if (response != null) {
@@ -96,6 +116,8 @@ public class RoleplayReplyGenerationService {
             trace.put("cachedPromptTokens",usage == null ? 0 : usage.getIntValue("cachedPromptTokens"));
             trace.put("elapsedMs",elapsed);
             trace.put("reply",service.shortText(service.safe(response.getString("content")),240));
+            JSONArray toolTrace = response.getJSONArray("toolTrace");
+            if (toolTrace != null) trace.put("toolTrace",toolTrace);
             service.getTraceService().record(groupID,userID,0L,"reply",trace);
         }
         return response;

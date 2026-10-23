@@ -99,6 +99,7 @@ public class RoleplayService {
     private final RoleplayPromptMaterialService promptMaterialService;
     private final RoleplayMessageContentService contentService;
     private final RoleplaySkillRegistry skillRegistry;
+    private final RoleplayToolLoopService toolLoopService;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
     private volatile RoleplayConfig config;
@@ -317,6 +318,7 @@ public class RoleplayService {
         this.promptMaterialService = new RoleplayPromptMaterialService(this);
         this.contentService = new RoleplayMessageContentService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
+        this.toolLoopService = new RoleplayToolLoopService(this,config);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
     }
@@ -357,6 +359,7 @@ public class RoleplayService {
         threadService.reload(config);
         attentionService.reload(config);
         dailyReviewService.reload(config);
+        toolLoopService.reload(config);
         executorService.ensureTurnExecutor();
         executorService.ensureBackgroundExecutor();
         dailyReviewService.ensureTask();
@@ -586,6 +589,10 @@ public class RoleplayService {
 
     RoleplayStyler styler() {
         return styler;
+    }
+
+    RoleplayToolLoopService toolLoopService() {
+        return toolLoopService;
     }
 
     RoleplayRouter router() {
