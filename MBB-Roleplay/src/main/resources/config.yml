@@ -245,6 +245,26 @@ replyReviewReasoningEffort: "none"
 replyReviewTimeoutSecond: 60
 #复核最低通过分，低于该分数且模型给出改写时使用改写文本
 replyReviewMinScore: 70
+#是否允许角色通过原生工具调用查询信息或维护私有工作区
+toolEnable: true
+#单轮最多进行多少次模型-工具循环
+toolMaxSteps: 4
+#单轮最多执行多少个工具调用
+toolMaxCalls: 8
+#单个工具结果注入上下文的最大字符数
+toolResultMaxChars: 8000
+#工具执行期间最多并入多少条新群消息
+toolLiveMessageMax: 10
+#是否启用角色私有工作区 plugins/MBB-Roleplay/data
+workspaceEnable: true
+#工作区单次读取最大字符数
+workspaceMaxReadChars: 32000
+#工作区单次写入最大字符数
+workspaceMaxWriteChars: 64000
+#工作区列表最多返回多少个文件
+workspaceMaxFilesPerList: 200
+#工作区总大小上限，默认 64MB
+workspaceMaxTotalBytes: 67108864
 #是否在发送前加入拟人打字延迟
 pacingEnable: true
 #基础延迟毫秒

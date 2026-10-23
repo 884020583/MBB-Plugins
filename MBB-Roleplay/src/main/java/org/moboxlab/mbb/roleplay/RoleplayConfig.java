@@ -162,6 +162,16 @@ public class RoleplayConfig {
     public String replyReviewReasoningEffort = "none";
     public int replyReviewTimeoutSecond = 60;
     public int replyReviewMinScore = 70;
+    public boolean toolEnable = true;
+    public int toolMaxSteps = 4;
+    public int toolMaxCalls = 8;
+    public int toolResultMaxChars = 8000;
+    public int toolLiveMessageMax = 10;
+    public boolean workspaceEnable = true;
+    public int workspaceMaxReadChars = 32000;
+    public int workspaceMaxWriteChars = 64000;
+    public int workspaceMaxFilesPerList = 200;
+    public long workspaceMaxTotalBytes = 64L * 1024L * 1024L;
     public boolean pacingEnable = true;
     public int pacingBaseMs = 350;
     public int pacingPerCharMs = 25;
@@ -483,6 +493,17 @@ public class RoleplayConfig {
                 plugin.getConfig().getString("replyReviewReasoningEffort","none"));
         config.replyReviewTimeoutSecond = plugin.getConfig().getInt("replyReviewTimeoutSecond",60);
         config.replyReviewMinScore = plugin.getConfig().getInt("replyReviewMinScore",70);
+        config.toolEnable = plugin.getConfig().getBoolean("toolEnable",true);
+        config.toolMaxSteps = plugin.getConfig().getInt("toolMaxSteps",4);
+        config.toolMaxCalls = plugin.getConfig().getInt("toolMaxCalls",8);
+        config.toolResultMaxChars = plugin.getConfig().getInt("toolResultMaxChars",8000);
+        config.toolLiveMessageMax = plugin.getConfig().getInt("toolLiveMessageMax",10);
+        config.workspaceEnable = plugin.getConfig().getBoolean("workspaceEnable",true);
+        config.workspaceMaxReadChars = plugin.getConfig().getInt("workspaceMaxReadChars",32000);
+        config.workspaceMaxWriteChars = plugin.getConfig().getInt("workspaceMaxWriteChars",64000);
+        config.workspaceMaxFilesPerList = plugin.getConfig().getInt("workspaceMaxFilesPerList",200);
+        config.workspaceMaxTotalBytes = plugin.getConfig().getInt("workspaceMaxTotalBytes",
+                64 * 1024 * 1024);
         config.pacingEnable = plugin.getConfig().getBoolean("pacingEnable",true);
         config.pacingBaseMs = plugin.getConfig().getInt("pacingBaseMs",350);
         config.pacingPerCharMs = plugin.getConfig().getInt("pacingPerCharMs",25);
@@ -794,6 +815,26 @@ public class RoleplayConfig {
         if (config.replyReviewTimeoutSecond > 300) config.replyReviewTimeoutSecond = 300;
         if (config.replyReviewMinScore < 0) config.replyReviewMinScore = 0;
         if (config.replyReviewMinScore > 100) config.replyReviewMinScore = 100;
+        if (config.toolMaxSteps < 1) config.toolMaxSteps = 1;
+        if (config.toolMaxSteps > 8) config.toolMaxSteps = 8;
+        if (config.toolMaxCalls < 1) config.toolMaxCalls = 1;
+        if (config.toolMaxCalls > 24) config.toolMaxCalls = 24;
+        if (config.toolResultMaxChars < 500) config.toolResultMaxChars = 500;
+        if (config.toolResultMaxChars > 32000) config.toolResultMaxChars = 32000;
+        if (config.toolLiveMessageMax < 1) config.toolLiveMessageMax = 1;
+        if (config.toolLiveMessageMax > 30) config.toolLiveMessageMax = 30;
+        if (config.workspaceMaxReadChars < 1000) config.workspaceMaxReadChars = 1000;
+        if (config.workspaceMaxReadChars > 200000) config.workspaceMaxReadChars = 200000;
+        if (config.workspaceMaxWriteChars < 1000) config.workspaceMaxWriteChars = 1000;
+        if (config.workspaceMaxWriteChars > 500000) config.workspaceMaxWriteChars = 500000;
+        if (config.workspaceMaxFilesPerList < 10) config.workspaceMaxFilesPerList = 10;
+        if (config.workspaceMaxFilesPerList > 1000) config.workspaceMaxFilesPerList = 1000;
+        if (config.workspaceMaxTotalBytes < 1024L * 1024L) {
+            config.workspaceMaxTotalBytes = 1024L * 1024L;
+        }
+        if (config.workspaceMaxTotalBytes > 1024L * 1024L * 1024L) {
+            config.workspaceMaxTotalBytes = 1024L * 1024L * 1024L;
+        }
         if (config.pacingBaseMs < 0) config.pacingBaseMs = 0;
         if (config.pacingPerCharMs < 0) config.pacingPerCharMs = 0;
         if (config.pacingMaxMs < 0) config.pacingMaxMs = 0;
