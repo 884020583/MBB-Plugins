@@ -13,4 +13,6 @@ public class RoleplayToolContext {
     public String message = "";
     public String channel = "group";
     public String privacy = "group";
+    public String eventRaw = "";
+    public boolean ownerAuthorizedInternalNetwork;
 }

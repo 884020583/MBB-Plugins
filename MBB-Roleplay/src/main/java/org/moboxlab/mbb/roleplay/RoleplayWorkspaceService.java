@@ -6,10 +6,16 @@ import org.moboxlab.moboxbot.API.Plugin;
 
 import java.io.File;
 import java.nio.charset.StandardCharsets;
+import java.nio.file.AtomicMoveNotSupportedException;
+import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
+import java.util.UUID;
 
 /**
  * 角色私有工作区。
@@ -17,6 +23,8 @@ import java.util.Locale;
  * 所有路径都必须落在插件数据目录下的 data/ 中，拒绝绝对路径、父目录逃逸和符号链接。
  */
 public class RoleplayWorkspaceService {
+    private static final String TRASH = ".trash";
+    private static final String HISTORY = ".history";
     private final Plugin plugin;
     private volatile RoleplayConfig config;
 
@@ -33,6 +41,7 @@ public class RoleplayWorkspaceService {
 
     public JSONObject list(String path) throws Exception {
         File target = resolve(path,true);
+        rejectInternalNamespace(target);
         if (!target.exists()) throw new IllegalArgumentException("路径不存在");
         if (!target.isDirectory()) throw new IllegalArgumentException("目标不是文件夹");
         File[] files = target.listFiles();
@@ -44,6 +53,7 @@ public class RoleplayWorkspaceService {
             sorted.sort((left,right) -> left.getName().compareToIgnoreCase(right.getName()));
             for (File file : sorted) {
                 if (items.size() >= limit) break;
+                if (isInternalNamespace(file)) continue;
                 JSONObject item = new JSONObject(true);
                 item.put("name",file.getName());
                 item.put("path",relative(file));
@@ -62,6 +72,7 @@ public class RoleplayWorkspaceService {
 
     public JSONObject read(String path) throws Exception {
         File target = resolve(path,false);
+        rejectInternalNamespace(target);
         if (!target.isFile()) throw new IllegalArgumentException("目标不存在或不是文件");
         rejectSymlink(target);
         long size = target.length();
@@ -82,6 +93,7 @@ public class RoleplayWorkspaceService {
     public JSONObject write(String path,String content,boolean append) throws Exception {
         if (!config.workspaceEnable) throw new IllegalArgumentException("角色工作区未启用");
         File target = resolve(path,false);
+        rejectInternalNamespace(target);
         if (target.isDirectory()) throw new IllegalArgumentException("目标是一个文件夹");
         rejectSymlink(target);
         String text = content == null ? "" : content;
@@ -106,7 +118,18 @@ public class RoleplayWorkspaceService {
             throw new IllegalArgumentException("工作区总大小超过上限 "
                     +config.workspaceMaxTotalBytes+" 字节");
         }
-        Files.write(target.toPath(),bytes);
+        if (target.exists() && config.workspaceHistoryEnable) backupHistory(target);
+        Path temp = parent.toPath().resolve("."+target.getName()+".tmp-"
+                +UUID.randomUUID().toString().replace("-",""));
+        Files.write(temp,bytes);
+        try {
+            Files.move(temp,target.toPath(),StandardCopyOption.REPLACE_EXISTING,
+                    StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(temp,target.toPath(),StandardCopyOption.REPLACE_EXISTING);
+        } finally {
+            Files.deleteIfExists(temp);
+        }
         JSONObject result = new JSONObject(true);
         result.put("path",relative(target));
         result.put("size",target.length());
@@ -115,8 +138,13 @@ public class RoleplayWorkspaceService {
     }
 
     public JSONObject delete(String path,boolean recursive) throws Exception {
+        return delete(path,recursive,false);
+    }
+
+    public JSONObject delete(String path,boolean recursive,boolean permanent) throws Exception {
         if (!config.workspaceEnable) throw new IllegalArgumentException("角色工作区未启用");
         File target = resolve(path,false);
+        rejectInternalNamespace(target);
         if (!target.exists()) throw new IllegalArgumentException("路径不存在");
         rejectSymlink(target);
         if (target.isDirectory()) {
@@ -124,11 +152,86 @@ public class RoleplayWorkspaceService {
             if (files != null && files.length > 0 && !recursive) {
                 throw new IllegalArgumentException("文件夹非空；确认删除请传 recursive=true");
             }
-            deleteRecursive(target);
-        } else if (!target.delete()) {
-            throw new IllegalStateException("删除文件失败");
         }
-        return new JSONObject(true);
+        JSONObject result = new JSONObject(true);
+        if (permanent) {
+            if (target.isDirectory()) deleteRecursive(target);
+            else if (!target.delete()) throw new IllegalStateException("删除文件失败");
+            result.put("permanent",true);
+            result.put("path",path);
+            return result;
+        }
+        File trash = new File(root(),TRASH);
+        if (!trash.exists() && !trash.mkdirs()) throw new IllegalStateException("无法创建工作区回收站");
+        File dest = new File(trash,System.currentTimeMillis()+"-"+target.getName());
+        move(target,dest,false);
+        dest.setLastModified(System.currentTimeMillis());
+        result.put("permanent",false);
+        result.put("path",path);
+        result.put("trashPath",relative(dest));
+        result.put("restoreHint","可调用 workspace_restore 恢复");
+        cleanupTrash();
+        return result;
+    }
+
+    public JSONObject rename(String source,String target,boolean overwrite) throws Exception {
+        File from = resolve(source,false);
+        File to = resolve(target,false);
+        rejectInternalNamespace(from);
+        rejectInternalNamespace(to);
+        if (!from.exists()) throw new IllegalArgumentException("源路径不存在");
+        if (from.equals(to)) return pathResult(to,"rename");
+        rejectNestedTarget(from,to);
+        rejectSymlink(from);
+        rejectSymlink(to);
+        move(from,to,overwrite);
+        return pathResult(to,"rename");
+    }
+
+    public JSONObject copy(String source,String target,boolean overwrite) throws Exception {
+        File from = resolve(source,false);
+        File to = resolve(target,false);
+        rejectInternalNamespace(from);
+        rejectInternalNamespace(to);
+        if (!from.exists()) throw new IllegalArgumentException("源路径不存在");
+        rejectNestedTarget(from,to);
+        rejectSymlink(from);
+        rejectSymlink(to);
+        if (to.exists() && !overwrite) throw new FileAlreadyExistsException(target);
+        File parent = to.getParentFile();
+        if (parent == null) throw new IllegalArgumentException("目标路径无效");
+        if (!parent.exists() && !parent.mkdirs()) throw new IllegalStateException("无法创建父目录");
+        verifyInsideRoot(parent.getCanonicalFile());
+        long total = directorySize(root());
+        long sourceSize = directorySize(from);
+        long oldSize = to.exists() ? directorySize(to) : 0L;
+        if (total - oldSize + sourceSize > config.workspaceMaxTotalBytes) {
+            throw new IllegalArgumentException("复制后工作区总大小超过上限 "
+                    +config.workspaceMaxTotalBytes+" 字节");
+        }
+        if (to.exists()) {
+            if (to.isDirectory()) deleteRecursive(to);
+            else Files.deleteIfExists(to.toPath());
+        }
+        copyRecursive(from,to);
+        return pathResult(to,"copy");
+    }
+
+    public JSONObject restore(String trashPath,String target,boolean overwrite) throws Exception {
+        File from = resolve(trashPath,false);
+        File trash = new File(root(),TRASH).getCanonicalFile();
+        if (!from.getCanonicalPath().startsWith(trash.getPath()+File.separator)) {
+            throw new IllegalArgumentException("只能从工作区回收站恢复");
+        }
+        if (!from.exists()) throw new IllegalArgumentException("回收站路径不存在");
+        String name = from.getName();
+        int split = name.indexOf('-');
+        if (split >= 0 && split + 1 < name.length()) name = name.substring(split + 1);
+        File to = resolve(target == null || target.trim().isEmpty() ? name : target,false);
+        rejectSymlink(from);
+        rejectSymlink(to);
+        move(from,to,overwrite);
+        return pathResult(to,"restore");
     }
 
     public JSONObject search(String path,String query,int maxResults) throws Exception {
@@ -200,6 +303,7 @@ public class RoleplayWorkspaceService {
 
     private void ensureRoot() {
         root();
+        cleanupTrash();
     }
 
     private File resolve(String path,boolean allowRoot) throws Exception {
@@ -259,6 +363,139 @@ public class RoleplayWorkspaceService {
             }
         }
         Files.deleteIfExists(file.toPath());
+    }
+
+    private void copyRecursive(File source,File target) throws Exception {
+        if (Files.isSymbolicLink(source.toPath())) {
+            throw new IllegalArgumentException("不允许复制符号链接");
+        }
+        if (source.isDirectory()) {
+            if (!target.exists() && !target.mkdirs()) {
+                throw new IllegalStateException("无法创建目录："+target.getName());
+            }
+            File[] files = source.listFiles();
+            if (files != null) {
+                for (File child : files) {
+                    copyRecursive(child,new File(target,child.getName()));
+                }
+            }
+            return;
+        }
+        File parent = target.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            throw new IllegalStateException("无法创建父目录");
+        }
+        Files.copy(source.toPath(),target.toPath(),StandardCopyOption.REPLACE_EXISTING,
+                StandardCopyOption.COPY_ATTRIBUTES);
+    }
+
+    private void move(File source,File target,boolean overwrite) throws Exception {
+        File parent = target.getParentFile();
+        if (parent == null) throw new IllegalArgumentException("目标路径无效");
+        if (!parent.exists() && !parent.mkdirs()) throw new IllegalStateException("无法创建父目录");
+        verifyInsideRoot(parent.getCanonicalFile());
+        if (target.exists()) {
+            if (!overwrite) throw new FileAlreadyExistsException(target.getPath());
+            if (target.isDirectory()) deleteRecursive(target);
+            else Files.deleteIfExists(target.toPath());
+        }
+        try {
+            Files.move(source.toPath(),target.toPath(),StandardCopyOption.ATOMIC_MOVE);
+        } catch (AtomicMoveNotSupportedException e) {
+            Files.move(source.toPath(),target.toPath());
+        }
+    }
+
+    private void backupHistory(File target) throws Exception {
+        if (target == null || !target.isFile()) return;
+        File historyRoot = new File(root(),HISTORY);
+        String relative = relative(target).replace("/",File.separator);
+        File directory = new File(historyRoot,relative);
+        if (!directory.exists() && !directory.mkdirs()) {
+            throw new IllegalStateException("无法创建工作区历史目录");
+        }
+        String stamp = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss-SSS",
+                Locale.CHINA).format(new java.util.Date());
+        Files.copy(target.toPath(),new File(directory,stamp+".bak").toPath(),
+                StandardCopyOption.REPLACE_EXISTING,StandardCopyOption.COPY_ATTRIBUTES);
+        pruneHistory(directory);
+        if (directorySize(root()) > config.workspaceMaxTotalBytes) {
+            File[] files = directory.listFiles();
+            if (files != null && files.length > 0) Files.deleteIfExists(files[0].toPath());
+        }
+    }
+
+    private void pruneHistory(File directory) {
+        int keep = Math.max(0,config.workspaceHistoryMaxVersions);
+        File[] files = directory.listFiles();
+        if (files == null || files.length <= keep) return;
+        List<File> sorted = new ArrayList<>();
+        for (File file : files) sorted.add(file);
+        sorted.sort(new Comparator<File>() {
+            @Override
+            public int compare(File left,File right) {
+                return Long.compare(left.lastModified(),right.lastModified());
+            }
+        });
+        int remove = sorted.size() - keep;
+        for (int i = 0; i < remove; i++) {
+            try {
+                Files.deleteIfExists(sorted.get(i).toPath());
+            } catch (Exception ignored) {
+            }
+        }
+        if (keep == 0) deleteRecursiveQuietly(directory);
+    }
+
+    private void cleanupTrash() {
+        File trash = new File(root(),TRASH);
+        if (!trash.exists() || !trash.isDirectory()) return;
+        long cutoff = System.currentTimeMillis() - config.workspaceTrashKeepDays * 86400000L;
+        File[] files = trash.listFiles();
+        if (files == null) return;
+        for (File file : files) {
+            if (file.lastModified() >= cutoff) continue;
+            deleteRecursiveQuietly(file);
+        }
+    }
+
+    private void deleteRecursiveQuietly(File file) {
+        if (file == null || !file.exists() || Files.isSymbolicLink(file.toPath())) return;
+        try {
+            deleteRecursive(file);
+        } catch (Exception ignored) {
+        }
+    }
+
+    private JSONObject pathResult(File file,String action) throws Exception {
+        JSONObject result = new JSONObject(true);
+        result.put("path",relative(file));
+        result.put("action",action);
+        return result;
+    }
+
+    private void rejectInternalNamespace(File file) throws Exception {
+        if (isInternalNamespace(file)) {
+            throw new IllegalArgumentException("内部历史与回收站目录不能直接操作");
+        }
+    }
+
+    private void rejectNestedTarget(File source,File target) throws Exception {
+        if (source == null || target == null || !source.isDirectory()) return;
+        String sourcePath = source.getCanonicalPath();
+        String targetPath = target.getCanonicalPath();
+        if (targetPath.startsWith(sourcePath+File.separator)) {
+            throw new IllegalArgumentException("目标路径不能位于源目录内部");
+        }
+    }
+
+    private boolean isInternalNamespace(File file) throws Exception {
+        if (file == null) return false;
+        File root = root().getCanonicalFile();
+        String relative = root.toPath().relativize(file.getCanonicalFile().toPath())
+                .toString().replace("\\","/");
+        return relative.equals(TRASH) || relative.startsWith(TRASH+"/")
+                || relative.equals(HISTORY) || relative.startsWith(HISTORY+"/");
     }
 
     private long directorySize(File file) {

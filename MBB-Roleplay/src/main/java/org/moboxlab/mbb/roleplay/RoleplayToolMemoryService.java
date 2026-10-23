@@ -42,8 +42,10 @@ public class RoleplayToolMemoryService {
                 + "`arguments` TEXT NOT NULL DEFAULT '',"
                 + "`result` TEXT NOT NULL DEFAULT '',"
                 + "`summary` TEXT NOT NULL DEFAULT '',"
+                + "`trust` TEXT NOT NULL DEFAULT 'internal',"
                 + "`createTime` INTEGER NOT NULL DEFAULT 0"
                 + ")");
+        ensureColumn("trust","TEXT NOT NULL DEFAULT 'internal'");
         storage().update("CREATE INDEX IF NOT EXISTS `idx_plugin_mbb_roleplay_tool_memory_group` "
                 + "ON `"+TABLE+"` (`groupID`,`createTime`)");
         cleanup();
@@ -57,12 +59,20 @@ public class RoleplayToolMemoryService {
                        RoleplayToolResult result) {
         if (context == null || !config.toolEnable || toolName == null || toolName.isEmpty()) return;
         JSONObject resultData = result == null ? new JSONObject(true) : result.toJson();
+        String resultJson = serviceJson(resultData);
+        if (resultJson.length() > Math.max(1000,config.toolResultMaxChars)) {
+            resultJson = resultJson.substring(0,Math.max(1000,config.toolResultMaxChars))+"...";
+        }
+        String summary = result == null ? "" : result.summary;
+        String trust = result == null ? "internal" : result.trust;
+        if ("external-untrusted".equals(trust)) {
+            summary = RoleplayExternalContentGuard.sanitize(summary);
+        }
         storage().insert("INSERT INTO `"+TABLE+"` "
-                        + "(`groupID`,`userID`,`messageID`,`toolName`,`arguments`,`result`,`summary`,`createTime`) "
-                        + "VALUES (?,?,?,?,?,?,?,?)",
+                        + "(`groupID`,`userID`,`messageID`,`toolName`,`arguments`,`result`,`summary`,`trust`,`createTime`) "
+                        + "VALUES (?,?,?,?,?,?,?,?,?)",
                 context.groupID,context.userID,context.messageID,toolName,
-                serviceJson(arguments),serviceJson(resultData),
-                result == null ? "" : result.summary,System.currentTimeMillis());
+                serviceJson(arguments),resultJson,summary,trust,System.currentTimeMillis());
         if (writes.incrementAndGet() % 100 == 0) cleanup();
     }
 
@@ -204,7 +214,20 @@ public class RoleplayToolMemoryService {
             detail = data.getJSONArray("results").toJSONString();
         }
         if (detail.isEmpty()) detail = data.toJSONString();
+        if ("external-untrusted".equals(safe(item.getString("trust")))) {
+            detail = RoleplayExternalContentGuard.sanitize(detail);
+        }
         return (summary.isEmpty() ? "" : summary+"；")+detail;
+    }
+
+    private void ensureColumn(String name,String definition) {
+        List<JSONObject> columns = storage().query("PRAGMA table_info(`"+TABLE+"`)");
+        if (columns != null) {
+            for (JSONObject column : columns) {
+                if (name.equalsIgnoreCase(column.getString("name"))) return;
+            }
+        }
+        storage().update("ALTER TABLE `"+TABLE+"` ADD COLUMN `"+name+"` "+definition);
     }
 
     private JSONObject parseObject(String value) {

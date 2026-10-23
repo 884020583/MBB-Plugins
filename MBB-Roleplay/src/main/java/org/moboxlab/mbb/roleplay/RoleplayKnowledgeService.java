@@ -363,6 +363,55 @@ public class RoleplayKnowledgeService {
         return result;
     }
 
+    /**
+     * 工具检索结果：保留小节正文，供角色直接回答事实问题时引用。
+     */
+    public JSONArray toolResults(String query,String libraryID,int limit,int maxChars) {
+        JSONArray result = new JSONArray();
+        if (query == null || query.trim().isEmpty()) return result;
+        int used = 0;
+        int max = Math.max(1,Math.min(20,limit));
+        for (RoleplayKnowledgeLibrary library : enabledLibraries()) {
+            if (libraryID != null && !libraryID.trim().isEmpty()
+                    && !libraryID.trim().equals(library.id)) continue;
+            List<Match> matches = retrieve(library,query,max);
+            for (Match match : matches) {
+                JSONObject item = new JSONObject(true);
+                item.put("library",library.id);
+                item.put("libraryName",library.name);
+                item.put("entry",match.entry.name);
+                item.put("id",match.entry.id);
+                item.put("summary",match.entry.summary);
+                item.put("school",match.entry.school);
+                item.put("club",match.entry.club);
+                item.put("source",match.entry.source);
+                JSONArray sections = new JSONArray();
+                if (match.sections.isEmpty() && !match.entry.summary.isEmpty()) {
+                    JSONObject section = new JSONObject(true);
+                    section.put("title","摘要");
+                    section.put("text",shortText(match.entry.summary,500));
+                    sections.add(section);
+                }
+                for (ScoredSection scored : match.sections) {
+                    if (used >= maxChars) break;
+                    String text = flatten(scored.section.text);
+                    if (text.isEmpty()) continue;
+                    int remain = maxChars - used;
+                    if (remain <= 80) break;
+                    JSONObject section = new JSONObject(true);
+                    section.put("title",scored.section.title);
+                    section.put("text",shortText(text,Math.min(1600,remain)));
+                    sections.add(section);
+                    used += section.getString("text").length();
+                }
+                if (!sections.isEmpty()) item.put("sections",sections);
+                result.add(item);
+                if (result.size() >= max || used >= maxChars) return result;
+            }
+        }
+        return result;
+    }
+
     public JSONObject stats() {
         JSONObject result = new JSONObject(true);
         result.put("enabled",config.knowledgeEnable);
