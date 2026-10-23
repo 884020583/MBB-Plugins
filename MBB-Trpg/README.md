@@ -6,7 +6,18 @@ MoBoxBot 的跑团主持插件：在群里开一局 TRPG，提供 CoC 风格 d10
 
 ## 当前阶段
 
-S10 剧本导入与生成切片：把剧本库管理从「占位」接到真实链路，版本 `V0.1.9.0.1858`。
+S11 端到端验收与交付切片：按规格第 12 节逐条验收并留证据，版本 `V0.1.9.1.2011`（v1 交付）。
+
+- 验收结论：`build.ps1 -Test` → OK（497 个测试、45 个测试类），根 `build-all.ps1` 全仓构建成功；
+  逐条记录见 [docs/MBB-Trpg-acceptance.md](../docs/MBB-Trpg-acceptance.md)。
+- 新增端到端测试：`FullSessionAcceptanceTest`（AI 全关时 B–H 指令跑完整局，`ai_trace` 0 行、
+  收尾结算幂等）与 `ThousandCommandsLoadTest`（千次/两千次连续指令下群锁缓存有界、表行数不增、堆占用趋稳）。
+- 规格裁决：E1「招募中重启」改为招募期不发恢复提示、`recovered=true`；标题词表计数纠正为 29 个
+  （§10/§12 原写 24），并补「86 条 / 表内 87 行 / J12 N/A」计数口径。
+- 已知遗留（不阻断 v1）：B4 命中顺序、C1 状态机非法路径矩阵、B2 五角色 × 指令矩阵等留作后续切片。
+
+S10 剧本导入与生成切片已交付：`ScriptLibrary`、`ScriptImportSessions`、`ScriptGenerationService`、
+`MbbAiClient`、`ScriptRejectedStore` 与删除/替换的引用保护（`E_IN_USE`）全部接到 `/trpg script` 链路。
 
 - `ScriptLibrary`：真正的 `ScriptCatalog` 实现，内置剧本只读、导入剧本落在
   `<dataFolder>/scripts/<id>.json`；建库时全量加载导入目录，单个文件校验失败只告警跳过。
@@ -29,7 +40,7 @@ S10 剧本导入与生成切片：把剧本库管理从「占位」接到真实�
 S9 AI 契约桩切片继续保留：按 §9.10 交付 v1 的「空 AI」——零调用、零审计、不注册定时器。
 
 - `TrpgAiHostService`：只读 `aiHost.*` 配置并判定全局开关，不持有 `AiClient`、`TraceStore`、
-  `Scheduler`，因此「零 AI 调用、零审计写入、无 AI 定时器」是结构性的（验收 I5）。
+  `Scheduler`，因此「零 AI 调用、零审计写入、无 AI 定时器」是结构性的（设计上满足 I5；装配层显式断言仍记在验收记录 §4 P2）。
 - `/trpg ai on|off`：开关词解析（`on`/`开`、`off`/`关`）与权限、状态、冷却判定仍留在
   `SessionService`；全局关时 `ai on` 按「当前状态不可用」拒绝，全局开时回
   「AI 主持将在 v1.1 提供」，两种情况都不写 `aiEnabled`、不写审计（验收 I1 / I7）。
@@ -126,9 +137,8 @@ S4 已落地的剧本契约继续保留：
   按字段白名单读值与范围、查全局 id 唯一与引用存在；未知字段只记 `W_UNKNOWN_FIELD` 告警，
   不阻断导入；文本字段先去首尾空白再判非空与长度，落盘保留原文（只把 CRLF 统一为 LF）。
 - `BuiltinScriptCatalog`：启动时读 `scripts/index.txt`，逐个加载 JAR 内 `scripts/<id>.json`
-  并校验缓存；内置剧本只读（删除回 `E_BUILTIN`），导入与替换归 S10（现在回 `E_IMPORT_STATE`）。
-  库级读写锁先就位，供「先群锁后库读锁」的调用顺序使用。
-- `ScriptImportService`：只冻结「开始 → 分段粘贴 → 结束 / 取消」端口，实现归 S10。
+  并校验缓存；运行时以 `ScriptLibrary` 组合「内置只读 + 导入目录」，内置剧本删除回 `E_BUILTIN`。
+- `ScriptImportService` 端口由 S10 的 `ScriptImportSessions` 实现（分段粘贴、超时、字节/段数上限、失败留档）。
 - 随包示例 `coc-example`（雨夜古宅）：4 个线性场景、4 条线索、2 个 NPC、3 个建议检定、
   3 个触发、3 个结局，覆盖三种 `when` 与 `clue.lockedSummary` / `npc.secret` 素材结构。
 
@@ -152,7 +162,8 @@ S2 已落地的存储层继续保留：
 - `TrpgRetentionService`：启动清一轮，之后每小时清一次过期已结算局
   （先日志、再成员、最后主行，失败留待下一轮）与过期/超量审计行。
 
-当前版本已注册 `/trpg`、`/r`、`/roll`；检定与场景推进、AI 主持、剧本导入在后续切片按依赖顺序落地。
+v1 已注册 `/trpg`、`/r`、`/roll` 与 `/trpg script` 全链路；AI 主持按 S9 契约桩交付（零调用、零审计、
+不注册定时器），真实 AI 叙述归 v1.1。
 
 ## 剧本文件
 

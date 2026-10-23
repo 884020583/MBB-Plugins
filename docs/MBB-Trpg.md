@@ -350,7 +350,7 @@ public final class RuleRegistry {
 | T5 | 招募 | 已结束 | 惰性过期 | 超过 24 小时未开局（可配置） |
 | T6 | 进行中 | 已结束 | 惰性过期 | 超过 7 天无局内活动（可配置） |
 | T7 | 招募 / 进行中 | 已结束 | KP 离群通知 | `group_decrease` 命中 KP |
-| T8 | 招募 / 进行中 | 不变 | 进程重启 | 加载后 `recovered=false`；进行中局群内一条【恢复】提示，招募期不发【恢复】；KP 用 `/trpg resume` 确认 |
+| T8 | 招募 / 进行中 | 不变 | 进程重启 | 招募局加载后 `recovered=true`（视为已确认，无需 resume）；进行中局 `recovered=false`，群内一条【恢复】提示，KP 用 `/trpg resume` 确认 |
 
 T1–T7 是状态迁移，T8 是恢复事件（不写库）。
 
@@ -362,7 +362,7 @@ T1–T7 是状态迁移，T8 是恢复事件（不写库）。
 | T2 | `state=RUNNING`、`startedAt`、当前场景=剧本开场；开场叙述：AI 未启用用 §10 模板，AI 启用由 AI 生成（不重复发两条） |
 | T3 / T6 / 进行中 T7 / 强制 | 走 RUNNING→ENDED 统一收尾（见下），`endReason` 依次 `finished` / `expired` / `kp_left` / `forced` |
 | T4 / T5 / 招募期 T7 | 写结束摘要、直接归档、**不结算成长**，`endReason` = `cancelled` / `expired` / `kp_left` |
-| T8 | 只置内存 `recovered=false`，不改库 |
+| T8 | 只置内存 `recovered`（招募局 `true`、进行中局 `false`），不改库 |
 
 **统一收尾顺序（冻结）**：CAS 置 ENDED（写 `endedAt`、`endReason`、`growthSettled=0`、空 summary）→ 逐成员成长结算 → 写摘要并把 `growthSettled` 置 1 → 异步战报（失败回退文本）。否掉「先成长后归档」：崩溃后会二次成长。
 
@@ -397,9 +397,9 @@ T1–T7 是状态迁移，T8 是恢复事件（不写库）。
 
 ### 5.7 重启恢复
 
-- 启动顺序（冻结）：建表 / 补列 → 成长与摘要补做 → 清理 → 扫未归档 session → 逐局加载 member → 重建内存局面（`recovered=false`）→ 进行中的局每群一条【恢复】提示（招募期的局不发）。**先清后载**，避免把刚删的局加载回内存。
+- 启动顺序（冻结）：建表 / 补列 → 成长与摘要补做 → 清理 → 扫未归档 session → 逐局加载 member → 重建内存局面（进行中局 `recovered=false`，招募局视为已确认）→ 进行中的局每群一条【恢复】提示（招募期的局不发）。**先清后载**，避免把刚删的局加载回内存。
 - 恢复只读，不因重建写库；不预载文本日志；ENDED 局不参与恢复。
-- `recovered` 是「本进程刚加载」的内存事实，不落库；KP 执行 `/trpg resume` 后置 `true` 并写日志。
+- `recovered` 是「本进程刚加载」的内存事实，不落库；招募局加载即为已确认（`true`），进行中局初始 `false`，KP 执行 `/trpg resume` 后置 `true` 并写日志。
 - 加载到活跃局但成员行为 0 → 按 T4 `cancelled` 归档并告警（覆盖「建局先写局、成员写入失败」窗口）。
 - `ruleSetID` 未知 → 回退 `d100` 并告警，不阻断恢复。
 - 恢复只是一次性确认，不冻结局；不做自动静默续跑；v1 无定时器，库即真相。
@@ -831,7 +831,7 @@ DELETE FROM plugin_mbb_trpg_ai_trace WHERE id < (SELECT id FROM plugin_mbb_trpg_
 
 消息文案、版式、字数预算、图片与回退全部收口到 [呈现规范分册](MBB-Trpg-presentation.md)，本文**不复制**文案；实现只许引用，不许另写一套。这里只锁不可协商的六条：
 
-1. **版式唯一**：群内只用 A 播报风 `【标题】`（最多两级，第二级用 ` · ` 分隔，如 `【检定 · 聆听】`），标题取自冻结 24 词表；`presentation.style` 配置位只接受 `broadcast`。
+1. **版式唯一**：群内只用 A 播报风 `【标题】`（最多两级，第二级用 ` · ` 分隔，如 `【检定 · 聆听】`），标题取自冻结 29 词表；`presentation.style` 配置位只接受 `broadcast`。
 2. **两级字数预算**：群内单条硬上限 500 字、私聊 1200 字；每类消息另有内容上限（如检定 200、场景 400、战报 600、AI 叙述正文 300）。
 3. **超长处理**：按段落 → 行 → 强标点 → 弱标点回扫拆分，最多 3 条（第 2、3 条标题加 ` · 续 n/3`），仍超出折叠成「……（本条还有 N 字，发送 /trpg log 查看）」；私聊不拆只折叠；列表类每页 10 条。
 4. **图片只做三种**：情景卡（≤14 行）、战报（≤22 行）、剧本打印页；只用 `ImageUtil.renderText` 760px，不引入 AWT；角色卡与检定不发图。
@@ -895,6 +895,8 @@ DELETE FROM plugin_mbb_trpg_ai_trace WHERE id < (SELECT id FROM plugin_mbb_trpg_
 
 每条包含前置、操作与预期；全部通过才算 v1 验收完成。测试执行方式见 §7.9（JUnit 4 + 真 SQLite + 假端口；`-Test` 构建开关在同节）。
 
+计数口径：共 86 条（表内 87 行，J5 拆为 J5a/J5b 两行）；J12（20 秒合并窗口）属 v1.1 能力，v1 验收标 N/A。本轮逐条执行记录见 [验收记录](MBB-Trpg-acceptance.md)。
+
 ### A. 构建与测试载体
 
 | 编号 | 操作 | 预期 |
@@ -945,7 +947,7 @@ DELETE FROM plugin_mbb_trpg_ai_trace WHERE id < (SELECT id FROM plugin_mbb_trpg_
 
 | 编号 | 操作 | 预期 |
 | --- | --- | --- |
-| E1 | 招募中重启 | 加载局与成员；群内一条恢复提示；`recovered=false` |
+| E1 | 招募中重启 | 加载局与成员；招募期不发【恢复】提示，`recovered=true`（无需 resume） |
 | E2 | `/trpg resume` | `recovered=true`、清提示、写日志 |
 | E3 | 进行中重启 | 场景、SAN、成功技能、离场 / 代管 / 临时疯狂全部还原 |
 | E4 | 重启后不发 resume 直接操作 | 允许操作；库中不写 `recovered`（仍为 false），`/trpg status` 多一行提示用 `/trpg resume` 确认；不静默续跑 |
@@ -1024,7 +1026,7 @@ DELETE FROM plugin_mbb_trpg_ai_trace WHERE id < (SELECT id FROM plugin_mbb_trpg_
 | J10 | 千次连续指令（长跑） | 群锁缓存条数不超过本群活跃数上界并随空闲淘汰（§5.5）；1000 次后堆占用趋于稳定、无单调增长；日志与审计按保留策略收敛 |
 | J11 | 对照分册 §4 抽 5 条样例逐字比对 | 标题、正文行、折叠行与分册逐字一致 |
 | J12 | 20 秒内同一局产生多条事件 | 落一个合并窗口，群内只出现一条 AI 叙述 |
-| J13 | 抽查任一条 bot 消息标题 | 在冻结 24 词表内；无 emoji、无 Markdown 残符 |
+| J13 | 抽查任一条 bot 消息标题 | 在冻结 29 词表内（§2.3 分册）；无 emoji、无 Markdown 残符 |
 | J14 | 关键消息（开团 / 开局 / 结束）发送失败 | 只补一行【提示】不重发正文 |
 
 ### K. 安全与隐私
