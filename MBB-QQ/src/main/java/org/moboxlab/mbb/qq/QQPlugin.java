@@ -20,6 +20,7 @@ public class QQPlugin extends Plugin {
         service = new QQService(this,config);
         service.init();
         getServer().getPluginManager().registerService(this,service);
+        getServer().getPluginManager().registerListener(this,new QQListener(service));
         getServer().getPluginManager().registerCommand(this,new QQCommand(this,service));
         getLogger().sendInfo("MBB-QQ 已启用");
     }

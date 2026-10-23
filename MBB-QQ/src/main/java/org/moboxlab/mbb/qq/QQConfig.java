@@ -10,6 +10,7 @@ public class QQConfig {
     public boolean readToolsEnable = true;
     public boolean interactionToolsEnable = true;
     public boolean mediaToolsEnable = true;
+    public boolean adminToolsEnable = true;
     public boolean qzoneEnable = true;
     public int pokeCooldownSecond = 30;
     public int likeCooldownSecond = 86400;
@@ -27,6 +28,7 @@ public class QQConfig {
     public String voiceExtensions = "silk,amr,mp3,wav,ogg,m4a,flac";
     public int auditKeepDays = 90;
     public int auditMaxRows = 10000;
+    public int requestKeepDays = 30;
 
     public static QQConfig load(Plugin plugin) {
         QQConfig config = new QQConfig();
@@ -34,6 +36,7 @@ public class QQConfig {
         config.readToolsEnable = plugin.getConfig().getBoolean("readToolsEnable",true);
         config.interactionToolsEnable = plugin.getConfig().getBoolean("interactionToolsEnable",true);
         config.mediaToolsEnable = plugin.getConfig().getBoolean("mediaToolsEnable",true);
+        config.adminToolsEnable = plugin.getConfig().getBoolean("adminToolsEnable",true);
         config.qzoneEnable = plugin.getConfig().getBoolean("qzoneEnable",true);
         config.pokeCooldownSecond = plugin.getConfig().getInt("pokeCooldownSecond",30);
         config.likeCooldownSecond = plugin.getConfig().getInt("likeCooldownSecond",86400);
@@ -51,6 +54,7 @@ public class QQConfig {
         config.voiceExtensions = plugin.getConfig().getString("voiceExtensions","silk,amr,mp3,wav,ogg,m4a,flac");
         config.auditKeepDays = plugin.getConfig().getInt("auditKeepDays",90);
         config.auditMaxRows = plugin.getConfig().getInt("auditMaxRows",10000);
+        config.requestKeepDays = plugin.getConfig().getInt("requestKeepDays",30);
         clamp(config);
         return config;
     }
@@ -81,5 +85,7 @@ public class QQConfig {
         if (config.auditKeepDays < 1) config.auditKeepDays = 1;
         if (config.auditMaxRows < 100) config.auditMaxRows = 100;
         if (config.auditMaxRows > 100000) config.auditMaxRows = 100000;
+        if (config.requestKeepDays < 1) config.requestKeepDays = 1;
+        if (config.requestKeepDays > 365) config.requestKeepDays = 365;
     }
 }

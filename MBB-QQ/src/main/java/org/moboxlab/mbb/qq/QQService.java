@@ -20,6 +20,7 @@ import java.util.Locale;
 public class QQService implements PluginService {
     private static final String AUDIT_TABLE = "plugin_mbb_qq_audit";
     private static final String QZONE_TABLE = "plugin_mbb_qq_qzone_post";
+    private static final String REQUEST_TABLE = "plugin_mbb_qq_request";
     private final Plugin plugin;
     private volatile QQConfig config;
 
@@ -58,7 +59,24 @@ public class QQService implements PluginService {
                 + "`ugcRight` INTEGER NOT NULL DEFAULT 64,"
                 + "`createTime` INTEGER NOT NULL DEFAULT 0"
                 + ")");
+        storage().update("CREATE TABLE IF NOT EXISTS `"+REQUEST_TABLE+"` ("
+                + "`ID` INTEGER PRIMARY KEY AUTOINCREMENT,"
+                + "`requestType` TEXT NOT NULL DEFAULT '',"
+                + "`subType` TEXT NOT NULL DEFAULT '',"
+                + "`userID` INTEGER NOT NULL DEFAULT 0,"
+                + "`groupID` INTEGER NOT NULL DEFAULT 0,"
+                + "`comment` TEXT NOT NULL DEFAULT '',"
+                + "`flag` TEXT NOT NULL DEFAULT '',"
+                + "`status` TEXT NOT NULL DEFAULT 'pending',"
+                + "`createTime` INTEGER NOT NULL DEFAULT 0,"
+                + "`updateTime` INTEGER NOT NULL DEFAULT 0"
+                + ")");
+        storage().update("CREATE UNIQUE INDEX IF NOT EXISTS `idx_mbb_qq_request_flag` "
+                + "ON `"+REQUEST_TABLE+"` (`requestType`,`flag`)");
+        storage().update("CREATE INDEX IF NOT EXISTS `idx_mbb_qq_request_status` "
+                + "ON `"+REQUEST_TABLE+"` (`status`,`updateTime`)");
         cleanupAudit();
+        cleanupRequests();
     }
 
     @Override
@@ -83,6 +101,16 @@ public class QQService implements PluginService {
             if ("qzone_post".equalsIgnoreCase(name)) return qzonePost(input);
             if ("qzone_delete".equalsIgnoreCase(name)) return qzoneDelete(input);
             if ("qzone_posts".equalsIgnoreCase(name)) return qzonePosts(input);
+            if ("pending_requests".equalsIgnoreCase(name)) return pendingRequests(input);
+            if ("friend_request".equalsIgnoreCase(name)) return friendRequest(input);
+            if ("group_request".equalsIgnoreCase(name)) return groupRequest(input);
+            if ("group_ban".equalsIgnoreCase(name)) return groupBan(input);
+            if ("group_whole_ban".equalsIgnoreCase(name)) return groupWholeBan(input);
+            if ("delete_friend".equalsIgnoreCase(name)) return deleteFriend(input);
+            if ("set_friend_remark".equalsIgnoreCase(name)) return setFriendRemark(input);
+            if ("set_avatar".equalsIgnoreCase(name)) return setAvatar(input);
+            if ("set_profile".equalsIgnoreCase(name)) return setProfile(input);
+            if ("set_signature".equalsIgnoreCase(name)) return setSignature(input);
             if ("audit".equalsIgnoreCase(name)) return auditList(input);
             return error("不支持的 QQ 动作："+name);
         } catch (Exception e) {
@@ -395,6 +423,269 @@ public class QQService implements PluginService {
         return result;
     }
 
+    /**
+     * 保存好友申请和群邀请。这里只记录，不自动同意或拒绝。
+     */
+    public void recordRequest(org.moboxlab.moboxbot.API.Event.RequestEvent event) {
+        if (event == null || !config.adminToolsEnable) return;
+        String type = safe(event.getRequestType()).toLowerCase(Locale.ROOT);
+        String flag = safe(event.getFlag()).trim();
+        if (type.isEmpty() || flag.isEmpty()) return;
+        long now = System.currentTimeMillis();
+        JSONObject exists = storage().queryOne(
+                "SELECT `ID` FROM `"+REQUEST_TABLE+"` WHERE `requestType`=? AND `flag`=?",
+                type,flag);
+        if (exists == null) {
+            storage().insert("INSERT INTO `"+REQUEST_TABLE+"` "
+                            + "(`requestType`,`subType`,`userID`,`groupID`,`comment`,`flag`,`status`,"
+                            + "`createTime`,`updateTime`) VALUES (?,?,?,?,?,?,?,?,?)",
+                    type,safe(event.getSubType()).toLowerCase(Locale.ROOT),event.getUserID(),
+                    event.getGroupID(),shortText(event.getComment(),500),flag,"pending",now,now);
+        } else {
+            storage().update("UPDATE `"+REQUEST_TABLE+"` SET `subType`=?,`userID`=?,`groupID`=?,"
+                            + "`comment`=?,`status`='pending',`updateTime`=? WHERE `ID`=?",
+                    safe(event.getSubType()).toLowerCase(Locale.ROOT),event.getUserID(),
+                    event.getGroupID(),shortText(event.getComment(),500),now,
+                    exists.getLongValue("ID"));
+        }
+    }
+
+    private JSONObject pendingRequests(JSONObject input) {
+        if (!config.adminToolsEnable) return error("QQ 管理工具未启用");
+        if (!isOwner(positive(input,"operatorID"))) return error("查看申请列表仅 owner 可用");
+        int limit = clamp(input.getIntValue("limit"),1,50);
+        List<JSONObject> rows = storage().query(
+                "SELECT * FROM `"+REQUEST_TABLE+"` WHERE `status`='pending' "
+                        + "ORDER BY `updateTime` DESC,`ID` DESC LIMIT ?",
+                limit);
+        JSONArray requests = new JSONArray();
+        if (rows != null) {
+            for (JSONObject row : rows) {
+                JSONObject item = new JSONObject(true);
+                item.put("id",row.getLongValue("ID"));
+                item.put("requestType",safe(row.getString("requestType")));
+                item.put("subType",safe(row.getString("subType")));
+                item.put("userID",row.getLongValue("userID"));
+                item.put("groupID",row.getLongValue("groupID"));
+                item.put("comment",safe(row.getString("comment")));
+                item.put("flag",safe(row.getString("flag")));
+                item.put("createTime",row.getLongValue("createTime"));
+                requests.add(item);
+            }
+        }
+        JSONObject result = ok("读取待处理 QQ 申请");
+        result.put("requests",requests);
+        return result;
+    }
+
+    private JSONObject friendRequest(JSONObject input) {
+        if (!config.adminToolsEnable) return error("QQ 管理工具未启用");
+        if (!isOwner(positive(input,"operatorID"))) return error("处理好友申请仅 owner 可用");
+        JSONObject row = requestRow(input,"friend");
+        String flag = requestFlag(input,row);
+        if (flag.isEmpty()) return error("缺少好友申请 flag，请先读取 pending_requests");
+        boolean approve = boolValue(input,"approve",false);
+        JSONObject params = new JSONObject(true);
+        params.put("flag",flag);
+        params.put("approve",approve);
+        if (approve) {
+            String remark = safe(input.getString("remark")).trim();
+            if (remark.length() > 60) return error("好友备注最多 60 个字符");
+            if (!remark.isEmpty()) params.put("remark",remark);
+        }
+        JSONObject result = action("friend_request","set_friend_add_request",params,input,0,
+                row == null ? 0L : row.getLongValue("userID"),
+                approve ? "同意好友申请" : "拒绝好友申请");
+        if (result.getBooleanValue("status")) markRequest(row,flag,"friend",
+                approve ? "approved" : "rejected");
+        return result;
+    }
+
+    private JSONObject groupRequest(JSONObject input) {
+        if (!config.adminToolsEnable) return error("QQ 管理工具未启用");
+        if (!isOwner(positive(input,"operatorID"))) return error("处理群邀请仅 owner 可用");
+        JSONObject row = requestRow(input,"group");
+        String flag = requestFlag(input,row);
+        if (flag.isEmpty()) return error("缺少群邀请 flag，请先读取 pending_requests");
+        boolean approve = boolValue(input,"approve",false);
+        JSONObject params = new JSONObject(true);
+        params.put("flag",flag);
+        params.put("approve",approve);
+        if (row != null && !safe(row.getString("subType")).isEmpty()) {
+            params.put("sub_type",safe(row.getString("subType")));
+        }
+        if (!approve) {
+            String reason = safe(input.getString("reason")).trim();
+            if (!reason.isEmpty()) params.put("reason",reason);
+        }
+        JSONObject result = action("group_request","set_group_add_request",params,input,
+                row == null ? 0L : row.getLongValue("groupID"),
+                row == null ? 0L : row.getLongValue("userID"),
+                approve ? "同意群邀请" : "拒绝群邀请");
+        if (result.getBooleanValue("status")) markRequest(row,flag,"group",
+                approve ? "approved" : "rejected");
+        return result;
+    }
+
+    private JSONObject groupBan(JSONObject input) {
+        if (!config.adminToolsEnable) return error("QQ 管理工具未启用");
+        long groupID = positive(input,"groupID");
+        long operatorID = positive(input,"operatorID");
+        long targetID = positive(input,"targetID");
+        long selfID = positive(input,"selfID");
+        if (groupID <= 0 || targetID <= 0) return error("缺少群号或目标 QQ");
+        if (exampleSelf(selfID,targetID)) return error("不能禁言机器人自己");
+        if (!isOwnerOrAdmin(groupID,operatorID,input)) {
+            return error("禁言需要 owner 或当前群管理员权限");
+        }
+        int duration = input.containsKey("duration")
+                ? input.getIntValue("duration") : 600;
+        if (duration < 0 || duration > 30 * 86400) {
+            return error("禁言时长必须在 0 到 30 天之间，0 表示解禁");
+        }
+        JSONObject params = new JSONObject(true);
+        params.put("group_id",String.valueOf(groupID));
+        params.put("user_id",String.valueOf(targetID));
+        params.put("duration",duration);
+        return action("group_ban","set_group_ban",params,input,groupID,targetID,
+                duration == 0 ? "解除禁言 "+targetID : "禁言 "+targetID+" "+duration+"秒");
+    }
+
+    private JSONObject groupWholeBan(JSONObject input) {
+        if (!config.adminToolsEnable) return error("QQ 管理工具未启用");
+        long groupID = positive(input,"groupID");
+        long operatorID = positive(input,"operatorID");
+        if (groupID <= 0) return error("缺少群号");
+        if (!isOwnerOrAdmin(groupID,operatorID,input)) {
+            return error("全员禁言需要 owner 或当前群管理员权限");
+        }
+        boolean enable = boolValue(input,"enable",false);
+        JSONObject params = new JSONObject(true);
+        params.put("group_id",String.valueOf(groupID));
+        params.put("enable",enable);
+        return action("group_whole_ban","set_group_whole_ban",params,input,groupID,0,
+                enable ? "开启全员禁言" : "关闭全员禁言");
+    }
+
+    private JSONObject deleteFriend(JSONObject input) {
+        if (!config.adminToolsEnable) return error("QQ 管理工具未启用");
+        if (!isOwner(positive(input,"operatorID"))) return error("删除好友仅 owner 可用");
+        long targetID = positive(input,"targetID");
+        if (targetID <= 0) return error("缺少目标 QQ");
+        JSONObject params = new JSONObject(true);
+        params.put("user_id",String.valueOf(targetID));
+        if (input.containsKey("tempBlock")) params.put("temp_block",boolValue(input,"tempBlock",false));
+        if (input.containsKey("tempBothDelete")) {
+            params.put("temp_both_del",boolValue(input,"tempBothDelete",false));
+        }
+        return action("delete_friend","delete_friend",params,input,0,targetID,
+                "删除好友 "+targetID);
+    }
+
+    private JSONObject setFriendRemark(JSONObject input) {
+        if (!config.adminToolsEnable) return error("QQ 管理工具未启用");
+        if (!isOwner(positive(input,"operatorID"))) return error("设置好友备注仅 owner 可用");
+        long targetID = positive(input,"targetID");
+        String remark = safe(input.getString("remark")).trim();
+        if (targetID <= 0) return error("缺少目标 QQ");
+        if (remark.isEmpty()) return error("好友备注不能为空");
+        if (remark.length() > 60) return error("好友备注最多 60 个字符");
+        JSONObject params = new JSONObject(true);
+        params.put("user_id",String.valueOf(targetID));
+        params.put("remark",remark);
+        return action("set_friend_remark","set_friend_remark",params,input,0,targetID,
+                "设置好友备注 "+targetID);
+    }
+
+    private JSONObject setAvatar(JSONObject input) {
+        if (!config.adminToolsEnable) return error("QQ 管理工具未启用");
+        if (!isOwner(positive(input,"operatorID"))) return error("设置头像仅 owner 可用");
+        String file = safe(input.getString("file")).trim();
+        if (file.isEmpty()) return error("缺少头像文件");
+        if (!file.startsWith("base64://") && !file.startsWith("http://")
+                && !file.startsWith("https://") && !validFileExtension(file,config.imageExtensions)) {
+            return error("头像文件格式不支持");
+        }
+        if (!withinBase64Limit(file,config.imageMaxBytes)) return error("头像文件超过大小限制");
+        JSONObject params = new JSONObject(true);
+        params.put("file",file);
+        return action("set_avatar","set_qq_avatar",params,input,0,0,"设置 QQ 头像");
+    }
+
+    private JSONObject setProfile(JSONObject input) {
+        if (!config.adminToolsEnable) return error("QQ 管理工具未启用");
+        if (!isOwner(positive(input,"operatorID"))) return error("设置资料卡仅 owner 可用");
+        String nickname = safe(input.getString("nickname")).trim();
+        if (nickname.isEmpty()) return error("昵称不能为空");
+        if (nickname.length() > 30) return error("昵称最多 30 个字符");
+        JSONObject params = new JSONObject(true);
+        params.put("nickname",nickname);
+        String personalNote = safe(input.getString("personalNote")).trim();
+        if (personalNote.length() > 200) return error("个性签名最多 200 个字符");
+        if (!personalNote.isEmpty()) params.put("personal_note",personalNote);
+        if (input.containsKey("sex")) {
+            int sex = input.getIntValue("sex");
+            if (sex < 0 || sex > 2) return error("性别只能是 0、1 或 2");
+            params.put("sex",sex);
+        }
+        return action("set_profile","set_qq_profile",params,input,0,0,
+                "设置 QQ 资料卡："+shortText(nickname,30));
+    }
+
+    private JSONObject setSignature(JSONObject input) {
+        if (!config.adminToolsEnable) return error("QQ 管理工具未启用");
+        if (!isOwner(positive(input,"operatorID"))) return error("设置个性签名仅 owner 可用");
+        String longNick = safe(input.getString("longNick")).trim();
+        if (longNick.isEmpty()) return error("个性签名不能为空");
+        if (longNick.length() > 200) return error("个性签名最多 200 个字符");
+        JSONObject params = new JSONObject(true);
+        params.put("longNick",longNick);
+        return action("set_signature","set_self_longnick",params,input,0,0,
+                "设置个性签名："+shortText(longNick,40));
+    }
+
+    private JSONObject requestRow(JSONObject input,String requestType) {
+        long id = positive(input,"requestID");
+        if (id > 0) {
+            return storage().queryOne("SELECT * FROM `"+REQUEST_TABLE+"` "
+                    + "WHERE `ID`=? AND `requestType`=?",id,requestType);
+        }
+        String flag = safe(input.getString("flag")).trim();
+        if (flag.isEmpty()) return null;
+        return storage().queryOne("SELECT * FROM `"+REQUEST_TABLE+"` "
+                + "WHERE `requestType`=? AND `flag`=?",requestType,flag);
+    }
+
+    private String requestFlag(JSONObject input,JSONObject row) {
+        String flag = row == null ? "" : safe(row.getString("flag")).trim();
+        if (flag.isEmpty()) flag = safe(input.getString("flag")).trim();
+        return flag;
+    }
+
+    private void markRequest(JSONObject row,String flag,String type,String status) {
+        if (row != null) {
+            storage().update("UPDATE `"+REQUEST_TABLE+"` SET `status`=?,`updateTime`=? WHERE `ID`=?",
+                    status,System.currentTimeMillis(),row.getLongValue("ID"));
+        } else {
+            storage().update("UPDATE `"+REQUEST_TABLE+"` SET `status`=?,`updateTime`=? "
+                            + "WHERE `requestType`=? AND `flag`=?",
+                    status,System.currentTimeMillis(),type,flag);
+        }
+    }
+
+    private boolean exampleSelf(long selfID,long targetID) {
+        return selfID > 0 && targetID == selfID;
+    }
+
+    private boolean boolValue(JSONObject input,String key,boolean defaultValue) {
+        if (input == null || !input.containsKey(key)) return defaultValue;
+        Object value = input.get(key);
+        if (value instanceof Boolean) return ((Boolean)value).booleanValue();
+        String text = safe(String.valueOf(value)).trim().toLowerCase(Locale.ROOT);
+        return "true".equals(text) || "1".equals(text) || "yes".equals(text)
+                || "approve".equals(text) || "on".equals(text);
+    }
+
     private JSONObject auditList(JSONObject input) {
         int limit = clamp(input.getIntValue("limit"),1,50);
         long groupID = positive(input,"groupID");
@@ -550,6 +841,11 @@ public class QQService implements PluginService {
         storage().update("DELETE FROM `"+AUDIT_TABLE+"` WHERE `ID` NOT IN "
                 + "(SELECT `ID` FROM `"+AUDIT_TABLE+"` ORDER BY `ID` DESC LIMIT "
                 +config.auditMaxRows+")");
+    }
+
+    private void cleanupRequests() {
+        long cutoff = System.currentTimeMillis() - config.requestKeepDays * 86400000L;
+        storage().update("DELETE FROM `"+REQUEST_TABLE+"` WHERE `updateTime`<?",cutoff);
     }
 
     private boolean validUgcRight(int right) {

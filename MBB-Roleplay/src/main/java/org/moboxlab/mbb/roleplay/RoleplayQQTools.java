@@ -57,6 +57,34 @@ public class RoleplayQQTools {
                 "删除机器人自己的 QQ 空间说说，仅 owner 可用",true,1,qzoneDeleteArgs()));
         registry.register(new QQTool(service,qq,"qq_qzone_posts","qzone_posts",
                 "查看机器人本机记录的 Qzone 说说的 tid、正文和可见范围，仅 owner 可用",false,1,qzonePostsArgs()));
+        registry.register(new QQTool(service,qq,"qq_pending_requests","pending_requests",
+                "查看待处理的好友申请和群邀请，仅 owner 可用，不会自动响应",false,1,
+                requestListArgs()));
+        registry.register(new QQTool(service,qq,"qq_friend_request","friend_request",
+                "同意或拒绝待处理好友申请，仅 owner 可用",true,1,friendRequestArgs(),
+                "approve"));
+        registry.register(new QQTool(service,qq,"qq_group_request","group_request",
+                "同意或拒绝待处理群邀请，仅 owner 可用",true,1,groupRequestArgs(),
+                "approve"));
+        registry.register(new QQTool(service,qq,"qq_group_ban","group_ban",
+                "禁言或解禁当前群成员，需要 owner 或当前群管理员权限",true,1,banArgs(),
+                "userID","duration"));
+        registry.register(new QQTool(service,qq,"qq_group_whole_ban","group_whole_ban",
+                "开启或关闭当前群全员禁言，需要 owner 或当前群管理员权限",true,1,
+                wholeBanArgs(),"enable"));
+        registry.register(new QQTool(service,qq,"qq_delete_friend","delete_friend",
+                "删除机器人好友，仅 owner 可用",true,1,friendTargetArgs(),"userID"));
+        registry.register(new QQTool(service,qq,"qq_set_friend_remark","set_friend_remark",
+                "设置机器人好友备注，仅 owner 可用",true,1,friendRemarkArgs(),
+                "userID","remark"));
+        registry.register(new QQTool(service,qq,"qq_set_avatar","set_avatar",
+                "从角色私有工作区读取图片并设置 QQ 头像，仅 owner 可用",true,1,avatarArgs(),
+                "path"));
+        registry.register(new QQTool(service,qq,"qq_set_profile","set_profile",
+                "设置机器人 QQ 资料卡昵称、性别和资料签名，仅 owner 可用",true,1,profileArgs(),
+                "nickname"));
+        registry.register(new QQTool(service,qq,"qq_set_signature","set_signature",
+                "设置机器人 QQ 个性签名，仅 owner 可用",true,1,signatureArgs(),"longNick"));
     }
 
     private static PluginService qqService(RoleplayService service) {
@@ -141,6 +169,76 @@ public class RoleplayQQTools {
         return properties;
     }
 
+    private static JSONObject requestListArgs() {
+        JSONObject properties = new JSONObject(true);
+        properties.put("limit",property("integer","最多读取多少条待处理申请，1 到 50"));
+        return properties;
+    }
+
+    private static JSONObject friendRequestArgs() {
+        JSONObject properties = new JSONObject(true);
+        properties.put("requestID",property("integer","pending_requests 返回的申请 ID"));
+        properties.put("flag",property("string","申请 flag；通常用 requestID 即可"));
+        properties.put("approve",property("boolean","true 同意，false 拒绝"));
+        properties.put("remark",property("string","同意后设置的好友备注，最多 60 字"));
+        return properties;
+    }
+
+    private static JSONObject groupRequestArgs() {
+        JSONObject properties = new JSONObject(true);
+        properties.put("requestID",property("integer","pending_requests 返回的申请 ID"));
+        properties.put("flag",property("string","申请 flag；通常用 requestID 即可"));
+        properties.put("approve",property("boolean","true 同意，false 拒绝"));
+        properties.put("reason",property("string","拒绝理由，可省略"));
+        return properties;
+    }
+
+    private static JSONObject banArgs() {
+        JSONObject properties = new JSONObject(true);
+        properties.put("userID",property("integer","目标 QQ"));
+        properties.put("duration",property("integer","禁言秒数，0 表示解禁，最长 30 天"));
+        return properties;
+    }
+
+    private static JSONObject wholeBanArgs() {
+        JSONObject properties = new JSONObject(true);
+        properties.put("enable",property("boolean","true 开启全员禁言，false 关闭"));
+        return properties;
+    }
+
+    private static JSONObject friendTargetArgs() {
+        JSONObject properties = new JSONObject(true);
+        properties.put("userID",property("integer","目标好友 QQ"));
+        return properties;
+    }
+
+    private static JSONObject friendRemarkArgs() {
+        JSONObject properties = new JSONObject(true);
+        properties.put("userID",property("integer","目标好友 QQ"));
+        properties.put("remark",property("string","好友备注，最多 60 字"));
+        return properties;
+    }
+
+    private static JSONObject avatarArgs() {
+        JSONObject properties = new JSONObject(true);
+        properties.put("path",property("string","角色工作区中的图片相对路径"));
+        return properties;
+    }
+
+    private static JSONObject profileArgs() {
+        JSONObject properties = new JSONObject(true);
+        properties.put("nickname",property("string","新的 QQ 昵称，最多 30 字"));
+        properties.put("personalNote",property("string","资料签名，最多 200 字"));
+        properties.put("sex",property("integer","性别：0 未知，1 男，2 女"));
+        return properties;
+    }
+
+    private static JSONObject signatureArgs() {
+        JSONObject properties = new JSONObject(true);
+        properties.put("longNick",property("string","新的个性签名，最多 200 字"));
+        return properties;
+    }
+
     private static JSONObject property(String type,String description) {
         JSONObject property = new JSONObject(true);
         property.put("type",type);
@@ -148,14 +246,21 @@ public class RoleplayQQTools {
         return property;
     }
 
-    private static JSONObject schema(String name,String description,JSONObject properties) {
+    private static JSONObject schema(String name,String description,JSONObject properties,
+                                     String... required) {
         JSONObject function = new JSONObject(true);
         function.put("name",name);
         function.put("description",description);
         JSONObject parameters = new JSONObject(true);
         parameters.put("type","object");
         parameters.put("properties",properties == null ? new JSONObject(true) : properties);
-        parameters.put("required",new JSONArray());
+        JSONArray requiredArray = new JSONArray();
+        if (required != null) {
+            for (String item : required) {
+                if (item != null && !item.trim().isEmpty()) requiredArray.add(item.trim());
+            }
+        }
+        parameters.put("required",requiredArray);
         parameters.put("additionalProperties",false);
         function.put("parameters",parameters);
         JSONObject schema = new JSONObject(true);
@@ -175,7 +280,8 @@ public class RoleplayQQTools {
         private final JSONObject schema;
 
         private QQTool(RoleplayService service,PluginService qq,String name,String action,
-                       String description,boolean sideEffect,int maxCalls,JSONObject properties) {
+                       String description,boolean sideEffect,int maxCalls,JSONObject properties,
+                       String... required) {
             this.service = service;
             this.qq = qq;
             this.name = name;
@@ -183,7 +289,7 @@ public class RoleplayQQTools {
             this.description = description;
             this.sideEffect = sideEffect;
             this.maxCalls = maxCalls;
-            this.schema = RoleplayQQTools.schema(name,description,properties);
+            this.schema = RoleplayQQTools.schema(name,description,properties,required);
         }
 
         @Override
@@ -223,6 +329,19 @@ public class RoleplayQQTools {
             params.put("targetUins",args.getJSONArray("targetUins"));
             params.put("tid",service.safe(args.getString("tid")));
             params.put("limit",args.getIntValue("limit"));
+            params.put("requestID",args.getLongValue("requestID"));
+            params.put("flag",service.safe(args.getString("flag")));
+            params.put("approve",args.getBooleanValue("approve"));
+            params.put("reason",service.safe(args.getString("reason")));
+            params.put("remark",service.safe(args.getString("remark")));
+            params.put("duration",args.getIntValue("duration"));
+            params.put("enable",args.getBooleanValue("enable"));
+            params.put("nickname",service.safe(args.getString("nickname")));
+            params.put("personalNote",service.safe(args.getString("personalNote")));
+            params.put("sex",args.getIntValue("sex"));
+            params.put("longNick",service.safe(args.getString("longNick")));
+            params.put("tempBlock",args.getBooleanValue("tempBlock"));
+            params.put("tempBothDelete",args.getBooleanValue("tempBothDelete"));
             if ("send_image".equals(action) || "send_voice".equals(action)) {
                 String path = service.safe(args.getString("path")).trim();
                 if (!validExtension(path,"send_image".equals(action))) {
@@ -232,6 +351,18 @@ public class RoleplayQQTools {
                     params.put("file","base64://" + service.toolLoopService().registry()
                             .workspace().readBase64(
                             path,MEDIA_MAX_BYTES));
+                } catch (Exception e) {
+                    return RoleplayToolResult.failed(e.getMessage());
+                }
+            }
+            if ("set_avatar".equals(action)) {
+                String path = service.safe(args.getString("path")).trim();
+                if (!validExtension(path,true)) {
+                    return RoleplayToolResult.failed("头像扩展名不在允许范围内");
+                }
+                try {
+                    params.put("file","base64://" + service.toolLoopService().registry()
+                            .workspace().readBase64(path,MEDIA_MAX_BYTES));
                 } catch (Exception e) {
                     return RoleplayToolResult.failed(e.getMessage());
                 }
@@ -276,6 +407,9 @@ public class RoleplayQQTools {
             }
             if (response.getJSONArray("items") != null) {
                 result.data.put("items",response.getJSONArray("items"));
+            }
+            if (response.getJSONArray("requests") != null) {
+                result.data.put("requests",response.getJSONArray("requests"));
             }
             return result;
         }

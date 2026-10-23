@@ -6,6 +6,8 @@ readToolsEnable: true
 interactionToolsEnable: true
 #是否允许发送工作区图片、语音
 mediaToolsEnable: true
+#是否允许 owner 执行好友、群管理和账号资料操作
+adminToolsEnable: true
 #是否允许管理机器人自己的 QQ 空间
 qzoneEnable: true
 #戳同一用户的最小间隔秒数
@@ -40,3 +42,5 @@ voiceExtensions: "silk,amr,mp3,wav,ogg,m4a,flac"
 auditKeepDays: 90
 #动作审计最多保留行数
 auditMaxRows: 10000
+#好友和群请求记录保留天数
+requestKeepDays: 30

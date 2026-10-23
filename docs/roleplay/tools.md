@@ -20,6 +20,9 @@
 `tool_search,end_turn,message_send`），其他工具必须由模型先调用 `tool_search` 搜索并加载，
 下一轮才会收到对应 schema。这样能减少每轮固定 Token、降低工具选错概率，也保留多轮检索能力：
 
+如果模型直接点名了注册表中已启用的工具，但还没有调用过 `tool_search`，工具循环会自动装载并执行该工具，
+不会只返回“尚未加载”再浪费一轮。未注册或配置关闭的工具仍然拒绝。
+
 ```text
 tool_search
 → 返回工具名、分类、用途和技能说明
@@ -51,7 +54,17 @@ tool_search
 
 安装 `MBB-QQ` 后会额外开放 `qq_*` 工具，包括群资料、成员资料、远程历史、
 消息详情、群公告、已读、戳一戳、点赞、表情回应、撤回自己的消息、发送工作区图片/语音、
-修改自己的群名片和 Qzone 发布/删除/本机记录查询。群号与操作者由 Roleplay 上下文强制注入。
+修改自己的群名片、Qzone、申请处理和群/账号管理。群号与操作者由 Roleplay 上下文强制注入。
+
+高权限 QQ 工具：
+
+| 工具 | 用途 |
+|---|---|
+| `qq_pending_requests` | 查看待处理好友申请和群邀请，仅 owner；不会自动响应 |
+| `qq_friend_request` / `qq_group_request` | 处理好友申请或群邀请，仅 owner |
+| `qq_group_ban` / `qq_group_whole_ban` | 禁言、解禁、全员禁言，需要 owner 或群管理员 |
+| `qq_delete_friend` / `qq_set_friend_remark` | 删除好友、设置好友备注，仅 owner |
+| `qq_set_avatar` / `qq_set_profile` / `qq_set_signature` | 设置机器人头像、资料卡和个性签名，仅 owner |
 
 `message_send` 只负责中途补一句，最终回复仍走普通回复通道。工具循环会提醒模型不要用它重复最终正文。
 代码会把 `message_send` 限制为每轮最多一次；一旦已经拿到实质性工具结果，再调用 `message_send`
