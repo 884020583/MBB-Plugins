@@ -860,7 +860,6 @@ public final class SessionService implements SessionView {
         }
     }
 
-
     private static MemberRow findMember(List<MemberRow> members, long userId) {
         for (MemberRow member : members) {
             if (member != null && member.userId() == userId) {

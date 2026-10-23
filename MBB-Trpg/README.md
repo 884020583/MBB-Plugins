@@ -21,7 +21,6 @@ S9 AI 契约桩切片：按 §9.10 交付 v1 的「空 AI」——零调用、�
 
 S8 已落地的指令层 B 继续保留：
 
-
 - `KpCommandHandler` 注册 `scene` / `check` / `opposed` / `san` / `adjust` / `invite` /
   `take` / `skip` / `ai`，`AdminCommandHandler` 注册 `script` / `blacklist`；
   分派主干仍是 S7 的 handler 注册表，本片只追加 handler，不改分派与门禁。
