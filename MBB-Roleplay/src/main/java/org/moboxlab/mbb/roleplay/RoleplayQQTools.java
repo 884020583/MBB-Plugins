@@ -63,7 +63,8 @@ public class RoleplayQQTools {
                 "查看待处理的好友申请和群邀请，仅 owner 可用，不会自动响应",false,1,
                 requestListArgs()));
         registry.register(new QQTool(service,qq,"qq_friend_request","friend_request",
-                "同意或拒绝待处理好友申请，仅 owner 可用",true,1,friendRequestArgs(),
+                "同意或拒绝待处理好友申请，支持一次按 requestIDs 或 userID 批量处理，仅 owner 可用",true,3,
+                friendRequestArgs(),
                 "approve"));
         registry.register(new QQTool(service,qq,"qq_group_request","group_request",
                 "同意或拒绝待处理群邀请，仅 owner 可用",true,1,groupRequestArgs(),
@@ -180,6 +181,8 @@ public class RoleplayQQTools {
     private static JSONObject friendRequestArgs() {
         JSONObject properties = new JSONObject(true);
         properties.put("requestID",property("integer","pending_requests 返回的申请 ID"));
+        properties.put("requestIDs",property("array","可选，一次处理多个 pending_requests 返回的申请 ID"));
+        properties.put("userID",property("integer","可选，处理这个 QQ 的全部待处理好友申请"));
         properties.put("flag",property("string","申请 flag；通常用 requestID 即可"));
         properties.put("approve",property("boolean","true 同意，false 拒绝"));
         properties.put("remark",property("string","同意后设置的好友备注，最多 60 字"));
@@ -320,6 +323,7 @@ public class RoleplayQQTools {
             params.put("selfID",context.selfID);
             params.put("targetID",args.getLongValue("userID") > 0
                     ? args.getLongValue("userID") : context.userID);
+            params.put("userID",args.getLongValue("userID"));
             params.put("messageID",service.safe(args.getString("messageID")));
             params.put("messageSeq",service.safe(args.getString("messageSeq")));
             params.put("count",args.getIntValue("count"));
@@ -332,6 +336,7 @@ public class RoleplayQQTools {
             params.put("tid",service.safe(args.getString("tid")));
             params.put("limit",args.getIntValue("limit"));
             params.put("requestID",args.getLongValue("requestID"));
+            params.put("requestIDs",args.getJSONArray("requestIDs"));
             params.put("flag",service.safe(args.getString("flag")));
             params.put("approve",args.getBooleanValue("approve"));
             params.put("reason",service.safe(args.getString("reason")));
@@ -403,6 +408,13 @@ public class RoleplayQQTools {
                 failed.data.put("groupID",context.groupID);
                 failed.data.put("operatorQQ",context.userID);
                 if (targetID > 0) failed.data.put("targetQQ",targetID);
+                if (response != null) {
+                    JSONObject data = response.getJSONObject("data");
+                    if (data != null) failed.data.putAll(data);
+                    if (response.getJSONArray("items") != null) {
+                        failed.data.put("items",response.getJSONArray("items"));
+                    }
+                }
                 return failed;
             }
             String summary = response.getString("message") == null

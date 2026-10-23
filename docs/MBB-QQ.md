@@ -36,6 +36,8 @@ QQ 扩展动作服务。它把 NapCat/OneBot 的常用 QQ 能力封装成稳定�
 - 点赞默认只能操作当前用户或 owner。
 - 修改机器人群名片需要 owner 或当前群管理员。
 - 好友申请、群邀请只记录在当前插件的待处理表；处理时必须由 owner 明确指定申请 ID。
+- `friend_request` 支持 `requestIDs` 数组和按 `userID` 批量处理。同一 QQ 的重复申请只调用一次 OneBot，
+  成功后会把该 QQ 剩余 pending 记录一起收口，避免后续重复 flag 返回 `No such request`。
 - 禁言、全员禁言、删除好友、好友备注、头像、资料卡和个性签名都会写入审计。
 - 退群只接受 owner 的 `operatorID`；普通群员即使通过聊天诱导角色，也会在服务层被拒绝。
 - 机器人被移出群、主动退群或自身被禁言时，会私聊通知服务器配置的 owner；通知受 `notifyOwnerOnGroupEvent` 控制。
@@ -58,3 +60,6 @@ QQ 扩展动作服务。它把 NapCat/OneBot 的常用 QQ 能力封装成稳定�
 默认关闭 Qzone 的公开发布：`qzoneDefaultUgcRight=64`，需要公开发布时显式传 `ugcRight=1`。
 `adminToolsEnable=false` 会同时关闭申请记录和全部高权限账号/群管理动作。
 `groupLeaveEnable=false` 只关闭退群动作，不影响其他 QQ 管理能力。
+
+Qzone 主动互动目前只支持发布与删除说说。NapCat 当前 OneBot 扩展没有开放评论列表、评论事件或回复评论 action，
+因此插件无法可靠实现“看到空间评论后主动回复”；需要等待 NapCat 暴露相应接口，不能用再发一条说说代替评论回复。

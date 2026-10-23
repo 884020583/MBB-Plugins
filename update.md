@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.11.1.0.0338 | 2026-10-24 | `MBB-Roleplay` 网页白名单改为二次元百科与游戏资料站优先，默认移除 X、Pixiv、YouTube、微博、知乎、Reddit 和短链，新增 Bangumi、Biligame、灰机 Wiki、PRTS、Wiki.gg、Game8、AppMedia、Kamigame、巴哈动画等站点；旧默认白名单自动迁移，自定义列表不覆盖。`MBB-QQ` 好友申请支持 `requestIDs` 数组和按 `userID` 批量处理，同一 QQ 的重复申请只调用一次 OneBot，成功后统一收口剩余 pending 记录，`No such request` 标记为 expired；单轮好友申请工具次数由 1 提升到 3。补充角色 workspace 的日记、个人笔记、草稿、计划、资料索引和表情灵感用法。Qzone 当前 NapCat OneBot 未开放评论事件或回复评论 action，本轮记录为接口限制，不伪装成“再发一条说说”。 |
 | V0.11.0.0.0258 | 2026-10-24 | `MBB-Roleplay` 私聊提示词拆成稳定人设前缀和动态状态块，降低时间、关系、记忆与近期消息对提示词缓存前缀的打断；私聊接入 `MBB-Vision` 识图，模型可在同一轮回复中返回可选 `memory`，写入 `visibility=private` 的长期记忆，群聊检索与长期记忆合并只处理 `shared`，不会泄漏私聊内容。新增 `sticker_save`：当前或最近图片适合复用时，角色可主动保存到 `MBB-Sticker`，支持自定义标签和描述。`MBB-QQ` 新增 owner-only `group_leave`，代码层拒绝非 owner 诱导退群；机器人退群、被移出群或被自身禁言时私聊通知 owner。所有面向群员的 QQ 工具结果补充 `operatorQQ`、`targetQQ` 和目标 QQ 摘要。 |
 | V0.10.1.1.0222 | 2026-10-24 | 提高 `MBB-Roleplay` 表情包使用率：`sticker` 默认加入首轮核心工具，情绪或场景合适时无需先 `tool_search`；`tags` 可留空由 `MBB-Sticker` 随机选择，并如实返回发送失败。新增 `stickerSendChance` 提示词参考使用率，默认 `0.35`，同时保留连续两条不连发的约束。旧配置若仍是原核心工具默认值会自动迁移，不覆盖自定义列表。 |
 | V0.10.1.0.0158 | 2026-10-24 | `MBB-Roleplay` 将 `memory_search` 扩展为按需检索跨群短期、长期、永久和个人记忆，支持可选 `userID`，默认查询当前发言人，并按单个工具结果预算分配四类记忆的字符上限；提示词明确引导角色在常驻摘要不足时主动检索。私聊准入改为 owner 或机器人 QQ 好友，好友列表通过 `get_friend_list` 缓存，查询失败时暂停响应非 owner 私聊；旧 `privateChatWhitelist` 仅保留配置兼容，不再放行非好友。 |

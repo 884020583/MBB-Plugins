@@ -9,9 +9,12 @@ import org.moboxlab.moboxbot.API.Plugin;
 import org.moboxlab.moboxbot.API.PluginService;
 
 import java.text.SimpleDateFormat;
+import java.util.ArrayList;
 import java.util.Date;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 
 /**
  * QQ 扩展动作服务。
@@ -540,23 +543,81 @@ public class QQService implements PluginService {
     private JSONObject friendRequest(JSONObject input) {
         if (!config.adminToolsEnable) return error("QQ 管理工具未启用");
         if (!isOwner(positive(input,"operatorID"))) return error("处理好友申请仅 owner 可用");
-        JSONObject row = requestRow(input,"friend");
-        String flag = requestFlag(input,row);
-        if (flag.isEmpty()) return error("缺少好友申请 flag，请先读取 pending_requests");
         boolean approve = boolValue(input,"approve",false);
-        JSONObject params = new JSONObject(true);
-        params.put("flag",flag);
-        params.put("approve",approve);
-        if (approve) {
-            String remark = safe(input.getString("remark")).trim();
-            if (remark.length() > 60) return error("好友备注最多 60 个字符");
-            if (!remark.isEmpty()) params.put("remark",remark);
+        String remark = safe(input.getString("remark")).trim();
+        if (remark.length() > 60) return error("好友备注最多 60 个字符");
+        List<JSONObject> selected = friendRequestRows(input);
+        if (selected.isEmpty()) return error("没有找到要处理的好友申请，请先读取 pending_requests");
+        Map<Long,List<JSONObject>> grouped = new LinkedHashMap<>();
+        for (JSONObject row : selected) {
+            long userID = row.getLongValue("userID");
+            if (userID <= 0) continue;
+            List<JSONObject> rows = grouped.get(userID);
+            if (rows == null) {
+                rows = new ArrayList<>();
+                grouped.put(userID,rows);
+            }
+            if (!rows.contains(row)) rows.add(row);
         }
-        JSONObject result = action("friend_request","set_friend_add_request",params,input,0,
-                row == null ? 0L : row.getLongValue("userID"),
-                approve ? "同意好友申请" : "拒绝好友申请");
-        if (result.getBooleanValue("status")) markRequest(row,flag,"friend",
-                approve ? "approved" : "rejected");
+        int success = 0;
+        int skipped = 0;
+        int failed = 0;
+        JSONArray items = new JSONArray();
+        for (Map.Entry<Long,List<JSONObject>> entry : grouped.entrySet()) {
+            long userID = entry.getKey();
+            List<JSONObject> pending = pendingFriendRequests(userID);
+            JSONObject item = new JSONObject(true);
+            item.put("targetQQ",userID);
+            if (pending.isEmpty()) {
+                item.put("status","skipped");
+                item.put("message","该 QQ 的申请已处理或已失效");
+                skipped++;
+                items.add(item);
+                continue;
+            }
+            JSONObject first = pending.get(0);
+            String flag = safe(first.getString("flag")).trim();
+            if (flag.isEmpty()) {
+                item.put("status","failed");
+                item.put("message","好友申请缺少 flag");
+                failed++;
+                items.add(item);
+                continue;
+            }
+            JSONObject params = new JSONObject(true);
+            params.put("flag",flag);
+            params.put("approve",approve);
+            if (approve) {
+                if (!remark.isEmpty()) params.put("remark",remark);
+            }
+            JSONObject result = action("friend_request","set_friend_add_request",params,input,0,
+                    userID,approve ? "同意好友申请 "+userID : "拒绝好友申请 "+userID);
+            JSONArray requestIDs = new JSONArray();
+            for (JSONObject row : pending) requestIDs.add(row.getLongValue("ID"));
+            item.put("requestIDs",requestIDs);
+            item.put("flag",flag);
+            item.put("message",safe(result.getString("message")));
+            if (result.getBooleanValue("status")) {
+                markFriendRequestsForUser(userID,approve ? "approved" : "rejected");
+                item.put("status",approve ? "approved" : "rejected");
+                success++;
+            } else if (isMissingRequest(result.getString("message"))) {
+                markFriendRequestsForUser(userID,"expired");
+                item.put("status","expired");
+                item.put("message","QQ 服务端已不存在该申请，剩余重复申请一并收口");
+                skipped++;
+            } else {
+                item.put("status","failed");
+                failed++;
+            }
+            items.add(item);
+        }
+        JSONObject result = new JSONObject(true);
+        result.put("status",success + skipped > 0);
+        result.put("partial",failed > 0 && success + skipped > 0);
+        result.put("message","好友申请批处理完成：成功 "+success+"，跳过 "+skipped
+                +"，失败 "+failed);
+        result.put("items",items);
         return result;
     }
 
@@ -701,6 +762,59 @@ public class QQService implements PluginService {
         params.put("longNick",longNick);
         return action("set_signature","set_self_longnick",params,input,0,0,
                 "设置个性签名："+shortText(longNick,40));
+    }
+
+    private List<JSONObject> friendRequestRows(JSONObject input) {
+        List<JSONObject> result = new ArrayList<>();
+        JSONArray requestIDs = input.getJSONArray("requestIDs");
+        if (requestIDs != null) {
+            for (Object value : requestIDs) {
+                long id = longValue(value);
+                if (id <= 0) continue;
+                JSONObject row = storage().queryOne("SELECT * FROM `"+REQUEST_TABLE+"` "
+                        + "WHERE `ID`=? AND `requestType`='friend'",id);
+                if (row != null && !result.contains(row)) result.add(row);
+            }
+        }
+        if (result.isEmpty()) {
+            JSONObject row = requestRow(input,"friend");
+            if (row != null) result.add(row);
+        }
+        if (result.isEmpty()) {
+            long userID = positive(input,"userID");
+            if (userID > 0) {
+                List<JSONObject> pending = pendingFriendRequests(userID);
+                if (pending != null) result.addAll(pending);
+            }
+        }
+        return result;
+    }
+
+    private List<JSONObject> pendingFriendRequests(long userID) {
+        List<JSONObject> rows = storage().query("SELECT * FROM `"+REQUEST_TABLE+"` "
+                + "WHERE `requestType`='friend' AND `userID`=? AND `status`='pending' "
+                + "ORDER BY `ID` ASC",userID);
+        return rows == null ? new ArrayList<>() : rows;
+    }
+
+    private void markFriendRequestsForUser(long userID,String status) {
+        storage().update("UPDATE `"+REQUEST_TABLE+"` SET `status`=?,`updateTime`=? "
+                        + "WHERE `requestType`='friend' AND `userID`=? AND `status`='pending'",
+                status,System.currentTimeMillis(),userID);
+    }
+
+    private boolean isMissingRequest(String message) {
+        String text = safe(message).toLowerCase(Locale.ROOT);
+        return text.contains("no such request") || text.contains("not found")
+                || text.contains("不存在") || text.contains("已失效");
+    }
+
+    private long longValue(Object value) {
+        try {
+            return Long.parseLong(String.valueOf(value).trim());
+        } catch (Exception e) {
+            return 0L;
+        }
     }
 
     private JSONObject requestRow(JSONObject input,String requestType) {
