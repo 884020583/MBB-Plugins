@@ -13,7 +13,8 @@ S9 AI 契约桩切片：按 §9.10 交付 v1 的「空 AI」——零调用、�
 - `/trpg ai on|off`：开关词解析（`on`/`开`、`off`/`关`）与权限、状态、冷却判定仍留在
   `SessionService`；全局关时 `ai on` 按「当前状态不可用」拒绝，全局开时回
   「AI 主持将在 v1.1 提供」，两种情况都不写 `aiEnabled`、不写审计（验收 I1 / I7）。
-- `ai off` 恒可回执，回【主持】「本局 AI 主持保持关闭。」；无参数或其他词回用法提示（验收 I6）。
+- `ai off` 对 KP、群管理员与机器人管理员恒回执，回【主持】「本局 AI 主持保持关闭。」；
+  无参数或其他词回用法提示（验收 I6）。
 - `status` 的 AI 行按库里的 `aiEnabled` / `aiSuspendedUntil` 投影；v1 桩不写这两列，
   因此这一行在 v1 恒显「关」（验收 I4）。
 - `SessionService` 实现 `SessionView`（`readSnapshot(群号)`），插件装配时把只读视图交给桩，
