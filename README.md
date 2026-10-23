@@ -16,7 +16,7 @@ MoBoxBot 独立插件仓库。
 | [MBB-Chat](docs/MBB-Chat.md) | `/chat <内容>`、`/chat new`、`/chat persona` | 管理员或白名单 | AI 对话，每人独立上下文与人设 |
 | [MBB-ChatStat](docs/MBB-ChatStat.md) | `/chatstat group/user` | `BOT_ADMIN` | 统计群聊内容或某人在所有可见群的发言，可接 AI 总结 |
 | [MBB-ComfyUI](docs/MBB-ComfyUI.md) | `/comfyui status/reload/test` | `BOT_ADMIN` | 按群独立冷却的 ComfyUI 生图服务，供 Roleplay 的 `draw` 工具调用 |
-| [MBB-QQ](docs/MBB-QQ.md) | `/qq status/audit/qzone/reload` | `BOT_ADMIN` | QQ 群资料、历史消息、互动、媒体发送、自己的群名片与 Qzone 扩展动作 |
+| [MBB-QQ](docs/MBB-QQ.md) | `/qq status/audit/qzone/reload` | `BOT_ADMIN` | QQ 群资料、互动与媒体、好友/群管理、owner 退群、Qzone 和群事件通知 |
 | [MBB-Help](docs/MBB-Help.md) | `/help` | `EVERYONE` | 按权限分区的命令帮助图片 |
 | [MBB-Leave](docs/MBB-Leave.md) | `/leave [消息]` | `OWNER` | 发送退群消息后退出当前群 |
 | [MBB-PigHub](docs/MBB-PigHub.md) | `来只猪猪` | `EVERYONE` | 随机 PigHub 猪猪图片 |
@@ -29,7 +29,7 @@ MoBoxBot 独立插件仓库。
 | [MBB-Remind](docs/MBB-Remind.md) | `/remind` | `BOT_ADMIN` | 定时提醒 |
 | [MBB-Roleplay](docs/MBB-Roleplay.md) | `/role ...` | `BOT_ADMIN` | 按角色设定参与群聊和私聊，支持跨群语义记忆、随机刻主动互动、情绪、原生工具、联网检索与私有工作区 |
 | [MBB-Status](docs/MBB-Status.md) | `/status` | `BOT_ADMIN` | 系统运行状态 |
-| [MBB-Sticker](docs/MBB-Sticker.md) | `/sticker ...` | `EVERYONE` / `BOT_ADMIN` | 表情包收录、AI 情绪标签检索与发送 |
+| [MBB-Sticker](docs/MBB-Sticker.md) | `/sticker ...` | `EVERYONE` / `BOT_ADMIN` | 表情包收录、AI 情绪标签检索、随机发送与角色主动收藏 |
 | [MBB-Vision](docs/MBB-Vision.md) | `/vision ...` | `BOT_ADMIN` | 公用识图与本地缓存，供表情包和角色扮演调用 |
 | [MBB-Version](docs/MBB-Version.md) | `/version` | `BOT_ADMIN` | 版本信息图片 |
 | [MBB-Welcome](docs/MBB-Welcome.md) | `/welcome` | `BOT_ADMIN` | 群进群退群消息 |

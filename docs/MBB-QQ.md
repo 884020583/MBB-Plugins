@@ -27,7 +27,7 @@ QQ 扩展动作服务。它把 NapCat/OneBot 的常用 QQ 能力封装成稳定�
 | Qzone | `qzone_post` / `qzone_delete` / `qzone_posts` | owner 管理机器人自己的 QQ 空间 |
 
 好友申请和群邀请只写入本地待处理表，不会自动同意或拒绝。好友删除、账号资料和头像属于 owner 操作，
-不会开放给普通群员。私聊消息和好友主动消息仍未开放。
+不会开放给普通群员。MBB-QQ 本身不接管原始私聊消息；角色私聊由 `MBB-Roleplay` 的好友制私聊入口处理。
 
 ## 权限与审计
 
@@ -60,6 +60,13 @@ QQ 扩展动作服务。它把 NapCat/OneBot 的常用 QQ 能力封装成稳定�
 默认关闭 Qzone 的公开发布：`qzoneDefaultUgcRight=64`，需要公开发布时显式传 `ugcRight=1`。
 `adminToolsEnable=false` 会同时关闭申请记录和全部高权限账号/群管理动作。
 `groupLeaveEnable=false` 只关闭退群动作，不影响其他 QQ 管理能力。
+
+```yaml
+adminToolsEnable: true
+groupLeaveEnable: true
+notifyOwnerOnGroupEvent: true
+qzoneEnable: true
+```
 
 Qzone 主动互动目前只支持发布与删除说说。NapCat 当前 OneBot 扩展没有开放评论列表、评论事件或回复评论 action，
 因此插件无法可靠实现“看到空间评论后主动回复”；需要等待 NapCat 暴露相应接口，不能用再发一条说说代替评论回复。

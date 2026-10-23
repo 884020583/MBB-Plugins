@@ -305,6 +305,11 @@ quietReplyEnable: true
 
 `replyReviewEnable` 默认 `true`。角色回复在发送前会经过 `RoleplayReplyReviewService` 复核：检查是否像角色、是否有 AI 味、总结腔、说教、重复或过长；分数低于 `replyReviewMinScore` 且模型给出 `rewrite` 时使用改写文本。`replyReviewProfile` 留空时使用 `aiProfile`。
 
+`privateChatEnable` 控制私聊入口。准入规则是 owner 或机器人 QQ 好友，好友列表按
+`privateChatFriendCacheSecond` 缓存；查询失败时拒绝非 owner 私聊。`privateChatWhitelist`
+只保留旧配置兼容，不再放行非好友。私聊使用独立上下文，图片会交给 `MBB-Vision`，
+长期结论以 `visibility=private` 写入记忆表。
+
 `toolEnable` 默认 `true`，通过 `MBB-AI` 的 OpenAI `tools/tool_calls` 执行有限工具循环。
 首轮只开放 `toolCoreTools`，其他工具由 `tool_search` 按需加载，最多同时加载
 `toolLoadedMaxTools` 个 schema。`toolMaxSteps` 和 `toolMaxCalls` 限制单轮循环次数；
@@ -328,6 +333,9 @@ quietReplyEnable: true
 
 `webEnable` 开放网页读取和搜索工具。公网域名只允许 `webWhitelist` 中的域名及其子域名；
 内网地址必须由 owner 当前发言或 `webOwnerAuthWindowSecond` 内的明确请求授权。
+默认白名单以二次元百科、游戏资料站和公开技术资料为主，不包含 X、Pixiv、YouTube、微博、
+知乎、Reddit 等社交或图片站；需要时可自行加入 `webWhitelist`。旧默认列表会自动迁移，
+自定义列表不会被覆盖。
 `webSearchUrl` 使用 `{query}` 占位符，主搜索源无结果或连接失败时会尝试
 `webSearchFallbackUrl`。`webCacheSecond` 缓存网页和搜索结果。
 `contextHardLimitEnable` 默认关闭，关闭时不按 `promptTotalChars` 截断动态资料；
@@ -383,7 +391,10 @@ quietReplyEnable: true
 
 ## 配置补全
 
-插件启动和重载时会检查 `config.yml`。缺失的配置项会自动追加到文件末尾，并附带中文注释。旧版本默认的 `otherRoleBotReplyChance: 0.10` 会一次性迁移为 `0.50`。
+插件启动和重载时会检查 `config.yml`。缺失的配置项会自动追加到文件末尾，并附带中文注释。
+已知旧默认值会按配置结构版本迁移，包括 `otherRoleBotReplyChance: 0.10 -> 0.50`、
+旧 `toolCoreTools` 补入 `sticker`、旧社交网页白名单替换为二次元资料站默认值。
+迁移只在值仍等于旧默认值时执行，不会覆盖用户自定义内容。
 
 如需手动触发：
 

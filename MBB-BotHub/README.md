@@ -236,4 +236,4 @@ client 握手成功后会调用 `MBB-Vision` 的 `dump` 把本地缓存回填进
 
 ## 文档
 
-详细设计与部署说明见 [docs/MBB-BotHub.md](../../docs/MBB-BotHub.md)。
+详细设计与部署说明见 [docs/MBB-BotHub.md](../docs/MBB-BotHub.md)。

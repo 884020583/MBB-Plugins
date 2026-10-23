@@ -8,8 +8,8 @@ MoBoxBot 角色扮演插件。插件读取 persona 文件，让角色以普通�
 
 | 分区 | 主要能力 | 详细文档 |
 |---|---|---|
-| 会话与回复 | 群级开关、参与概率、冷却、消息合批、路由判断、引用回复、结构化输出 | [回复架构](roleplay/architecture.md) |
-| 记忆系统 | 跨群短期、长期、永久、个人记忆；来源保留、私聊上下文、相关性注入、合并、备份与恢复 | [记忆系统](roleplay/memory.md) |
+| 会话与回复 | 群聊与 owner/好友制私聊、私聊稳定缓存前缀与识图、参与概率、冷却、消息合批、路由判断、引用回复、结构化输出 | [回复架构](roleplay/architecture.md) |
+| 记忆系统 | 跨群短期、长期、永久、个人记忆；私聊私有长期记忆、来源保留、相关性注入、合并、备份与恢复 | [记忆系统](roleplay/memory.md) |
 | 情绪与关系 | 群级情绪、好感、信任、厌烦、黑名单、用户关系原因 | [情绪与关系](roleplay/emotion.md) |
 | 反馈与表达 | 主动发言反馈、注意力漂移、每日复盘、群内表达候选提取与管理员复核 | [回复架构](roleplay/architecture.md) |
 | 资料与提示词 | persona、台词语料、知识库、提示词缓存前缀 | [回复架构](roleplay/architecture.md) / [技能与集成](roleplay/integrations.md) |
@@ -19,7 +19,7 @@ MoBoxBot 角色扮演插件。插件读取 persona 文件，让角色以普通�
 | 命令与配置 | 全部管理命令、配置项、默认性能、构建和升级 | [命令](roleplay/commands.md) / [配置与部署](roleplay/configuration.md) |
 | 训练语料采集 | `/role learn` 把任意群消息和前后文存成训练样本，供后续微调使用 | [技能与集成](roleplay/integrations.md) |
 | 风格层训练 | `/role train` 把群消息导出成 ShareGPT 交给本地 MBB-Model 训练；默认复制当前 adapter 到新任务目录后续训，可新开 adapter，截止游标避免重复喂数据 | [技能与集成](roleplay/integrations.md) |
-| 工具与工作区 | 按需加载原生工具、多轮检索、并行只读调用、工具结果总预算、网页搜索、私有工作区版本/回收站、工具回合恢复 | [工具与工作区](roleplay/tools.md) |
+| 工具与工作区 | 按需加载原生工具、QQ 工具、表情包主动收藏、多轮检索、并行只读调用、工具结果总预算、私有工作区用途约定与版本/回收站、工具回合恢复 | [工具与工作区](roleplay/tools.md) |
 
 ## 核心流程
 
@@ -28,12 +28,14 @@ flowchart TD
     subgraph ENTRY["事件入口 RoleplayListener"]
         E1["群消息 GroupMessageEvent"]
         E2["戳一戳 NoticeEvent notice/poke"]
+        E3["私聊 PrivateMessageEvent"]
     end
 
     E2 --> POKE{"MBB-Poke 已启用？"}
     POKE -->|是| POKE1["交给 MBB-Poke，本插件跳过"]
     POKE -->|否| T0["提交插件任务线程"]
     E1 --> T0
+    E3 --> PCHAT["RoleplayPrivateChatService：稳定前缀 / 识图 / 私聊记忆"]
 
     T0 --> GATE{"插件开关 + 群级开关"}
     GATE -->|关闭| END0["本轮结束"]
@@ -183,7 +185,7 @@ flowchart LR
 
     RP ==>|"chat：路由 / 回复 / 风格 / 记忆 / 情绪 / 提醒"| AI["MBB-AI（必需）"]
     RP ==>|"describe：图片与表情包识图 + 本地缓存"| VIS["MBB-Vision（可选）"]
-    RP ==>|"search / send：表情包标签检索与发送"| ST["MBB-Sticker（可选）"]
+    RP ==>|"tags / random / add：表情包发送与主动收藏"| ST["MBB-Sticker（可选）"]
     RP ==>|"status / generate：生图与群级冷却"| CU["MBB-ComfyUI（可选）"]
     RP -.->|"isEnabled：避免戳一戳重复响应"| POKE["MBB-Poke（可选）"]
     RP -.->|"复用同一套 AI profile 与并发限制"| CHAT["MBB-Chat（同生态参考）"]
@@ -214,7 +216,7 @@ flowchart LR
 |---|---|---|
 | `MBB-AI` | 必需 | 路由、回复、记忆、情绪、提醒识别等模型调用 |
 | `MBB-Vision` | 可选 | 图片与表情包识图、缓存和原图上下文 |
-| `MBB-Sticker` | 可选 | 表情包标签检索与发送 |
+| `MBB-Sticker` | 可选 | 表情包标签检索、随机发送与主动收藏 |
 | `MBB-ComfyUI` | 可选 | 生图技能与生成完成回调 |
 
 没有可选插件时，Roleplay 仍可使用文本聊天、记忆、情绪和提醒功能。
