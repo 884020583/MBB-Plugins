@@ -16,6 +16,7 @@ MoBoxBot 独立插件仓库。
 | [MBB-Chat](docs/MBB-Chat.md) | `/chat <内容>`、`/chat new`、`/chat persona` | 管理员或白名单 | AI 对话，每人独立上下文与人设 |
 | [MBB-ChatStat](docs/MBB-ChatStat.md) | `/chatstat group/user` | `BOT_ADMIN` | 统计群聊内容或某人在所有可见群的发言，可接 AI 总结 |
 | [MBB-ComfyUI](docs/MBB-ComfyUI.md) | `/comfyui status/reload/test` | `BOT_ADMIN` | 按群独立冷却的 ComfyUI 生图服务，供 Roleplay 的 `draw` 工具调用 |
+| [MBB-QQ](docs/MBB-QQ.md) | `/qq status/audit/qzone/reload` | `BOT_ADMIN` | QQ 群资料、历史消息、互动、媒体发送、自己的群名片与 Qzone 扩展动作 |
 | [MBB-Help](docs/MBB-Help.md) | `/help` | `EVERYONE` | 按权限分区的命令帮助图片 |
 | [MBB-Leave](docs/MBB-Leave.md) | `/leave [消息]` | `OWNER` | 发送退群消息后退出当前群 |
 | [MBB-PigHub](docs/MBB-PigHub.md) | `来只猪猪` | `EVERYONE` | 随机 PigHub 猪猪图片 |
