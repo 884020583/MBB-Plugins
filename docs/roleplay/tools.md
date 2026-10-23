@@ -39,7 +39,7 @@ tool_search
 |---|---|
 | `self_state` | 查看回复冷却、工作区、记忆和长度约束 |
 | `history_search` | 搜索当前群消息流水 |
-| `memory_search` | 检索长期记忆和永久记忆 |
+| `memory_search` | 按主题检索跨群短期、长期、永久和个人记忆，可选 `userID`，默认当前发言人 |
 | `kb_search` | 检索已启用的知识库，返回条目、小节与正文 |
 | `web_fetch` | 读取白名单网站中的公开网页并净化正文 |
 | `web_search` | 联网搜索公开信息，返回标题和链接 |
@@ -51,6 +51,10 @@ tool_search
 | `workspace_delete` / `workspace_restore` | 移入回收站或从回收站恢复 |
 | `message_send` | 工具处理期间追加发送一条短消息 |
 | `end_turn` | 本轮保持沉默并立即结束 |
+
+`memory_search` 用于补充常驻注入之外的按需回忆。它会同时返回 `shortTerm`、`profile`、
+`longTerm` 和 `global` 四部分，并受 `toolResultMaxChars` 单次预算约束；个人记忆默认查询当前
+发言人，也可以传 `userID` 查询指定群员。该工具在只读检索批次中可和其他查询工具并行执行。
 
 安装 `MBB-QQ` 后会额外开放 `qq_*` 工具，包括群资料、成员资料、远程历史、
 消息详情、群公告、已读、戳一戳、点赞、表情回应、撤回自己的消息、发送工作区图片/语音、

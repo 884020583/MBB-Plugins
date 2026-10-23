@@ -10,6 +10,7 @@ import org.moboxlab.moboxbot.API.PluginService;
 import org.moboxlab.moboxbot.API.Storage.StorageService;
 
 import java.util.Collections;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
@@ -27,6 +28,10 @@ public class RoleplayPrivateChatService {
     private volatile RoleplayConfig config;
     private final Set<Long> running =
             Collections.newSetFromMap(new ConcurrentHashMap<Long,Boolean>());
+    private volatile Set<Long> friendCache = Collections.emptySet();
+    private volatile boolean friendCacheReady = false;
+    private volatile long friendCacheTime = 0L;
+    private volatile long friendCacheRetryTime = 0L;
 
     public RoleplayPrivateChatService(Plugin plugin,RoleplayConfig config,RoleplayService service) {
         this.plugin = plugin;
@@ -77,7 +82,13 @@ public class RoleplayPrivateChatService {
     public boolean allowed(long userID) {
         if (userID <= 0) return false;
         if (service.isOwner(userID)) return true;
-        return service.containsCSVLong(config.privateChatWhitelist,userID);
+        long now = System.currentTimeMillis();
+        long cacheMillis = Math.max(30,config.privateChatFriendCacheSecond) * 1000L;
+        if (!friendCacheReady || now - friendCacheTime >= cacheMillis) {
+            refreshFriendCache(now);
+        }
+        Set<Long> current = friendCache;
+        return friendCacheReady && current.contains(userID);
     }
 
     public String generateProactive(long userID,String reason) {
@@ -235,6 +246,53 @@ public class RoleplayPrivateChatService {
         if (client == null || !client.isConnected()) return null;
         JSONObject response = client.callAction("get_login_info",new JSONObject(true));
         return response == null ? null : response.getJSONObject("data");
+    }
+
+    /**
+     * 好友列表按配置缓存。查询失败时清空缓存并短暂退避，
+     * 非 owner 私聊保持拒绝，避免把陌生人误当好友。
+     */
+    private synchronized void refreshFriendCache(long now) {
+        long cacheMillis = Math.max(30,config.privateChatFriendCacheSecond) * 1000L;
+        if (friendCacheReady && now - friendCacheTime < cacheMillis) return;
+        if (now < friendCacheRetryTime) return;
+        OneBotClient client = plugin.getServer().getOneBotClient();
+        if (client == null || !client.isConnected()) {
+            markFriendCacheFailed(now,"OneBot 未连接");
+            return;
+        }
+        try {
+            JSONObject response = client.callAction("get_friend_list",new JSONObject(true));
+            JSONArray data = response == null ? null : response.getJSONArray("data");
+            if (response == null || response.getIntValue("retcode") != 0 || data == null) {
+                String message = response == null ? "空响应"
+                        : service.safe(response.getString("message"));
+                markFriendCacheFailed(now,message);
+                return;
+            }
+            Set<Long> loaded = new HashSet<>();
+            for (Object object : data) {
+                if (!(object instanceof JSONObject)) continue;
+                long friendID = ((JSONObject)object).getLongValue("user_id");
+                if (friendID > 0) loaded.add(friendID);
+            }
+            friendCache = Collections.unmodifiableSet(loaded);
+            friendCacheReady = true;
+            friendCacheTime = now;
+            friendCacheRetryTime = 0L;
+            plugin.getLogger().sendInfo("[私聊] 好友列表已刷新，共 "+loaded.size()+" 人");
+        } catch (Exception e) {
+            markFriendCacheFailed(now,service.safe(e.getMessage()));
+        }
+    }
+
+    private void markFriendCacheFailed(long now,String reason) {
+        friendCache = Collections.emptySet();
+        friendCacheReady = false;
+        friendCacheTime = 0L;
+        friendCacheRetryTime = now + 30000L;
+        plugin.getLogger().sendWarn("[私聊] 好友列表查询失败，暂不响应非 owner 私聊："
+                +service.shortText(service.safe(reason),160));
     }
 
     private String clean(String text) {

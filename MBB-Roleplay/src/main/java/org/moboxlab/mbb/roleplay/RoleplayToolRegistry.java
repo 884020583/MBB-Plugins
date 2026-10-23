@@ -516,7 +516,7 @@ public class RoleplayToolRegistry {
         public String name() { return "memory_search"; }
 
         @Override
-        public String description() { return "按当前问题检索本群长期记忆和全局永久记忆"; }
+        public String description() { return "按需检索跨群短期、长期、永久和个人记忆；个人记忆默认查当前发言人"; }
 
         @Override
         public String category() { return "retrieval"; }
@@ -525,6 +525,7 @@ public class RoleplayToolRegistry {
         public JSONObject schema() {
             JSONObject properties = new JSONObject(true);
             properties.put("query",property("string","要查询的主题或关键词"));
+            properties.put("userID",property("integer","可选，要查询个人记忆的 QQ；默认当前发言人"));
             return functionSchema(name(),description(),properties,new String[]{"query"});
         }
 
@@ -532,14 +533,37 @@ public class RoleplayToolRegistry {
         public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
             String query = service.safe(args.getString("query")).trim();
             if (query.isEmpty()) return RoleplayToolResult.failed("query 不能为空");
-            RoleplayToolResult result = RoleplayToolResult.ok("已检索相关记忆");
+            long targetUserID = context.userID;
+            if (args.containsKey("userID")) {
+                try {
+                    targetUserID = Long.parseLong(String.valueOf(args.get("userID")).trim());
+                } catch (Exception e) {
+                    return RoleplayToolResult.failed("userID 必须是有效 QQ 号");
+                }
+                if (targetUserID <= 0) {
+                    return RoleplayToolResult.failed("userID 必须是有效 QQ 号");
+                }
+            }
+            int budget = Math.max(1000,service.config().toolResultMaxChars);
+            String profile;
+            if (!service.config().memberMemoryEnable) {
+                profile = "个人记忆未启用。";
+            } else {
+                profile = service.memberService().promptText(context.groupID,targetUserID);
+                if (profile.isEmpty()) profile = "暂无该群员的个人记忆。";
+            }
+            RoleplayToolResult result = RoleplayToolResult.ok("已按需检索短期、长期、永久和个人记忆");
+            result.data.put("query",query);
+            result.data.put("userID",targetUserID);
+            result.data.put("shortTerm",service.shortText(service.shortSummary(0L),budget * 10 / 100));
+            result.data.put("profile",service.shortText(profile,budget * 15 / 100));
             result.data.put("longTerm",service.shortText(
-                    service.longMemoryText(context.groupID,context.userID,query),
-                    service.config().toolResultMaxChars / 2));
+                    service.longMemoryText(context.groupID,targetUserID,query),
+                    budget * 28 / 100));
             result.data.put("global",service.shortText(
-                    service.globalMemoryService().promptText(query,context.userID,
-                            Math.max(1000,service.config().toolResultMaxChars / 2)),
-                    service.config().toolResultMaxChars / 2));
+                    service.globalMemoryService().promptText(query,targetUserID,
+                            Math.max(1000,budget * 28 / 100)),
+                    budget * 28 / 100));
             return result;
         }
     }

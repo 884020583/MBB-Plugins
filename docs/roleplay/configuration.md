@@ -105,6 +105,7 @@ globalMemoryMergeCooldownMinute: 60
 memoryTimeoutSecond: 300
 privateChatEnable: true
 privateChatWhitelist: ""
+privateChatFriendCacheSecond: 300
 privateChatContextMessages: 40
 privateChatMaxReplyChars: 160
 randomTickEnable: true

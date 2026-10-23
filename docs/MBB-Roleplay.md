@@ -112,7 +112,9 @@ flowchart TD
 
 ## 私聊与随机刻
 
-私聊由 `PrivateMessageEvent` 进入独立的 `RoleplayPrivateChatService`。默认只响应 owner 和 `privateChatWhitelist`，不会进入群消息合批或群话题疲劳。
+私聊由 `PrivateMessageEvent` 进入独立的 `RoleplayPrivateChatService`。默认只响应 owner 和机器人 QQ 好友，
+好友列表通过 `get_friend_list` 缓存，查询失败时拒绝非 owner 私聊；旧 `privateChatWhitelist` 仅保留配置兼容。
+私聊不会进入群消息合批或群话题疲劳。
 
 `RoleplayRandomTickService` 每隔 10 到 30 分钟检查一次随机刻，`00:00-08:00` 只调度不执行。随机刻先做夜间、去重、群主动频率和 Qzone 日限额判断，再让模型选择 `none / private_owner / group_topic / qzone_post`；`none` 是正常结果。主动私聊 owner 不做频率限制，主动群话题全局每 6 小时最多 2 次，Qzone 每天最多 2 次。
 

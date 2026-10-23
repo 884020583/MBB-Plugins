@@ -8,7 +8,7 @@ MoBoxBot 角色扮演插件。插件读取 persona 文件，让角色以普通�
 
 | 分区 | 主要能力 | 详细文档 |
 |---|---|---|
-| 会话与回复 | 群聊与 owner/白名单私聊、参与概率、冷却、消息合批、路由判断、引用回复、结构化输出 | [回复架构](../docs/roleplay/architecture.md) |
+| 会话与回复 | 群聊与 owner/好友制私聊、参与概率、冷却、消息合批、路由判断、引用回复、结构化输出 | [回复架构](../docs/roleplay/architecture.md) |
 | 记忆系统 | 跨群短期、长期、永久、个人记忆；来源保留、私聊上下文、相关性注入、合并、备份与恢复 | [记忆系统](../docs/roleplay/memory.md) |
 | 随机刻 | 10 到 30 分钟主动行为，夜间静默、去重、频率限制和 `NO_OP` | [配置与部署](../docs/roleplay/configuration.md) |
 | 情绪与关系 | 群级情绪、好感、信任、厌烦、黑名单、用户关系原因 | [情绪与关系](../docs/roleplay/emotion.md) |

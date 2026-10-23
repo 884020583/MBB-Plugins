@@ -295,6 +295,7 @@ public class RoleplayConfig {
     public boolean quietReplyEnable = true;
     public boolean privateChatEnable = true;
     public String privateChatWhitelist = "";
+    public int privateChatFriendCacheSecond = 300;
     public int privateChatContextMessages = 40;
     public int privateChatMaxReplyChars = 160;
     public boolean randomTickEnable = true;
@@ -726,6 +727,8 @@ public class RoleplayConfig {
         config.quietReplyEnable = plugin.getConfig().getBoolean("quietReplyEnable",true);
         config.privateChatEnable = plugin.getConfig().getBoolean("privateChatEnable",true);
         config.privateChatWhitelist = plugin.getConfig().getString("privateChatWhitelist","");
+        config.privateChatFriendCacheSecond =
+                plugin.getConfig().getInt("privateChatFriendCacheSecond",300);
         config.privateChatContextMessages = plugin.getConfig().getInt("privateChatContextMessages",40);
         config.privateChatMaxReplyChars = plugin.getConfig().getInt("privateChatMaxReplyChars",160);
         config.randomTickEnable = plugin.getConfig().getBoolean("randomTickEnable",true);
@@ -1165,6 +1168,8 @@ public class RoleplayConfig {
         if (config.repeatOpeningLimit < 1) config.repeatOpeningLimit = 1;
         if (config.minMessageLength < 1) config.minMessageLength = 1;
         if (config.privateChatWhitelist == null) config.privateChatWhitelist = "";
+        if (config.privateChatFriendCacheSecond < 30) config.privateChatFriendCacheSecond = 30;
+        if (config.privateChatFriendCacheSecond > 3600) config.privateChatFriendCacheSecond = 3600;
         if (config.privateChatContextMessages < 4) config.privateChatContextMessages = 4;
         if (config.privateChatContextMessages > 200) config.privateChatContextMessages = 200;
         if (config.privateChatMaxReplyChars < 20) config.privateChatMaxReplyChars = 20;
