@@ -15,7 +15,7 @@ import java.util.List;
  * Roleplay 配置迁移与缺失项补全
  */
 public class RoleplayConfigMigrator {
-    private static final String CURRENT_VERSION = "38";
+    private static final String CURRENT_VERSION = "39";
 
     private static class ConfigEntry {
         private final String key;
@@ -234,7 +234,8 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("workspaceTrashKeepDays","30","工作区回收站保留天数"),
             new ConfigEntry("webEnable","true","是否开放受限网页浏览工具"),
             new ConfigEntry("webWhitelist","wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,fandom.com,namu.wiki,arca.live,pixiv.net,x.com,youtube.com,b23.tv","网页允许域名，多个用英文逗号分隔"),
-            new ConfigEntry("webSearchUrl","https://html.duckduckgo.com/html/?q={query}","联网搜索地址模板"),
+            new ConfigEntry("webSearchUrl","https://www.bing.com/search?q={query}","联网搜索地址模板"),
+            new ConfigEntry("webSearchFallbackUrl","https://html.duckduckgo.com/html/?q={query}","联网搜索备用地址模板"),
             new ConfigEntry("webSearchMaxResults","5","单次联网搜索最多返回多少条摘要"),
             new ConfigEntry("webOwnerAuthWindowSecond","300","owner 内网访问授权窗口秒数"),
             new ConfigEntry("webTimeoutSecond","15","网页连接超时秒数"),
@@ -398,6 +399,9 @@ public class RoleplayConfigMigrator {
                 && ("wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,"
                 +"kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com")
                 .equals(config.getString("webWhitelist",""));
+        boolean legacyWebSearchPrimary = version < 39
+                && "https://html.duckduckgo.com/html/?q={query}"
+                .equals(config.getString("webSearchUrl",""));
         boolean legacyToolStepBalance = version < 38
                 && "8".equals(config.getString("toolMaxSteps",""));
         boolean legacyToolCallBalance = version < 38
@@ -417,7 +421,7 @@ public class RoleplayConfigMigrator {
                 plugin.getLogger().sendWarn("自动补全 Roleplay 配置失败，请检查 config.yml 权限！");
             }
         }
-        if (version < 38) {
+        if (version < 39) {
             config.set("configVersion",CURRENT_VERSION);
             if (!versionMissing) changed++;
         }
@@ -472,6 +476,11 @@ public class RoleplayConfigMigrator {
                             +"deepwiki.com,reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,"
                             +"fandom.com,namu.wiki,arca.live,pixiv.net,x.com,youtube.com,b23.tv");
             changed++;
+        }
+        if (legacyWebSearchPrimary) {
+            config.set("webSearchUrl","https://www.bing.com/search?q={query}");
+            config.set("webSearchFallbackUrl","https://html.duckduckgo.com/html/?q={query}");
+            changed += 2;
         }
         if (legacyToolStepBalance) {
             config.set("toolMaxSteps","6");

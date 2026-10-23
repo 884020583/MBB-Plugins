@@ -217,7 +217,8 @@ public class RoleplayConfig {
     public int workspaceTrashKeepDays = 30;
     public boolean webEnable = true;
     public String webWhitelist = "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,fandom.com,namu.wiki,arca.live,pixiv.net,x.com,youtube.com,b23.tv";
-    public String webSearchUrl = "https://html.duckduckgo.com/html/?q={query}";
+    public String webSearchUrl = "https://www.bing.com/search?q={query}";
+    public String webSearchFallbackUrl = "https://html.duckduckgo.com/html/?q={query}";
     public int webSearchMaxResults = 5;
     public int webOwnerAuthWindowSecond = 300;
     public int webTimeoutSecond = 15;
@@ -616,6 +617,8 @@ public class RoleplayConfig {
         config.webWhitelist = plugin.getConfig().getString("webWhitelist",
                 "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,fandom.com,namu.wiki,arca.live,pixiv.net,x.com,youtube.com,b23.tv");
         config.webSearchUrl = plugin.getConfig().getString("webSearchUrl",
+                "https://www.bing.com/search?q={query}");
+        config.webSearchFallbackUrl = plugin.getConfig().getString("webSearchFallbackUrl",
                 "https://html.duckduckgo.com/html/?q={query}");
         config.webSearchMaxResults = plugin.getConfig().getInt("webSearchMaxResults",5);
         config.webOwnerAuthWindowSecond =
@@ -1018,8 +1021,9 @@ public class RoleplayConfig {
         if (config.workspaceTrashKeepDays > 365) config.workspaceTrashKeepDays = 365;
         if (config.webWhitelist == null) config.webWhitelist = "";
         if (config.webSearchUrl == null || config.webSearchUrl.trim().isEmpty()) {
-            config.webSearchUrl = "https://html.duckduckgo.com/html/?q={query}";
+            config.webSearchUrl = "https://www.bing.com/search?q={query}";
         }
+        if (config.webSearchFallbackUrl == null) config.webSearchFallbackUrl = "";
         if (config.webSearchMaxResults < 1) config.webSearchMaxResults = 1;
         if (config.webSearchMaxResults > 10) config.webSearchMaxResults = 10;
         if (config.webOwnerAuthWindowSecond < 30) config.webOwnerAuthWindowSecond = 30;

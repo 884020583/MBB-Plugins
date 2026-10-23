@@ -1,7 +1,7 @@
 #MBB-Roleplay 插件配置
 
 #配置结构版本，插件升级时自动维护
-configVersion: 38
+configVersion: 39
 #是否启用角色扮演
 enable: true
 #AI 使用的模型配置名，对应 MBB-AI 的 profiles.json
@@ -368,7 +368,9 @@ webEnable: true
 #网页允许域名，多个用英文逗号分隔
 webWhitelist: "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,fandom.com,namu.wiki,arca.live,pixiv.net,x.com,youtube.com,b23.tv"
 #联网搜索地址模板，{query} 会替换成 URL 编码后的查询词
-webSearchUrl: "https://html.duckduckgo.com/html/?q={query}"
+webSearchUrl: "https://www.bing.com/search?q={query}"
+#联网搜索备用地址模板，主搜索源无结果或超时时尝试
+webSearchFallbackUrl: "https://html.duckduckgo.com/html/?q={query}"
 #单次联网搜索最多返回多少条摘要
 webSearchMaxResults: 5
 #owner 最近多少秒内提出过内网访问请求时，允许工具访问内网地址

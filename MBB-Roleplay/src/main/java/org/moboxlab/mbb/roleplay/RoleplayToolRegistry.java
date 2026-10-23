@@ -628,12 +628,15 @@ public class RoleplayToolRegistry {
         public String category() { return "web"; }
 
         @Override
-        public String description() { return "联网搜索公开信息，返回标题和链接，需要正文时再调用 web_fetch"; }
+        public String description() {
+            return "联网搜索公开信息，返回标题和链接；优先使用官方英文名搜索，需要正文时再调用 web_fetch";
+        }
 
         @Override
         public JSONObject schema() {
             JSONObject properties = new JSONObject(true);
-            properties.put("query",property("string","要搜索的问题或关键词"));
+            properties.put("query",property("string",
+                    "搜索词；作品、人物或站点优先使用官方英文名和常用英文别名"));
             return functionSchema(name(),description(),properties,new String[]{"query"});
         }
 
@@ -642,15 +645,36 @@ public class RoleplayToolRegistry {
             String query = service.safe(args.getString("query")).trim();
             if (query.isEmpty()) return RoleplayToolResult.failed("query 不能为空");
             try {
-                JSONArray results = web.search(query,false);
-                RoleplayToolResult result = RoleplayToolResult.untrusted(
-                        "联网搜索返回 "+results.size()+" 条结果");
-                result.data.put("query",query);
-                result.data.put("results",results);
+                JSONObject payload = web.searchPayload(query,false);
+                JSONArray results = payload.getJSONArray("results");
+                boolean anyProviderResponded = providerResponded(payload.getJSONArray("attempts"));
+                RoleplayToolResult result;
+                if (results.isEmpty() && !anyProviderResponded) {
+                    result = RoleplayToolResult.failed("搜索源连接失败或被风控页拦截");
+                    result.trust = "external-untrusted";
+                } else {
+                    result = RoleplayToolResult.untrusted(
+                            results.isEmpty() ? "联网搜索没有返回可解析结果"
+                                    : "联网搜索返回 "+results.size()+" 条结果");
+                }
+                result.data.putAll(payload);
+                if (results.isEmpty()) {
+                    result.data.put("retryHint",
+                            "换用作品、人物或站点的官方英文名/英文别名后重试一次，不要重复原查询");
+                }
                 return result;
             } catch (Exception e) {
                 return RoleplayToolResult.failed("联网搜索失败："+service.safe(e.getMessage()));
             }
+        }
+
+        private boolean providerResponded(JSONArray attempts) {
+            if (attempts == null) return false;
+            for (Object object : attempts) {
+                if (object instanceof JSONObject
+                        && ((JSONObject)object).getBooleanValue("status")) return true;
+            }
+            return false;
         }
     }
 
@@ -970,7 +994,7 @@ public class RoleplayToolRegistry {
 
         @Override
         public String description() {
-            return "在当前群追加发送一条短消息；适合在查资料或执行工具前先回应一句，不要用它重复最终回复";
+            return "在执行检索前追加一句简短回应；拿到工具结果后不要再用它说结论，最终结论必须走普通回复";
         }
 
         @Override
@@ -980,7 +1004,7 @@ public class RoleplayToolRegistry {
         public boolean sideEffect() { return true; }
 
         @Override
-        public int maxCallsPerTurn() { return 2; }
+        public int maxCallsPerTurn() { return 1; }
 
         @Override
         public JSONObject schema() {

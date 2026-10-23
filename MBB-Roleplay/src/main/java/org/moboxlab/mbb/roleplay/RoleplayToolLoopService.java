@@ -171,6 +171,7 @@ public class RoleplayToolLoopService {
                 addUsage(usage,response.getJSONObject("usage"));
                 JSONArray calls = response.getJSONArray("toolCalls");
                 if (calls == null || calls.isEmpty()) {
+                    suppressDuplicateFinal(groupID,response,active);
                     response.put("usage",usage);
                     response.put("toolTrace",toolTrace);
                     service.toolTurnService().update(token,messages,params);
@@ -268,6 +269,17 @@ public class RoleplayToolLoopService {
             } else {
                 call.invalid = registry.validateArguments(call.name,call.args);
             }
+            if (call.invalid.isEmpty() && active != null
+                    && "message_send".equals(call.name) && active.substantiveToolSeen) {
+                call.invalid = "工具结果已经返回，不要再用 message_send 追加阶段性结论；请直接输出最终回复";
+            }
+            if (call.invalid.isEmpty() && active != null
+                    && "message_send".equals(call.name)) {
+                String text = service.safe(call.args.getString("text")).trim();
+                if (similarToAny(text,active.sentMessageTexts,0.72)) {
+                    call.invalid = "这条追加消息与本次工具回合刚发送的内容重复";
+                }
+            }
             int used = perToolCalls.containsKey(call.name) ? perToolCalls.get(call.name) : 0;
             if (call.invalid.isEmpty() && (alreadyCalls + prepared.size() >= service.config().toolMaxCalls)) {
                 call.invalid = "工具调用次数超过单轮上限";
@@ -305,6 +317,7 @@ public class RoleplayToolLoopService {
             }
             call.result = result;
             if (active != null) active.lastResults.put(call.index,result);
+            recordToolState(active,call,result);
             try {
                 service.toolMemoryService().record(context,call.name,call.args,result);
             } catch (Exception e) {
@@ -403,6 +416,61 @@ public class RoleplayToolLoopService {
             RoleplayTool tool = registry.get(name);
             if (tool != null) exposed.add(name);
         }
+    }
+
+    private void recordToolState(ActiveTurn active,PreparedCall call,RoleplayToolResult result) {
+        if (active == null || call == null) return;
+        if ("message_send".equals(call.name) && result != null && result.success) {
+            String text = service.safe(result.data.getString("text")).trim();
+            if (!text.isEmpty()) active.sentMessageTexts.add(text);
+            return;
+        }
+        if (!"end_turn".equals(call.name)) {
+            active.substantiveToolSeen = true;
+        }
+    }
+
+    private void suppressDuplicateFinal(long groupID,JSONObject response,ActiveTurn active) {
+        if (response == null || active == null || active.sentMessageTexts.isEmpty()) return;
+        String finalText = replyText(response.getString("content"));
+        if (!similarToAny(finalText,active.sentMessageTexts,0.82)) return;
+        response.put("content","<SKIP>");
+        response.put("duplicateInterimSuppressed",true);
+        service.plugin().getLogger().sendInfo("[工具] 群"+groupID
+                +" 最终回复与工具期间追加消息重复，已抑制重复发送："
+                +service.shortText(finalText,80));
+    }
+
+    private String replyText(String content) {
+        RoleplayReplyDraft draft = RoleplayReplyDraft.parse(service.safe(content));
+        if (draft == null) return "";
+        List<RoleplayReplyDraft.Segment> segments = draft.effectiveSegments();
+        if (segments.isEmpty()) return service.safe(draft.text).trim();
+        StringBuilder builder = new StringBuilder();
+        for (RoleplayReplyDraft.Segment segment : segments) {
+            if (segment == null || segment.text == null || segment.text.trim().isEmpty()) continue;
+            if (builder.length() > 0) builder.append(" ");
+            builder.append(segment.text.trim());
+        }
+        return builder.toString();
+    }
+
+    private boolean similarToAny(String text,List<String> existing,double threshold) {
+        String normalized = SpeechCorpusEntry.normalize(text);
+        if (normalized.length() < 4) return false;
+        for (String item : existing) {
+            String previous = SpeechCorpusEntry.normalize(item);
+            if (previous.length() < 4) continue;
+            if (normalized.contains(previous) || previous.contains(normalized)) return true;
+            Set<String> left = SpeechCorpusEntry.bigrams(normalized);
+            Set<String> right = SpeechCorpusEntry.bigrams(previous);
+            if (left.isEmpty() || right.isEmpty()) continue;
+            int overlap = 0;
+            for (String bigram : left) if (right.contains(bigram)) overlap++;
+            double score = (double)overlap / Math.max(left.size(),right.size());
+            if (score >= threshold) return true;
+        }
+        return false;
     }
 
     private String buildToolContent(RoleplayToolResult result,int remaining) {
@@ -764,7 +832,10 @@ public class RoleplayToolLoopService {
         private final Map<Integer,RoleplayToolResult> lastResults = new ConcurrentHashMap<>();
         private final Set<Future<RoleplayToolResult>> futures =
                 Collections.newSetFromMap(new ConcurrentHashMap<Future<RoleplayToolResult>,Boolean>());
+        private final List<String> sentMessageTexts =
+                Collections.synchronizedList(new ArrayList<String>());
         private volatile Future<JSONObject> aiFuture;
+        private volatile boolean substantiveToolSeen;
         private final java.util.concurrent.atomic.AtomicBoolean cancelled =
                 new java.util.concurrent.atomic.AtomicBoolean();
 

@@ -72,24 +72,68 @@ public class RoleplayWebService {
     }
 
     public JSONArray search(String query,boolean allowInternal) throws Exception {
+        return searchPayload(query,allowInternal).getJSONArray("results");
+    }
+
+    public JSONObject searchPayload(String query,boolean allowInternal) throws Exception {
         String text = service.safe(query).trim();
         if (text.isEmpty()) throw new IllegalArgumentException("搜索词不能为空");
-        String template = service.safe(service.config().webSearchUrl);
-        if (!template.contains("{query}")) {
-            throw new IllegalArgumentException("webSearchUrl 缺少 {query} 占位符");
-        }
-        String url = template.replace("{query}",URLEncoder.encode(text,"UTF-8"));
-        String key = "search|"+(allowInternal ? "1" : "0")+"|"+url;
+        String primary = service.safe(service.config().webSearchUrl);
+        String fallback = service.safe(service.config().webSearchFallbackUrl);
+        String key = "search|"+(allowInternal ? "1" : "0")+"|"+text+"|"+primary+"|"+fallback;
         JSONObject cached = cached(key);
-        if (cached != null) return cached.getJSONArray("results");
-        Document document = fetchDocument(url,allowInternal);
-        JSONArray results = parseSearchResults(document.raw);
+        if (cached != null) return cached;
+        JSONArray attempts = new JSONArray();
+        JSONArray results = new JSONArray();
+        String usedUrl = "";
+        String usedProvider = "";
+        String encoded = URLEncoder.encode(text,"UTF-8");
+        String[] templates = new String[]{primary,fallback};
+        for (int i = 0; i < templates.length; i++) {
+            String template = service.safe(templates[i]).trim();
+            if (template.isEmpty()) continue;
+            JSONObject attempt = new JSONObject(true);
+            attempt.put("provider",i == 0 ? "primary" : "fallback");
+            if (!template.contains("{query}")) {
+                attempt.put("status",false);
+                attempt.put("error","模板缺少 {query} 占位符");
+                attempts.add(attempt);
+                continue;
+            }
+            String url = template.replace("{query}",encoded);
+            attempt.put("url",url);
+            try {
+                Document document = fetchDocument(url,allowInternal);
+                JSONArray parsed = parseSearchResults(document.raw);
+                attempt.put("status",true);
+                attempt.put("httpBytes",document.bytes);
+                attempt.put("htmlChars",document.raw.length());
+                attempt.put("resultCount",parsed.size());
+                attempts.add(attempt);
+                if (!parsed.isEmpty()) {
+                    results = parsed;
+                    usedUrl = document.url;
+                    usedProvider = i == 0 ? "primary" : "fallback";
+                    break;
+                }
+            } catch (Exception e) {
+                attempt.put("status",false);
+                attempt.put("error",service.safe(e.getMessage()));
+                attempts.add(attempt);
+            }
+        }
         JSONObject wrapper = new JSONObject(true);
         wrapper.put("results",results);
-        wrapper.put("searchUrl",document.url);
+        wrapper.put("searchUrl",usedUrl);
+        wrapper.put("provider",usedProvider);
+        wrapper.put("attempts",attempts);
+        wrapper.put("query",text);
+        wrapper.put("queryHint","优先使用作品或站点的官方英文名，并保留 wiki 关键词");
+        wrapper.put("emptyReason",results.isEmpty()
+                ? "搜索源返回的页面没有可解析结果，可能无结果、被风控页替代或页面结构变化" : "");
         wrapper.put("cached",false);
         putCache(key,wrapper);
-        return results;
+        return wrapper;
     }
 
     public boolean isAllowed(String rawUrl,boolean allowInternal) {
