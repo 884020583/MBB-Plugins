@@ -1,6 +1,7 @@
 package org.moboxlab.mbb.comfyui;
 
 import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import org.moboxlab.moboxbot.API.OneBot.MessageUtil;
 import org.moboxlab.moboxbot.API.OneBot.OneBotClient;
@@ -372,7 +373,7 @@ public class ComfyUIService implements PluginService {
             }
             File metadataFile = new File(imageFile.getParentFile(),name+".json");
             Files.write(Paths.get(metadataFile.getAbsolutePath()),
-                    metadata.toJSONString().getBytes(StandardCharsets.UTF_8));
+                    JSON.toJSONString(metadata,true).getBytes(StandardCharsets.UTF_8));
         } catch (Exception e) {
             plugin.getLogger().sendWarn("[ComfyUI] 图片元数据备份失败："+describe(e));
         }
