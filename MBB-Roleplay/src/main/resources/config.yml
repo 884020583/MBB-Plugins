@@ -1,7 +1,7 @@
 #MBB-Roleplay 插件配置
 
 #配置结构版本，插件升级时自动维护
-configVersion: 41
+configVersion: 42
 #是否启用角色扮演
 enable: true
 #AI 使用的模型配置名，对应 MBB-AI 的 profiles.json
@@ -381,6 +381,8 @@ webTimeoutSecond: 15
 webMaxBytes: 262144
 #网页净化后最多注入字符数
 webMaxChars: 12000
+#网页图片发送单张最多读取的字节数
+webImageMaxBytes: 8388608
 #网页和搜索结果缓存秒数，0 表示不缓存
 webCacheSecond: 300
 #是否启用本地提示词硬字符预算

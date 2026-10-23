@@ -15,7 +15,7 @@ import java.util.List;
  * Roleplay 配置迁移与缺失项补全
  */
 public class RoleplayConfigMigrator {
-    private static final String CURRENT_VERSION = "41";
+    private static final String CURRENT_VERSION = "42";
 
     private static class ConfigEntry {
         private final String key;
@@ -241,6 +241,7 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("webTimeoutSecond","15","网页连接超时秒数"),
             new ConfigEntry("webMaxBytes","262144","网页最多读取字节数"),
             new ConfigEntry("webMaxChars","12000","网页净化后最多注入字符数"),
+            new ConfigEntry("webImageMaxBytes","8388608","网页图片发送单张最多读取的字节数"),
             new ConfigEntry("webCacheSecond","300","网页和搜索结果缓存秒数"),
             new ConfigEntry("pacingEnable","true","是否在发送前加入拟人打字延迟"),
             new ConfigEntry("pacingBaseMs","350","拟人延迟基础毫秒"),
@@ -441,7 +442,7 @@ public class RoleplayConfigMigrator {
                 plugin.getLogger().sendWarn("自动补全 Roleplay 配置失败，请检查 config.yml 权限！");
             }
         }
-        if (version < 41) {
+        if (version < 42) {
             config.set("configVersion",CURRENT_VERSION);
             if (!versionMissing) changed++;
         }
@@ -619,7 +620,7 @@ public class RoleplayConfigMigrator {
             config.set("replySegmentMaxChars","30");
             changed++;
         }
-        if (version < 41 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
+        if (version < 42 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
                 || legacyRouterMaxTokens || legacyRouterMaxTokens1200
                 || legacyPromptTotalChars || legacyMemoryRelevanceMaxChars
                 || legacyGlobalMemoryRelevanceMaxChars || legacyRouterReasoningEffort

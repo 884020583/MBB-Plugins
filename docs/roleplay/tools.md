@@ -40,6 +40,7 @@ tool_search
 | `kb_search` | 检索已启用的知识库，返回条目、小节与正文 |
 | `web_fetch` | 读取白名单网站中的公开网页并净化正文 |
 | `web_search` | 联网搜索公开信息，返回标题和链接 |
+| `web_image_send` | 从白名单网页或 Pixiv 作品页读取一张公开图片并发送到当前群 |
 | `profile_get` | 查询群员个人印象 |
 | `workspace_list` / `workspace_read` / `workspace_search` | 查询角色私有工作区 |
 | `workspace_write` | 创建、覆盖或追加 UTF-8 文本文件 |
@@ -93,6 +94,10 @@ toolMemoryMaxRows: 500
 `web_search` 使用 `webSearchUrl` 模板联网搜索，主搜索源无结果或连接失败时自动尝试
 `webSearchFallbackUrl`。结果会附带每个搜索源的 HTTP、页面大小、命中数和空结果原因，
 搜索结果本身标记为不可信外部资料。
+
+`web_image_send` 支持图片直链和含 `og:image` / `twitter:image` 的网页。Pixiv 作品页会尝试读取
+预览图并携带 Pixiv Referer；`i.pximg.net` 作为 Pixiv 图片 CDN 单独放行。只接受 JPEG、PNG、GIF、WebP，
+拒绝 SVG，单张图片受 `webImageMaxBytes` 限制。该工具是副作用工具，每轮最多发送一张图。
 网页与搜索结果有 `webCacheSecond` TTL 缓存。
 
 ```yaml

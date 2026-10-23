@@ -225,6 +225,7 @@ webOwnerAuthWindowSecond: 300
 webTimeoutSecond: 15
 webMaxBytes: 262144
 webMaxChars: 12000
+webImageMaxBytes: 8388608
 webCacheSecond: 300
 contextHardLimitEnable: false
 promptTotalChars: 120000

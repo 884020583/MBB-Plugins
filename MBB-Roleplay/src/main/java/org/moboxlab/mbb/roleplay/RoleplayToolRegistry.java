@@ -2,6 +2,7 @@ package org.moboxlab.mbb.roleplay;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import org.moboxlab.moboxbot.API.PluginService;
 
 import java.text.SimpleDateFormat;
 import java.util.Date;
@@ -9,6 +10,7 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Base64;
 
 /**
  * 角色原生工具注册表。
@@ -32,6 +34,7 @@ public class RoleplayToolRegistry {
         register(new KnowledgeSearchTool());
         register(new WebFetchTool());
         register(new WebSearchTool());
+        register(new WebImageSendTool());
         register(new ProfileGetTool());
         register(new WorkspaceListTool());
         register(new WorkspaceReadTool());
@@ -300,8 +303,10 @@ public class RoleplayToolRegistry {
     private boolean enabled(RoleplayTool tool,RoleplayConfig config) {
         if (tool == null || config == null || !config.toolEnable) return false;
         if (tool.name().startsWith("workspace_") && !config.workspaceEnable) return false;
-        if (("web_fetch".equals(tool.name()) || "web_search".equals(tool.name()))
+        if (("web_fetch".equals(tool.name()) || "web_search".equals(tool.name())
+                || "web_image_send".equals(tool.name()))
                 && !config.webEnable) return false;
+        if ("web_image_send".equals(tool.name()) && !hasService("MBB-QQ")) return false;
         if ("kb_search".equals(tool.name()) && !config.knowledgeEnable) return false;
         if ("reminder".equals(tool.name()) && !config.reminderEnable) return false;
         if ("memory".equals(tool.name()) && !config.activeMemory) return false;
@@ -676,6 +681,68 @@ public class RoleplayToolRegistry {
                         && ((JSONObject)object).getBooleanValue("status")) return true;
             }
             return false;
+        }
+    }
+
+    private class WebImageSendTool extends BaseTool {
+        @Override
+        public String name() { return "web_image_send"; }
+
+        @Override
+        public String category() { return "web"; }
+
+        @Override
+        public String description() {
+            return "从白名单网页或 Pixiv 作品页获取一张公开图片并发送到当前群；支持直接图片 URL 和作品页预览图";
+        }
+
+        @Override
+        public boolean sideEffect() { return true; }
+
+        @Override
+        public int maxCallsPerTurn() { return 1; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("url",property("string","图片直链，或包含 og:image 的公开网页/Pixiv 作品页"));
+            return functionSchema(name(),description(),properties,new String[]{"url"});
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            if (context == null || context.groupID <= 0) {
+                return RoleplayToolResult.failed("当前会话不能主动发送群图片");
+            }
+            String url = service.safe(args.getString("url")).trim();
+            if (url.isEmpty()) return RoleplayToolResult.failed("url 不能为空");
+            PluginService qq = service.plugin().getServer().getPluginManager().getService("MBB-QQ");
+            if (qq == null) return RoleplayToolResult.failed("MBB-QQ 未启用");
+            try {
+                boolean internal = web.isInternal(url);
+                boolean ownerAllowed = !internal || context.ownerAuthorizedInternalNetwork
+                        || service.ownerAuthorizedInternalWeb(
+                        context.groupID,context.userID,url);
+                RoleplayWebService.ImagePayload image = web.fetchImage(url,ownerAllowed);
+                JSONObject params = new JSONObject(true);
+                params.put("groupID",context.groupID);
+                params.put("operatorID",context.userID);
+                params.put("file","base64://"+Base64.getEncoder().encodeToString(image.bytes));
+                JSONObject sent = qq.call("send_image",params);
+                if (sent == null || !sent.getBooleanValue("status")) {
+                    return RoleplayToolResult.failed(sent == null
+                            ? "图片发送没有返回结果" : sent.getString("message"));
+                }
+                RoleplayToolResult result = RoleplayToolResult.untrusted(
+                        "已从网络获取并发送图片");
+                result.data.put("sourceUrl",image.url);
+                result.data.put("contentType",image.contentType);
+                result.data.put("format",image.format);
+                result.data.put("bytes",image.bytes.length);
+                return result;
+            } catch (Exception e) {
+                return RoleplayToolResult.failed("网络图片发送失败："+service.safe(e.getMessage()));
+            }
         }
     }
 

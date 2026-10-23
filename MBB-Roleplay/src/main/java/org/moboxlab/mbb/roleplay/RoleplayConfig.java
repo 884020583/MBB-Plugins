@@ -224,6 +224,7 @@ public class RoleplayConfig {
     public int webTimeoutSecond = 15;
     public int webMaxBytes = 262144;
     public int webMaxChars = 12000;
+    public int webImageMaxBytes = 8 * 1024 * 1024;
     public int webCacheSecond = 300;
     public boolean contextHardLimitEnable = false;
     public boolean pacingEnable = true;
@@ -642,6 +643,7 @@ public class RoleplayConfig {
         config.webTimeoutSecond = plugin.getConfig().getInt("webTimeoutSecond",15);
         config.webMaxBytes = plugin.getConfig().getInt("webMaxBytes",262144);
         config.webMaxChars = plugin.getConfig().getInt("webMaxChars",12000);
+        config.webImageMaxBytes = plugin.getConfig().getInt("webImageMaxBytes",8 * 1024 * 1024);
         config.webCacheSecond = plugin.getConfig().getInt("webCacheSecond",300);
         config.contextHardLimitEnable = plugin.getConfig().getBoolean("contextHardLimitEnable",false);
         config.pacingEnable = plugin.getConfig().getBoolean("pacingEnable",true);
@@ -1067,6 +1069,8 @@ public class RoleplayConfig {
         if (config.webMaxBytes > 4 * 1024 * 1024) config.webMaxBytes = 4 * 1024 * 1024;
         if (config.webMaxChars < 1000) config.webMaxChars = 1000;
         if (config.webMaxChars > 100000) config.webMaxChars = 100000;
+        if (config.webImageMaxBytes < 1024 * 1024) config.webImageMaxBytes = 1024 * 1024;
+        if (config.webImageMaxBytes > 20 * 1024 * 1024) config.webImageMaxBytes = 20 * 1024 * 1024;
         if (config.webCacheSecond < 0) config.webCacheSecond = 0;
         if (config.webCacheSecond > 86400) config.webCacheSecond = 86400;
         if (config.pacingBaseMs < 0) config.pacingBaseMs = 0;

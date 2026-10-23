@@ -32,6 +32,11 @@ public class RoleplayWebService {
             "(?is)<a[^>]+href=\"([^\"]+)\"[^>]+class=\"[^\"]*result__a[^\"]*\"[^>]*>(.*?)</a>");
     private static final Pattern BING_RESULT = Pattern.compile(
             "(?is)<h2[^>]*>\\s*<a[^>]+href=\"([^\"]+)\"[^>]*>(.*?)</a>");
+    private static final Pattern IMAGE_META = Pattern.compile(
+            "(?is)<meta[^>]+(?:property|name)\\s*=\\s*[\"'](?:og:image|twitter:image:src|twitter:image)[\"'][^>]+content\\s*=\\s*[\"']([^\"']+)");
+    private static final Pattern IMAGE_META_CONTENT_FIRST = Pattern.compile(
+            "(?is)<meta[^>]+content\\s*=\\s*[\"']([^\"']+)[\"'][^>]+(?:property|name)\\s*=\\s*[\"'](?:og:image|twitter:image:src|twitter:image)[\"']");
+    private static final Pattern PIXIV_ARTWORK = Pattern.compile("(?i)/(?:en/)?artworks/(\\d+)");
     private static final Pattern TITLE_TAG = Pattern.compile("(?is)<[^>]+>");
     private static final Pattern UDDG_TARGET = Pattern.compile("[?&]uddg=([^&]+)");
 
@@ -69,6 +74,93 @@ public class RoleplayWebService {
         result.put("cached",false);
         putCache(key,result);
         return result;
+    }
+
+    /**
+     * 获取公网图片，支持直接图片 URL，也支持从网页的 og:image/twitter:image
+     * 读取第一张图片。只接受 JPEG、PNG、GIF、WebP，不把 SVG 交给 OneBot。
+     */
+    public ImagePayload fetchImage(String rawUrl,boolean allowInternal) throws Exception {
+        if (!service.config().webEnable) throw new IllegalArgumentException("网页浏览未启用");
+        URL current = new URL(rawUrl);
+        int redirects = 0;
+        int pageTransitions = 0;
+        while (true) {
+            validateImage(current,allowInternal);
+            if (pageTransitions == 0) {
+                String pixivPreview = pixivPreview(current,allowInternal);
+                if (!pixivPreview.isEmpty()) {
+                    current = new URL(current,pixivPreview);
+                    pageTransitions++;
+                    continue;
+                }
+            }
+            HttpURLConnection connection = (HttpURLConnection)current.openConnection();
+            connection.setInstanceFollowRedirects(false);
+            connection.setRequestMethod("GET");
+            connection.setConnectTimeout(Math.max(3,service.config().webTimeoutSecond) * 1000);
+            connection.setReadTimeout(Math.max(3,service.config().webTimeoutSecond) * 1000);
+            connection.setRequestProperty("User-Agent","MoBoxBot/0.1 (+https://github.com/MossCG/MoBoxBot)");
+            connection.setRequestProperty("Accept",
+                    "image/jpeg,image/png,image/gif,image/webp,text/html;q=0.9,*/*;q=0.1");
+            connection.setRequestProperty("Accept-Encoding","identity");
+            if (imageReferer(current).isEmpty() && current.getHost() != null
+                    && current.getHost().toLowerCase(Locale.ROOT).contains("pixiv")) {
+                connection.setRequestProperty("Referer","https://www.pixiv.net/");
+            }
+            String referer = imageReferer(current);
+            if (!referer.isEmpty()) connection.setRequestProperty("Referer",referer);
+            int code = connection.getResponseCode();
+            if (code >= 300 && code < 400) {
+                String location = connection.getHeaderField("Location");
+                connection.disconnect();
+                if (location == null || location.trim().isEmpty() || redirects++ >= 3) {
+                    throw new IllegalArgumentException("图片地址重定向无效或过多");
+                }
+                current = new URL(current,location.trim());
+                continue;
+            }
+            if (code < 200 || code >= 300) {
+                connection.disconnect();
+                throw new IllegalArgumentException("图片地址返回 HTTP "+code);
+            }
+            String contentType = service.safe(connection.getContentType()).toLowerCase(Locale.ROOT);
+            long contentLength = connection.getContentLengthLong();
+            if (contentType.contains("image/") || contentType.contains("octet-stream")) {
+                if (contentLength > service.config().webImageMaxBytes) {
+                    connection.disconnect();
+                    throw new IllegalArgumentException("图片超过大小限制");
+                }
+                byte[] bytes = readLimited(connection.getInputStream(),
+                        service.config().webImageMaxBytes);
+                connection.disconnect();
+                String format = imageFormat(bytes,contentType);
+                if (format.isEmpty()) throw new IllegalArgumentException("不是支持的图片格式");
+                return new ImagePayload(current.toString(),contentType,format,bytes);
+            }
+            if (contentType.contains("html") || contentType.contains("text")
+                    || contentType.isEmpty()) {
+                if (contentLength > service.config().webMaxBytes) {
+                    connection.disconnect();
+                    throw new IllegalArgumentException("网页超过大小限制");
+                }
+                byte[] htmlBytes = readLimited(connection.getInputStream(),
+                        service.config().webMaxBytes);
+                connection.disconnect();
+                String html = new String(htmlBytes,charset(contentType));
+                String imageUrl = socialImage(html);
+                if (imageUrl.isEmpty()) {
+                    throw new IllegalArgumentException("网页没有可用的预览图片");
+                }
+                if (++pageTransitions > 2) {
+                    throw new IllegalArgumentException("图片跳转层级过多");
+                }
+                current = new URL(current,imageUrl);
+                continue;
+            }
+            connection.disconnect();
+            throw new IllegalArgumentException("不支持的内容类型："+contentType);
+        }
     }
 
     public JSONArray search(String query,boolean allowInternal) throws Exception {
@@ -180,6 +272,7 @@ public class RoleplayWebService {
             connection.setRequestProperty("User-Agent","MoBoxBot/0.1 (+https://github.com/MossCG/MoBoxBot)");
             connection.setRequestProperty("Accept",
                     "text/html,text/plain,application/json,application/xml;q=0.9,*/*;q=0.1");
+            connection.setRequestProperty("Accept-Encoding","identity");
             int code = connection.getResponseCode();
             if (code >= 300 && code < 400) {
                 String location = connection.getHeaderField("Location");
@@ -231,6 +324,14 @@ public class RoleplayWebService {
             if (host.equals(domain) || host.endsWith("."+domain)) return;
         }
         throw new IllegalArgumentException("域名不在网页白名单："+host);
+    }
+
+    private void validateImage(URL url,boolean allowInternal) {
+        String host = url.getHost() == null ? "" : url.getHost().toLowerCase(Locale.ROOT);
+        if ("pximg.net".equals(host) || host.endsWith(".pximg.net")) {
+            return;
+        }
+        validate(url,allowInternal);
     }
 
     private boolean isInternalHost(String host) {
@@ -326,6 +427,57 @@ public class RoleplayWebService {
                 .replace("&quot;","\"").replace("&#39;","'");
     }
 
+    private String socialImage(String html) {
+        String raw = service.safe(html);
+        Matcher matcher = IMAGE_META.matcher(raw);
+        if (matcher.find()) return decodeHtml(matcher.group(1)).trim();
+        matcher = IMAGE_META_CONTENT_FIRST.matcher(raw);
+        if (matcher.find()) return decodeHtml(matcher.group(1)).trim();
+        return "";
+    }
+
+    private String imageReferer(URL url) {
+        String host = url == null || url.getHost() == null
+                ? "" : url.getHost().toLowerCase(Locale.ROOT);
+        if (host.contains("pixiv") || host.endsWith("pximg.net")) {
+            return "https://www.pixiv.net/";
+        }
+        return "";
+    }
+
+    private String pixivPreview(URL page,boolean allowInternal) {
+        if (page == null) return "";
+        String host = service.safe(page.getHost()).toLowerCase(Locale.ROOT);
+        if (!host.equals("pixiv.net") && !host.endsWith(".pixiv.net")) return "";
+        Matcher matcher = PIXIV_ARTWORK.matcher(page.getPath() == null ? "" : page.getPath());
+        if (!matcher.find()) return "";
+        try {
+            URL api = new URL("https://www.pixiv.net/ajax/illust/"+matcher.group(1));
+            Document document = fetchDocument(api.toString(),allowInternal);
+            JSONObject json = JSONObject.parseObject(document.raw);
+            JSONObject body = json == null ? null : json.getJSONObject("body");
+            JSONObject urls = body == null ? null : body.getJSONObject("urls");
+            return urls == null ? "" : service.safe(urls.getString("regular"));
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private String imageFormat(byte[] bytes,String contentType) {
+        if (bytes == null || bytes.length < 4) return "";
+        if ((bytes[0] & 0xff) == 0xff && (bytes[1] & 0xff) == 0xd8
+                && (bytes[2] & 0xff) == 0xff) return "jpeg";
+        if ((bytes[0] & 0xff) == 0x89 && bytes[1] == 0x50 && bytes[2] == 0x4e
+                && bytes[3] == 0x47) return "png";
+        if (bytes[0] == 0x47 && bytes[1] == 0x49 && bytes[2] == 0x46
+                && bytes[3] == 0x38) return "gif";
+        if (bytes.length >= 12 && bytes[0] == 0x52 && bytes[1] == 0x49
+                && bytes[2] == 0x46 && bytes[3] == 0x46
+                && bytes[8] == 0x57 && bytes[9] == 0x45
+                && bytes[10] == 0x42 && bytes[11] == 0x50) return "webp";
+        return "";
+    }
+
     private String normalizeText(String text) {
         String result = service.safe(text).replace("\u0000","")
                 .replaceAll("[ \\t]+"," ")
@@ -410,6 +562,20 @@ public class RoleplayWebService {
         private String contentType = "";
         private int bytes;
         private String raw = "";
+    }
+
+    public static class ImagePayload {
+        public final String url;
+        public final String contentType;
+        public final String format;
+        public final byte[] bytes;
+
+        private ImagePayload(String url,String contentType,String format,byte[] bytes) {
+            this.url = url;
+            this.contentType = contentType;
+            this.format = format;
+            this.bytes = bytes;
+        }
     }
 
     private static class CacheEntry {
