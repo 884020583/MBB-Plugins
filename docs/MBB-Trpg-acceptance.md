@@ -12,9 +12,9 @@
 | 测试 | `MBB-Trpg\build.ps1 -Test` → **OK (497 tests)，45 个测试类** |
 | 全仓构建 | `build-all.ps1 -Bot <MoBoxBot.jar>` → **exit 0，24 个 JAR 汇总到根 `out/`** |
 | 插件产物 | `out/MBB-Trpg.jar`（389.5 KB）根目录含 `plugin.json`；主类继承 `API.Plugin` |
-| 自动化覆盖 | 87 行结果：61 通过（含 E1 文档裁决）、14 部分、3 间接、7 手测（A1/A3/A4/K3/K5 等）、1 缺口（B4）、1 N/A（J12） |
+| 自动化覆盖 | 87 行结果：58 通过（含 E1 的文档裁决）、17 部分、3 间接、7 手测（A1/A3/A4/J11/J13/K3/K5）、1 缺口（B4）、1 N/A（J12） |
 | 规格冲突裁决 | E1 改为「招募期不发恢复提示，`recovered=true`」；J13 词表计数改为 29；两处已同步进 §10/§12 与本记录 |
-| 已知缺口 | B4 命中顺序、C1 状态机矩阵、B2 权限矩阵等留作后续切片（见 §4） |
+| 已知缺口 | B4 命中顺序、C1 状态机矩阵、B2 权限矩阵等留作后续切片；I2/I5 的插件装配层断言与 J10 的过期清理直证也记入 §4 |
 
 ## 2. 逐条执行记录
 
@@ -123,10 +123,10 @@
 | 编号 | 结果 | 证据 / 说明 |
 | --- | --- | --- |
 | I1 | 通过 | `TrpgAiHostServiceTest#toggleOnIsDisabledWhenGlobalSwitchIsOff`、`TrpgKpCommandTest#aiSwitchRepliesV1Branches` |
-| I2 | 通过 | `FullSessionAcceptanceTest#fullSessionRunsWithoutAi`（本轮新增）：B–H 指令跑完整局，`ai_trace` 0 行、无 RECOVERED 事件、收尾结算与幂等 |
+| I2 | 部分 | `FullSessionAcceptanceTest#fullSessionRunsWithoutAi`（本轮新增）：B–H 指令跑完整局、`ai_trace` 0 行、无 RECOVERED 事件、收尾结算与幂等；「AI 提示数 0」「与纯工具模式逐条一致」属插件装配层，未在本测试断言 |
 | I3 | 间接 | `TrpgAiHostServiceTest#toggleOnIsPlannedWhenGlobalSwitchIsOn`；v1 无局级授权概念，零调用/零审计无直接断言 |
 | I4 | 通过 | `TrpgKpCommandTest#aiOnWithGlobalSwitchReportsPlannedAndStatusStaysOff` |
-| I5 | 通过 | `SessionServiceTest#aiOnWithGlobalSwitchReportsPlannedWithoutWritingState`；`FullSessionAcceptanceTest` 以「无 AI 审计/事件」作等价证据 |
+| I5 | 部分 | `SessionServiceTest#aiOnWithGlobalSwitchReportsPlannedWithoutWritingState`；「不注册 AI 定时器」未做装配层显式断言（整局零审计/零事件只能作间接证据），记入 §4 |
 | I6 | 通过 | `TrpgAiHostServiceTest#parseWordAcceptsChineseAndEnglishWords`、`#toggleWithoutWordIsUsage`、`#toggleOffIsAlwaysAcknowledged` |
 | I7 | 通过 | `TrpgKpCommandTest#aiOnWithGlobalSwitchReportsPlannedAndStatusStaysOff`、`SessionServiceTest#aiOnWithGlobalSwitchReportsPlannedWithoutWritingState` |
 
@@ -144,7 +144,7 @@
 | J7 | 通过 | `TrpgListenerTest#blacklistedMessageIsCancelledSilently`、`TrpgKpCommandTest#blacklistedMemberGetsNoReply` |
 | J8 | 通过 | `TrpgCommandServiceTest#statusRepeatsAreSuppressedByCooldown`、`DiceCommandTest#cooldownIsTwoSecondsPerUserAndChannel` |
 | J9 | 部分 | `JdbcStorageFakeTest#queryReturnsPartialRowsInsteadOfThrowing`、`SessionServiceTest#endCasFailureKeepsSessionRunning`；「内存局面不半更新」仅 CAS 一例 |
-| J10 | 通过 | `ThousandCommandsLoadTest#thousandCommandsKeepOneGroupLockAndFlatTables`、`#groupLockCacheStaysBoundedAndEvictsIdleGroups`、`#twoThousandCommandsKeepHeapUsageStable`（本轮新增，单类 3 用例全绿） |
+| J10 | 部分 | `ThousandCommandsLoadTest#thousandCommandsKeepOneGroupLockAndFlatTables`、`#groupLockCacheStaysBoundedAndEvictsIdleGroups`、`#twoThousandCommandsKeepHeapUsageStable`（本轮新增，3 用例全绿）：缓存条数有界并随空闲淘汰（以 `size()==1` 为证，`isLocked` 只反映当前持锁）、四表行数零增长、活跃局唯一、两轮堆增量 ≤32MB；「日志与审计按保留策略清理过期行」无直接证据（只断言活跃局不是清理候选），由 `TrpgRetentionServiceTest` 另覆盖 |
 | J11 | 手测通过 | 对照呈现分册 §4 抽 7 条冻结样例（开团/检定/理智/AI 叙述/结束/战报/恢复），`TrpgMessageTemplatesTest` 内联冻结串逐字相等 |
 | J12 | N/A | 20 秒合并窗口属 v1.1 能力，`TrpgAiHostService` 注释已声明；v1 不纳入验收 |
 | J13 | 手测通过 | 词表实为 29 个标题（§2.3 分册），§10/§12 的「24 词表」已改；`TrpgTitlesTest#allTitlesAreUniqueAndCount29`、`#allTitlesAppearInSpecOrder`、`TrpgMessageFormatterTest#cleansMarkdownAndEmoji` |
@@ -164,7 +164,7 @@
 
 - 新增 `MBB-Trpg/src/test/java/org/moboxlab/mbb/trpg/session/FullSessionAcceptanceTest.java`（I2 整局回归）。
 - 新增 `MBB-Trpg/src/test/java/org/moboxlab/mbb/trpg/session/ThousandCommandsLoadTest.java`（J10 千次长跑）。
-- 规格裁决：§12 E1 改为招募期不发提示、`recovered=true`；§10/§12 J13 词表计数改为 29，并补「86 条 / 87 行 / J12 N/A」计数口径。
+- 规格裁决：§12 E1 改为招募期不发提示、`recovered=true`，并同步 §5.2 T8、§5.7 恢复段；§10/§12 J13 词表计数改为 29，并补「86 条 / 87 行 / J12 N/A」计数口径。
 - 本记录纳入版本控制，作为 S11 交付证据；测试总数 493 → 497。
 
 ## 4. 后续切片建议（不阻断 v1）
@@ -173,4 +173,4 @@
 
 1. P0：B4 错误命中顺序、C1 状态机非法路径矩阵、B2 五角色 × 指令权限矩阵（表驱动）。
 2. P1：E3/E4/E5 恢复逐项还原与告警、H4/H5/H6 导入与删除边界、J4/J5b/J9/J14 异常路径。
-3. P2：A2 产物依赖检查、B5 三次去重与窗口过期、I5 无 AI 定时器显式断言、D2/D5/I3 补直接证据。
+3. P2：A2 产物依赖检查、B5 三次去重与窗口过期、I2/I5 插件装配层显式断言（AI 提示数 0、零定时器注册）、J10 过期日志/审计清理直证、D2/D5/I3 补直接证据。
