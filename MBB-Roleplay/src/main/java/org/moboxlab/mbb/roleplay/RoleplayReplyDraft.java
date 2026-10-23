@@ -47,8 +47,9 @@ public class RoleplayReplyDraft {
 
         JSONObject json = tryParse(raw);
         boolean repaired = false;
+        String repairedRaw = raw;
         if (json == null) {
-            String repairedRaw = repairJsonLike(raw);
+            repairedRaw = repairJsonLike(raw);
             if (!repairedRaw.equals(raw)) {
                 json = tryParse(repairedRaw);
                 repaired = json != null;
@@ -80,13 +81,16 @@ public class RoleplayReplyDraft {
             return draft;
         }
 
-        // 严格解析失败：模型可能漏了转义或夹了说明，做一次宽松提取，避免把 JSON 原文发出去
-        String lenient = lenientText(repairJsonLike(raw));
+        // 仍然解析不出来：手工取出 text，并尽量恢复 actions。
+        // 之前这里只取正文、丢掉 actions，会导致路由已经选中的技能（比如 draw）被静默丢弃，
+        // 用户只看到半句被截断的回复。
+        String lenient = lenientText(repairedRaw);
         if (lenient != null) {
             draft.repaired = true;
             draft.text = lenient.trim();
-            draft.quote = raw.contains("\"quote\":true") || raw.contains("\"quote\": true");
-            if (raw.contains("poke_back")) draft.addCall(new RoleplaySkillCall("poke_back"));
+            draft.quote = repairedRaw.contains("\"quote\":true") || repairedRaw.contains("\"quote\": true");
+            lenientActions(repairedRaw,draft);
+            if (repairedRaw.contains("poke_back")) draft.addCall(new RoleplaySkillCall("poke_back"));
             return draft;
         }
 
@@ -215,15 +219,17 @@ public class RoleplayReplyDraft {
         value = value.replace(":text\"","\"text\"");
         value = value.replace(":text","\"text\"");
         value = normalizeFullwidthJson(value);
+        value = escapeTextValueQuotes(value);
         return value;
     }
 
     /**
      * 中文输入法可能把 JSON 的引号、冒号和分隔逗号打成全角。
-     * 引号统一转换，字符串内部的冒号和逗号保持原样。
+     * 只有真正当分隔符用的全角引号才转成半角；出现在正文里的全角引号转义保留，
+     * 否则会把正文从中间截断（例如“莉音会长也来？“妈妈你这旗袍…””）。
      */
     private static String normalizeFullwidthJson(String raw) {
-        String value = raw.replace('“','"').replace('”','"');
+        String value = raw == null ? "" : raw;
         StringBuilder builder = new StringBuilder(value.length());
         boolean inString = false;
         boolean escaped = false;
@@ -240,8 +246,28 @@ public class RoleplayReplyDraft {
                 continue;
             }
             if (current == '"') {
+                // 字符串里出现、后面又不接结构符号的引号当成正文内容转义，
+                // 否则会把正文从中间截断，还会让后面的全角逗号被误判成 JSON 分隔符
+                if (inString && !isStructuralFollower(value,i + 1,true)) {
+                    builder.append("\\\"");
+                    continue;
+                }
                 inString = !inString;
                 builder.append(current);
+                continue;
+            }
+            if (current == '“' || current == '”') {
+                if (!inString) {
+                    builder.append('"');
+                    inString = true;
+                    continue;
+                }
+                if (isStructuralFollower(value,i + 1,true)) {
+                    builder.append('"');
+                    inString = false;
+                } else {
+                    builder.append("\\\"");
+                }
                 continue;
             }
             if (!inString && current == '：') {
@@ -253,6 +279,87 @@ public class RoleplayReplyDraft {
             }
         }
         return builder.toString();
+    }
+
+    /**
+     * 修复正文里没转义的引号：定位 text 字段的值，把内部引号转义后再交给 JSON 解析。
+     * 只有后面跟着结构符号的引号才算真正的结束引号，其余都当成正文内容。
+     */
+    private static String escapeTextValueQuotes(String raw) {
+        String value = raw == null ? "" : raw;
+        int key = value.indexOf("\"text\"");
+        int keyLength = 6;
+        if (key < 0) {
+            key = value.indexOf("text");
+            keyLength = 4;
+        }
+        if (key < 0) return value;
+        int colon = value.indexOf(':',key + keyLength);
+        if (colon < 0) return value;
+        int start = colon + 1;
+        while (start < value.length() && Character.isWhitespace(value.charAt(start))) start++;
+        if (start >= value.length() || value.charAt(start) != '"') return value;
+
+        int end = -1;
+        boolean escaped = false;
+        for (int i = start + 1; i < value.length(); i++) {
+            char current = value.charAt(i);
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (current == '\\') {
+                escaped = true;
+                continue;
+            }
+            if (current == '"' && isStructuralFollower(value,i + 1,false)) {
+                end = i;
+                break;
+            }
+        }
+        if (end < 0) return value;
+
+        StringBuilder content = new StringBuilder(end - start);
+        boolean contentEscaped = false;
+        for (int i = start + 1; i < end; i++) {
+            char current = value.charAt(i);
+            if (contentEscaped) {
+                content.append('\\').append(current);
+                contentEscaped = false;
+                continue;
+            }
+            if (current == '\\') {
+                contentEscaped = true;
+                continue;
+            }
+            if (current == '"') {
+                content.append("\\\"");
+                continue;
+            }
+            content.append(current);
+        }
+        if (contentEscaped) content.append('\\');
+        return value.substring(0,start + 1) + content + value.substring(end);
+    }
+
+    /**
+     * 判断某个位置后面的第一个非空白字符是不是 JSON 结构符号。
+     * allowColon 为 true 时把冒号也算进去，用于识别全角引号包住的对象键。
+     */
+    private static boolean isStructuralFollower(String value,int from,boolean allowColon) {
+        int index = nextNonSpace(value,from);
+        if (index < 0) return true;
+        char next = value.charAt(index);
+        if (next == ',' || next == '，' || next == '}' || next == ']') return true;
+        return allowColon && (next == ':' || next == '：');
+    }
+
+    private static int nextNonSpace(String value,int from) {
+        if (value == null) return -1;
+        for (int i = Math.max(0,from); i < value.length(); i++) {
+            if (!Character.isWhitespace(value.charAt(i))) return i;
+        }
+        return -1;
     }
 
     /**
@@ -297,9 +404,78 @@ public class RoleplayReplyDraft {
                 escaped = true;
                 continue;
             }
-            if (current == '"') break;
+            if (current == '"') {
+                // 只有后面跟着结构符号的引号才是结束引号，正文里的引号原样保留
+                if (isStructuralFollower(raw,i + 1,false)) break;
+                builder.append(current);
+                continue;
+            }
             builder.append(current);
         }
         return builder.toString();
+    }
+
+    /**
+     * 宽松恢复 actions：定位 actions 数组，按大括号配对切出每个动作对象再解析。
+     * 这样即使正文里有没转义的引号，draw 这类动作也不会被静默丢掉。
+     */
+    private static void lenientActions(String raw,RoleplayReplyDraft draft) {
+        if (raw == null || draft == null) return;
+        int key = raw.indexOf("\"actions\"");
+        int keyLength = 9;
+        if (key < 0) {
+            key = raw.indexOf("actions");
+            keyLength = 7;
+        }
+        if (key < 0) return;
+        int start = raw.indexOf('[',key + keyLength);
+        if (start < 0) return;
+        int end = matching(raw,start,'[',']');
+        if (end < 0) end = raw.length();
+        int index = start + 1;
+        while (index < end) {
+            int objectStart = raw.indexOf('{',index);
+            if (objectStart < 0 || objectStart >= end) break;
+            int objectEnd = matching(raw,objectStart,'{','}');
+            if (objectEnd < 0 || objectEnd > end) break;
+            JSONObject json = tryParse(raw.substring(objectStart,objectEnd + 1));
+            if (json != null) {
+                RoleplaySkillCall call = parseCall(json);
+                if (call != null) draft.addCall(call);
+            }
+            index = objectEnd + 1;
+        }
+    }
+
+    /**
+     * 找配对的右括号，字符串内部的括号不计入深度
+     */
+    private static int matching(String value,int start,char open,char close) {
+        if (value == null || start < 0 || start >= value.length()) return -1;
+        int depth = 0;
+        boolean inString = false;
+        boolean escaped = false;
+        for (int i = start; i < value.length(); i++) {
+            char current = value.charAt(i);
+            if (escaped) {
+                escaped = false;
+                continue;
+            }
+            if (current == '\\') {
+                escaped = true;
+                continue;
+            }
+            if (current == '"') {
+                inString = !inString;
+                continue;
+            }
+            if (inString) continue;
+            if (current == open) depth++;
+            else if (current == close) {
+                depth--;
+                if (depth == 0) return i;
+            }
+        }
+        return -1;
     }
 }

@@ -94,7 +94,7 @@ splitMessageSuppressSecond: 20
 #触发补充抑制的最大字数
 splitMessageSuppressMaxChars: 20
 #即时上下文消息条数
-shortContextMessages: 80
+shortContextMessages: 200
 #短期记忆覆盖天数
 shortTermDays: 3
 #每累计多少条消息更新一次记忆
@@ -131,10 +131,10 @@ globalMemoryMaxItems: 300
 globalMemoryInjectItems: 80
 #是否启用角色台词语料检索
 speechCorpusEnable: true
-#台词语料目录，文件名为 speech-corpus-<角色>.jsonl
+#台词语料目录；speech-corpus-<角色>-qq.jsonl 优先，speech-corpus-<角色>.jsonl 仅作保底
 speechCorpusDirectory: "speech-corpus"
 #每次注入多少条参考台词
-speechRetrievalCount: 8
+speechRetrievalCount: 2
 #参考台词注入的最大字符数
 speechRetrievalMaxChars: 1200
 #台词检索最低分数
@@ -207,6 +207,32 @@ messageBatchMaxMessages: 10
 messageBatchMaxAgeSecond: 20
 #合批回合最多回复几段，每段可以回应批内不同的消息
 batchMaxSegments: 4
+#是否允许用 /role learn 采集训练语料
+learnEnable: true
+#采集语料的存放目录，相对插件数据目录
+learnDirectory: "train-corpus"
+#采集时向前截取多少条上下文
+learnContextBefore: 6
+#采集时向后截取多少条上下文
+learnContextAfter: 3
+#MBB-Model 风格层小模型服务地址
+modelServiceUrl: "http://127.0.0.1:8770"
+#访问 MBB-Model 的 token，留空表示不校验
+modelServiceToken: ""
+#调用 MBB-Model 的超时秒数
+modelServiceTimeoutSecond: 120
+#是否允许用 /role train 提交训练
+trainEnable: true
+#群聊语料训练时，每条样本带多少条前文
+trainContextBefore: 4
+#单次训练最多导出多少条样本
+trainMaxSamplesPerRun: 2000
+#超过这个长度的群消息不参与训练
+trainMaxChars: 200
+#是否把机器人自己的消息也算进训练语料
+trainIncludeBotMessages: false
+#提交数据后是否自动开始训练
+trainAutoStart: true
 #是否响应戳一戳；MBB-Poke 启用时本插件自动跳过
 pokeReplyEnable: true
 #被戳时是否允许角色戳回去
@@ -247,6 +273,24 @@ replyFeedbackMaxPenalty: 0.25
 replyFeedbackBonus: 0.10
 #内存中保留最近多少次主动发言反馈
 replyFeedbackHistory: 30
+#是否启用本地风格层改写
+styleEnable: true
+#超过多少字符视为超长回复
+styleMaxChars: 60
+#超长回复是否交给风格层；默认关闭，交给大模型回复复核改写
+styleLongReplyEnable: false
+#风格层使用的模型配置名，留空使用 aiProfile
+styleProfile: ""
+#风格层输出 Token 上限
+styleMaxTokens: 1200
+#风格层思考强度：none / low / medium / high
+styleReasoningEffort: "low"
+#主动发言时是否也触发风格层
+styleProactiveEnable: false
+#风格层连续多少次无效改写后临时熔断
+styleFailureThreshold: 2
+#风格层熔断冷却秒数
+styleFailureCooldownSecond: 600
 #是否在发送前复核角色回复候选
 replyReviewEnable: true
 #复核使用的模型配置名，留空使用 aiProfile
@@ -262,13 +306,25 @@ replyReviewMinScore: 70
 #是否允许角色通过原生工具调用查询信息或维护私有工作区
 toolEnable: true
 #单轮最多进行多少次模型-工具循环
-toolMaxSteps: 4
+toolMaxSteps: 8
 #单轮最多执行多少个工具调用
-toolMaxCalls: 8
+toolMaxCalls: 16
 #单个工具结果注入上下文的最大字符数
-toolResultMaxChars: 8000
+toolResultMaxChars: 16000
 #工具执行期间最多并入多少条新群消息
 toolLiveMessageMax: 10
+#单轮工具循环总时间上限毫秒
+toolLoopMaxMillis: 90000
+#单个工具调用时间上限毫秒
+toolCallMaxMillis: 20000
+#下一轮注入最近多少次工具调用结果
+toolMemoryInjectItems: 8
+#工具调用结果注入字符上限
+toolMemoryInjectMaxChars: 6000
+#工具调用记录保留小时数
+toolMemoryKeepHours: 72
+#工具调用记录最大行数
+toolMemoryMaxRows: 500
 #是否启用角色私有工作区 plugins/MBB-Roleplay/data
 workspaceEnable: true
 #工作区单次读取最大字符数
@@ -279,6 +335,20 @@ workspaceMaxWriteChars: 64000
 workspaceMaxFilesPerList: 200
 #工作区总大小上限，默认 64MB
 workspaceMaxTotalBytes: 67108864
+#是否开放受限网页浏览工具
+webEnable: true
+#网页允许域名，多个用英文逗号分隔
+webWhitelist: "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com"
+#网页连接超时秒数
+webTimeoutSecond: 15
+#网页最多读取字节数
+webMaxBytes: 262144
+#网页净化后最多注入字符数
+webMaxChars: 12000
+#是否启用本地提示词硬字符预算
+contextHardLimitEnable: false
+#启用本地硬预算时，单轮提示词总字符上限
+promptTotalChars: 120000
 #是否在发送前加入拟人打字延迟
 pacingEnable: true
 #基础延迟毫秒
@@ -356,15 +426,15 @@ memoryRelevanceSort: true
 #相关性排序前先加载多少条长期记忆作为候选池
 memoryRelevancePoolSize: 600
 #长期记忆按相关性注入的字符上限
-memoryRelevanceMaxChars: 5000
+memoryRelevanceMaxChars: 12000
 #是否在写入长期记忆时检测并归档冲突旧记忆
 memoryConflictResolveEnable: true
 #冲突判定所需的最小 bigram 重合数
 memoryConflictMinOverlap: 2
 #永久记忆按相关性注入的字符上限
-globalMemoryRelevanceMaxChars: 4000
+globalMemoryRelevanceMaxChars: 10000
 #单次角色回复最大 Token
-replyMaxTokens: 1200
+replyMaxTokens: 4000
 #带图片上下文时单次角色回复最大 Token
 replyImageMaxTokens: 4000
 #单段回复硬上限字符数，提示词默认按 12 字以内生成

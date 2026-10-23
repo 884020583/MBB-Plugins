@@ -20,7 +20,7 @@ public class RoleplayStyleDetector {
             "一方面","另一方面","更重要的是","归根结底","毫无疑问","显而易见","换言之",
             "赋能","闭环","抓手","底层逻辑","链路","颗粒度","复盘","对齐","拉齐",
             "心智","打法","组合拳","增长飞轮","护城河","价值锚点","生态位",
-            "算账","记账","欠账","还账","结账","账本","讨债"
+            "算账","记账","欠账","还账","结账","账本","讨债","盯"
     };
     private static final Pattern[] AI_FLAVOR_PATTERNS = {
             Pattern.compile("不是.{0,24}而是"),
@@ -40,7 +40,7 @@ public class RoleplayStyleDetector {
         String value = text == null ? "" : text.trim();
         if (value.isEmpty()) return "";
         if (proactive) return "主动发言";
-        if (value.length() > config.styleMaxChars) return "超长";
+        if (config.styleLongReplyEnable && value.length() > config.styleMaxChars) return "超长";
         if (value.contains("——")) return "破折号";
         if (value.contains("**") || value.contains("```")) return "Markdown残留";
         for (Pattern pattern : AI_FLAVOR_PATTERNS) {

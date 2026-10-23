@@ -63,7 +63,7 @@ public class RoleplayConfig {
     public boolean addressedOtherMemberSkip = true;
     public int splitMessageSuppressSecond = 20;
     public int splitMessageSuppressMaxChars = 20;
-    public int shortContextMessages = 120;
+    public int shortContextMessages = 200;
     public int shortTermDays = 3;
     public int memoryUpdateMessages = 50;
     public int memoryExtractMessages = 300;
@@ -92,7 +92,7 @@ public class RoleplayConfig {
     public double knowledgeMinScore = 1.0;
     public int knowledgeInjectMaxChars = 2000;
     public int knowledgeSpoilerLevel = 0;
-    public int speechRetrievalCount = 8;
+    public int speechRetrievalCount = 2;
     public int speechRetrievalMaxChars = 1200;
     public double speechRetrievalMinScore = 0.35;
     public int speechSpoilerLevel = 1;
@@ -117,15 +117,28 @@ public class RoleplayConfig {
     public boolean hubTypingBroadcastEnable = true;
     public boolean memoryRelevanceSort = true;
     public int memoryRelevancePoolSize = 600;
-    public int memoryRelevanceMaxChars = 5000;
+    public int memoryRelevanceMaxChars = 12000;
     public boolean memoryConflictResolveEnable = true;
     public int memoryConflictMinOverlap = 2;
-    public int globalMemoryRelevanceMaxChars = 4000;
+    public int globalMemoryRelevanceMaxChars = 10000;
     public boolean stickerAttachEnable = true;
     public int stickerAttachWindowSecond = 5;
     public int stickerAttachMaxWaitSecond = 15;
     public boolean stickerAttachWaitUntilNextMessage = true;
     public boolean messageBatchEnable = true;
+    public boolean learnEnable = true;
+    public String learnDirectory = "train-corpus";
+    public int learnContextBefore = 6;
+    public int learnContextAfter = 3;
+    public String modelServiceUrl = "http://127.0.0.1:8770";
+    public String modelServiceToken = "";
+    public int modelServiceTimeoutSecond = 120;
+    public boolean trainEnable = true;
+    public int trainContextBefore = 4;
+    public int trainMaxSamplesPerRun = 2000;
+    public int trainMaxChars = 200;
+    public boolean trainIncludeBotMessages = false;
+    public boolean trainAutoStart = true;
     public int messageBatchWindowSecond = 2;
     public int messageBatchMaxMessages = 10;
     public int messageBatchMaxAgeSecond = 20;
@@ -138,17 +151,20 @@ public class RoleplayConfig {
     public int pokeStreakWindowSecond = 60;
     public int pokeStreakThreshold = 3;
     public boolean quoteReplyEnable = true;
-    public int promptTotalChars = 26000;
+    public int promptTotalChars = 120000;
     public boolean routerEnable = true;
     public String routerProfile = "";
     public int routerMaxTokens = 2400;
     public String routerReasoningEffort = "none";
     public boolean styleEnable = true;
     public int styleMaxChars = 60;
+    public boolean styleLongReplyEnable = false;
     public String styleProfile = "";
     public int styleMaxTokens = 1200;
     public String styleReasoningEffort = "low";
     public boolean styleProactiveEnable = false;
+    public int styleFailureThreshold = 2;
+    public int styleFailureCooldownSecond = 600;
     public int maxLongMemories = 150;
     public boolean topicFatigueEnable = true;
     public int topicFatigueWindowMinute = 30;
@@ -170,15 +186,27 @@ public class RoleplayConfig {
     public int replyReviewTimeoutSecond = 60;
     public int replyReviewMinScore = 70;
     public boolean toolEnable = true;
-    public int toolMaxSteps = 4;
-    public int toolMaxCalls = 8;
-    public int toolResultMaxChars = 8000;
+    public int toolMaxSteps = 8;
+    public int toolMaxCalls = 16;
+    public int toolResultMaxChars = 16000;
     public int toolLiveMessageMax = 10;
+    public int toolLoopMaxMillis = 90000;
+    public int toolCallMaxMillis = 20000;
+    public int toolMemoryInjectItems = 8;
+    public int toolMemoryInjectMaxChars = 6000;
+    public int toolMemoryKeepHours = 72;
+    public int toolMemoryMaxRows = 500;
     public boolean workspaceEnable = true;
     public int workspaceMaxReadChars = 32000;
     public int workspaceMaxWriteChars = 64000;
     public int workspaceMaxFilesPerList = 200;
     public long workspaceMaxTotalBytes = 64L * 1024L * 1024L;
+    public boolean webEnable = true;
+    public String webWhitelist = "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com";
+    public int webTimeoutSecond = 15;
+    public int webMaxBytes = 262144;
+    public int webMaxChars = 12000;
+    public boolean contextHardLimitEnable = false;
     public boolean pacingEnable = true;
     public int pacingBaseMs = 350;
     public int pacingPerCharMs = 25;
@@ -215,7 +243,7 @@ public class RoleplayConfig {
     public String evalProfile = "";
     public int evalMaxTokens = 1200;
     public int evalTimeoutSecond = 60;
-    public int replyMaxTokens = 1200;
+    public int replyMaxTokens = 4000;
     public int replyImageMaxTokens = 4000;
     public int replySegmentMaxChars = 30;
     public String replySplitPunctuation = "。！？!?；;，、：,:～~…";
@@ -380,7 +408,7 @@ public class RoleplayConfig {
                 plugin.getConfig().getInt("splitMessageSuppressSecond",20);
         config.splitMessageSuppressMaxChars =
                 plugin.getConfig().getInt("splitMessageSuppressMaxChars",20);
-        config.shortContextMessages = plugin.getConfig().getInt("shortContextMessages",120);
+        config.shortContextMessages = plugin.getConfig().getInt("shortContextMessages",200);
         config.shortTermDays = plugin.getConfig().getInt("shortTermDays",3);
         config.memoryUpdateMessages = plugin.getConfig().getInt("memoryUpdateMessages",50);
         config.memoryExtractMessages = plugin.getConfig().getInt("memoryExtractMessages",300);
@@ -417,7 +445,7 @@ public class RoleplayConfig {
         }
         config.knowledgeInjectMaxChars = plugin.getConfig().getInt("knowledgeInjectMaxChars",2000);
         config.knowledgeSpoilerLevel = plugin.getConfig().getInt("knowledgeSpoilerLevel",0);
-        config.speechRetrievalCount = plugin.getConfig().getInt("speechRetrievalCount",8);
+        config.speechRetrievalCount = plugin.getConfig().getInt("speechRetrievalCount",2);
         config.speechRetrievalMaxChars = plugin.getConfig().getInt("speechRetrievalMaxChars",1200);
         try {
             config.speechRetrievalMinScore = Double.parseDouble(
@@ -455,19 +483,32 @@ public class RoleplayConfig {
         config.memoryRelevancePoolSize =
                 plugin.getConfig().getInt("memoryRelevancePoolSize",600);
         config.memoryRelevanceMaxChars =
-                plugin.getConfig().getInt("memoryRelevanceMaxChars",5000);
+                plugin.getConfig().getInt("memoryRelevanceMaxChars",12000);
         config.memoryConflictResolveEnable =
                 plugin.getConfig().getBoolean("memoryConflictResolveEnable",true);
         config.memoryConflictMinOverlap =
                 plugin.getConfig().getInt("memoryConflictMinOverlap",2);
         config.globalMemoryRelevanceMaxChars =
-                plugin.getConfig().getInt("globalMemoryRelevanceMaxChars",4000);
+                plugin.getConfig().getInt("globalMemoryRelevanceMaxChars",10000);
         config.stickerAttachEnable = plugin.getConfig().getBoolean("stickerAttachEnable",true);
         config.stickerAttachWindowSecond = plugin.getConfig().getInt("stickerAttachWindowSecond",5);
         config.stickerAttachMaxWaitSecond = plugin.getConfig().getInt("stickerAttachMaxWaitSecond",15);
         config.stickerAttachWaitUntilNextMessage =
                 plugin.getConfig().getBoolean("stickerAttachWaitUntilNextMessage",true);
         config.messageBatchEnable = plugin.getConfig().getBoolean("messageBatchEnable",true);
+        config.learnEnable = plugin.getConfig().getBoolean("learnEnable",true);
+        config.learnDirectory = plugin.getConfig().getString("learnDirectory","train-corpus");
+        config.learnContextBefore = plugin.getConfig().getInt("learnContextBefore",6);
+        config.learnContextAfter = plugin.getConfig().getInt("learnContextAfter",3);
+        config.modelServiceUrl = plugin.getConfig().getString("modelServiceUrl","http://127.0.0.1:8770");
+        config.modelServiceToken = plugin.getConfig().getString("modelServiceToken","");
+        config.modelServiceTimeoutSecond = plugin.getConfig().getInt("modelServiceTimeoutSecond",120);
+        config.trainEnable = plugin.getConfig().getBoolean("trainEnable",true);
+        config.trainContextBefore = plugin.getConfig().getInt("trainContextBefore",4);
+        config.trainMaxSamplesPerRun = plugin.getConfig().getInt("trainMaxSamplesPerRun",2000);
+        config.trainMaxChars = plugin.getConfig().getInt("trainMaxChars",200);
+        config.trainIncludeBotMessages = plugin.getConfig().getBoolean("trainIncludeBotMessages",false);
+        config.trainAutoStart = plugin.getConfig().getBoolean("trainAutoStart",true);
         config.messageBatchWindowSecond = plugin.getConfig().getInt("messageBatchWindowSecond",2);
         config.messageBatchMaxMessages = plugin.getConfig().getInt("messageBatchMaxMessages",10);
         config.messageBatchMaxAgeSecond = plugin.getConfig().getInt("messageBatchMaxAgeSecond",20);
@@ -477,7 +518,7 @@ public class RoleplayConfig {
         config.pokeReplyMaxChars = plugin.getConfig().getInt("pokeReplyMaxChars",20);
         config.pokeBackCooldownSecond = plugin.getConfig().getInt("pokeBackCooldownSecond",60);
         config.quoteReplyEnable = plugin.getConfig().getBoolean("quoteReplyEnable",true);
-        config.promptTotalChars = plugin.getConfig().getInt("promptTotalChars",26000);
+        config.promptTotalChars = plugin.getConfig().getInt("promptTotalChars",120000);
         config.routerEnable = plugin.getConfig().getBoolean("routerEnable",true);
         config.routerProfile = plugin.getConfig().getString("routerProfile","");
         config.routerMaxTokens = plugin.getConfig().getInt("routerMaxTokens",2400);
@@ -485,11 +526,14 @@ public class RoleplayConfig {
                 plugin.getConfig().getString("routerReasoningEffort","none"));
         config.styleEnable = plugin.getConfig().getBoolean("styleEnable",true);
         config.styleMaxChars = plugin.getConfig().getInt("styleMaxChars",60);
+        config.styleLongReplyEnable = plugin.getConfig().getBoolean("styleLongReplyEnable",false);
         config.styleProfile = plugin.getConfig().getString("styleProfile","");
         config.styleMaxTokens = plugin.getConfig().getInt("styleMaxTokens",1200);
         config.styleReasoningEffort = normalizeEffort(
                 plugin.getConfig().getString("styleReasoningEffort","low"));
         config.styleProactiveEnable = plugin.getConfig().getBoolean("styleProactiveEnable",false);
+        config.styleFailureThreshold = plugin.getConfig().getInt("styleFailureThreshold",2);
+        config.styleFailureCooldownSecond = plugin.getConfig().getInt("styleFailureCooldownSecond",600);
         config.maxLongMemories = plugin.getConfig().getInt("maxLongMemories",150);
         config.topicFatigueEnable = plugin.getConfig().getBoolean("topicFatigueEnable",true);
         config.topicFatigueWindowMinute = plugin.getConfig().getInt("topicFatigueWindowMinute",30);
@@ -512,16 +556,29 @@ public class RoleplayConfig {
         config.replyReviewTimeoutSecond = plugin.getConfig().getInt("replyReviewTimeoutSecond",60);
         config.replyReviewMinScore = plugin.getConfig().getInt("replyReviewMinScore",70);
         config.toolEnable = plugin.getConfig().getBoolean("toolEnable",true);
-        config.toolMaxSteps = plugin.getConfig().getInt("toolMaxSteps",4);
-        config.toolMaxCalls = plugin.getConfig().getInt("toolMaxCalls",8);
-        config.toolResultMaxChars = plugin.getConfig().getInt("toolResultMaxChars",8000);
+        config.toolMaxSteps = plugin.getConfig().getInt("toolMaxSteps",8);
+        config.toolMaxCalls = plugin.getConfig().getInt("toolMaxCalls",16);
+        config.toolResultMaxChars = plugin.getConfig().getInt("toolResultMaxChars",16000);
         config.toolLiveMessageMax = plugin.getConfig().getInt("toolLiveMessageMax",10);
+        config.toolLoopMaxMillis = plugin.getConfig().getInt("toolLoopMaxMillis",90000);
+        config.toolCallMaxMillis = plugin.getConfig().getInt("toolCallMaxMillis",20000);
+        config.toolMemoryInjectItems = plugin.getConfig().getInt("toolMemoryInjectItems",8);
+        config.toolMemoryInjectMaxChars = plugin.getConfig().getInt("toolMemoryInjectMaxChars",6000);
+        config.toolMemoryKeepHours = plugin.getConfig().getInt("toolMemoryKeepHours",72);
+        config.toolMemoryMaxRows = plugin.getConfig().getInt("toolMemoryMaxRows",500);
         config.workspaceEnable = plugin.getConfig().getBoolean("workspaceEnable",true);
         config.workspaceMaxReadChars = plugin.getConfig().getInt("workspaceMaxReadChars",32000);
         config.workspaceMaxWriteChars = plugin.getConfig().getInt("workspaceMaxWriteChars",64000);
         config.workspaceMaxFilesPerList = plugin.getConfig().getInt("workspaceMaxFilesPerList",200);
         config.workspaceMaxTotalBytes = plugin.getConfig().getInt("workspaceMaxTotalBytes",
                 64 * 1024 * 1024);
+        config.webEnable = plugin.getConfig().getBoolean("webEnable",true);
+        config.webWhitelist = plugin.getConfig().getString("webWhitelist",
+                "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com");
+        config.webTimeoutSecond = plugin.getConfig().getInt("webTimeoutSecond",15);
+        config.webMaxBytes = plugin.getConfig().getInt("webMaxBytes",262144);
+        config.webMaxChars = plugin.getConfig().getInt("webMaxChars",12000);
+        config.contextHardLimitEnable = plugin.getConfig().getBoolean("contextHardLimitEnable",false);
         config.pacingEnable = plugin.getConfig().getBoolean("pacingEnable",true);
         config.pacingBaseMs = plugin.getConfig().getInt("pacingBaseMs",350);
         config.pacingPerCharMs = plugin.getConfig().getInt("pacingPerCharMs",25);
@@ -562,7 +619,7 @@ public class RoleplayConfig {
         config.evalProfile = plugin.getConfig().getString("evalProfile","");
         config.evalMaxTokens = plugin.getConfig().getInt("evalMaxTokens",1200);
         config.evalTimeoutSecond = plugin.getConfig().getInt("evalTimeoutSecond",60);
-        config.replyMaxTokens = plugin.getConfig().getInt("replyMaxTokens",1200);
+        config.replyMaxTokens = plugin.getConfig().getInt("replyMaxTokens",4000);
         config.replyImageMaxTokens = plugin.getConfig().getInt("replyImageMaxTokens",4000);
         config.replySegmentMaxChars = plugin.getConfig().getInt("replySegmentMaxChars",30);
         config.replySplitPunctuation = plugin.getConfig().getString(
@@ -688,7 +745,7 @@ public class RoleplayConfig {
         if (config.splitMessageSuppressMaxChars < 4) config.splitMessageSuppressMaxChars = 4;
         if (config.splitMessageSuppressMaxChars > 60) config.splitMessageSuppressMaxChars = 60;
         if (config.memoryRelevanceMaxChars < 200) config.memoryRelevanceMaxChars = 200;
-        if (config.memoryRelevanceMaxChars > 8000) config.memoryRelevanceMaxChars = 8000;
+        if (config.memoryRelevanceMaxChars > 30000) config.memoryRelevanceMaxChars = 30000;
         if (config.memoryConflictMinOverlap < 1) config.memoryConflictMinOverlap = 1;
         if (config.memoryConflictMinOverlap > 8) config.memoryConflictMinOverlap = 8;
         if (config.memoryRelevancePoolSize < 50) config.memoryRelevancePoolSize = 50;
@@ -696,11 +753,11 @@ public class RoleplayConfig {
         if (config.globalMemoryRelevanceMaxChars < 200) {
             config.globalMemoryRelevanceMaxChars = 200;
         }
-        if (config.globalMemoryRelevanceMaxChars > 8000) {
-            config.globalMemoryRelevanceMaxChars = 8000;
+        if (config.globalMemoryRelevanceMaxChars > 30000) {
+            config.globalMemoryRelevanceMaxChars = 30000;
         }
         if (config.shortContextMessages < 1) config.shortContextMessages = 1;
-        if (config.shortContextMessages > 300) config.shortContextMessages = 300;
+        if (config.shortContextMessages > 500) config.shortContextMessages = 500;
         if (config.shortTermDays < 1) config.shortTermDays = 1;
         if (config.memoryUpdateMessages < 5) config.memoryUpdateMessages = 5;
         if (config.memoryExtractMessages < 50) config.memoryExtractMessages = 50;
@@ -794,6 +851,23 @@ public class RoleplayConfig {
         if (config.messageBatchWindowSecond > 10) config.messageBatchWindowSecond = 10;
         if (config.messageBatchMaxMessages < 2) config.messageBatchMaxMessages = 2;
         if (config.messageBatchMaxMessages > 50) config.messageBatchMaxMessages = 50;
+        if (config.learnDirectory == null || config.learnDirectory.trim().isEmpty()) {
+            config.learnDirectory = "train-corpus";
+        }
+        if (config.learnContextBefore < 0) config.learnContextBefore = 0;
+        if (config.learnContextBefore > 50) config.learnContextBefore = 50;
+        if (config.learnContextAfter < 0) config.learnContextAfter = 0;
+        if (config.learnContextAfter > 50) config.learnContextAfter = 50;
+        if (config.modelServiceUrl == null) config.modelServiceUrl = "";
+        if (config.modelServiceToken == null) config.modelServiceToken = "";
+        if (config.modelServiceTimeoutSecond < 10) config.modelServiceTimeoutSecond = 10;
+        if (config.modelServiceTimeoutSecond > 1800) config.modelServiceTimeoutSecond = 1800;
+        if (config.trainContextBefore < 0) config.trainContextBefore = 0;
+        if (config.trainContextBefore > 50) config.trainContextBefore = 50;
+        if (config.trainMaxSamplesPerRun < 10) config.trainMaxSamplesPerRun = 10;
+        if (config.trainMaxSamplesPerRun > 20000) config.trainMaxSamplesPerRun = 20000;
+        if (config.trainMaxChars < 10) config.trainMaxChars = 10;
+        if (config.trainMaxChars > 2000) config.trainMaxChars = 2000;
         if (config.messageBatchMaxAgeSecond < 0) config.messageBatchMaxAgeSecond = 0;
         if (config.messageBatchMaxAgeSecond > 120) config.messageBatchMaxAgeSecond = 120;
         if (config.batchMaxSegments < 1) config.batchMaxSegments = 1;
@@ -801,13 +875,17 @@ public class RoleplayConfig {
         if (config.pokeBackCooldownSecond < 0) config.pokeBackCooldownSecond = 0;
         if (config.pokeBackCooldownSecond > 3600) config.pokeBackCooldownSecond = 3600;
         if (config.promptTotalChars < 4000) config.promptTotalChars = 4000;
-        if (config.promptTotalChars > 64000) config.promptTotalChars = 64000;
+        if (config.promptTotalChars > 400000) config.promptTotalChars = 400000;
         if (config.routerProfile == null) config.routerProfile = "";
         if (config.routerMaxTokens < 200) config.routerMaxTokens = 200;
         if (config.routerMaxTokens > 4000) config.routerMaxTokens = 4000;
         if (config.styleProfile == null) config.styleProfile = "";
         if (config.styleMaxChars < 20) config.styleMaxChars = 20;
         if (config.styleMaxChars > 300) config.styleMaxChars = 300;
+        if (config.styleFailureThreshold < 1) config.styleFailureThreshold = 1;
+        if (config.styleFailureThreshold > 10) config.styleFailureThreshold = 10;
+        if (config.styleFailureCooldownSecond < 30) config.styleFailureCooldownSecond = 30;
+        if (config.styleFailureCooldownSecond > 3600) config.styleFailureCooldownSecond = 3600;
         if (config.styleMaxTokens < 100) config.styleMaxTokens = 100;
         if (config.styleMaxTokens > 2000) config.styleMaxTokens = 2000;
         if (config.maxLongMemories < 5) config.maxLongMemories = 5;
@@ -840,13 +918,25 @@ public class RoleplayConfig {
         if (config.replyReviewMinScore < 0) config.replyReviewMinScore = 0;
         if (config.replyReviewMinScore > 100) config.replyReviewMinScore = 100;
         if (config.toolMaxSteps < 1) config.toolMaxSteps = 1;
-        if (config.toolMaxSteps > 8) config.toolMaxSteps = 8;
+        if (config.toolMaxSteps > 12) config.toolMaxSteps = 12;
         if (config.toolMaxCalls < 1) config.toolMaxCalls = 1;
-        if (config.toolMaxCalls > 24) config.toolMaxCalls = 24;
+        if (config.toolMaxCalls > 32) config.toolMaxCalls = 32;
         if (config.toolResultMaxChars < 500) config.toolResultMaxChars = 500;
-        if (config.toolResultMaxChars > 32000) config.toolResultMaxChars = 32000;
+        if (config.toolResultMaxChars > 64000) config.toolResultMaxChars = 64000;
         if (config.toolLiveMessageMax < 1) config.toolLiveMessageMax = 1;
         if (config.toolLiveMessageMax > 30) config.toolLiveMessageMax = 30;
+        if (config.toolLoopMaxMillis < 10000) config.toolLoopMaxMillis = 10000;
+        if (config.toolLoopMaxMillis > 600000) config.toolLoopMaxMillis = 600000;
+        if (config.toolCallMaxMillis < 1000) config.toolCallMaxMillis = 1000;
+        if (config.toolCallMaxMillis > 120000) config.toolCallMaxMillis = 120000;
+        if (config.toolMemoryInjectItems < 0) config.toolMemoryInjectItems = 0;
+        if (config.toolMemoryInjectItems > 30) config.toolMemoryInjectItems = 30;
+        if (config.toolMemoryInjectMaxChars < 500) config.toolMemoryInjectMaxChars = 500;
+        if (config.toolMemoryInjectMaxChars > 32000) config.toolMemoryInjectMaxChars = 32000;
+        if (config.toolMemoryKeepHours < 1) config.toolMemoryKeepHours = 1;
+        if (config.toolMemoryKeepHours > 720) config.toolMemoryKeepHours = 720;
+        if (config.toolMemoryMaxRows < 20) config.toolMemoryMaxRows = 20;
+        if (config.toolMemoryMaxRows > 5000) config.toolMemoryMaxRows = 5000;
         if (config.workspaceMaxReadChars < 1000) config.workspaceMaxReadChars = 1000;
         if (config.workspaceMaxReadChars > 200000) config.workspaceMaxReadChars = 200000;
         if (config.workspaceMaxWriteChars < 1000) config.workspaceMaxWriteChars = 1000;
@@ -859,6 +949,13 @@ public class RoleplayConfig {
         if (config.workspaceMaxTotalBytes > 1024L * 1024L * 1024L) {
             config.workspaceMaxTotalBytes = 1024L * 1024L * 1024L;
         }
+        if (config.webWhitelist == null) config.webWhitelist = "";
+        if (config.webTimeoutSecond < 3) config.webTimeoutSecond = 3;
+        if (config.webTimeoutSecond > 60) config.webTimeoutSecond = 60;
+        if (config.webMaxBytes < 4096) config.webMaxBytes = 4096;
+        if (config.webMaxBytes > 4 * 1024 * 1024) config.webMaxBytes = 4 * 1024 * 1024;
+        if (config.webMaxChars < 1000) config.webMaxChars = 1000;
+        if (config.webMaxChars > 100000) config.webMaxChars = 100000;
         if (config.pacingBaseMs < 0) config.pacingBaseMs = 0;
         if (config.pacingPerCharMs < 0) config.pacingPerCharMs = 0;
         if (config.pacingMaxMs < 0) config.pacingMaxMs = 0;
@@ -910,7 +1007,7 @@ public class RoleplayConfig {
         if (config.evalTimeoutSecond < 20) config.evalTimeoutSecond = 20;
         if (config.evalTimeoutSecond > 300) config.evalTimeoutSecond = 300;
         if (config.replyMaxTokens < 200) config.replyMaxTokens = 200;
-        if (config.replyMaxTokens > 8000) config.replyMaxTokens = 8000;
+        if (config.replyMaxTokens > 32000) config.replyMaxTokens = 32000;
         if (config.drawPromptProfile == null) config.drawPromptProfile = "";
         if (config.drawPromptMaxTokens < 300) config.drawPromptMaxTokens = 300;
         if (config.drawPromptMaxTokens > 8000) config.drawPromptMaxTokens = 8000;

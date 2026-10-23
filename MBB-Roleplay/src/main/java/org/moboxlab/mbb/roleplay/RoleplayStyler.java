@@ -5,6 +5,9 @@ import com.alibaba.fastjson.JSONObject;
 import org.moboxlab.moboxbot.API.Plugin;
 import org.moboxlab.moboxbot.API.PluginService;
 
+import java.util.concurrent.atomic.AtomicInteger;
+import java.util.concurrent.atomic.AtomicLong;
+
 /**
  * 风格层
  *
@@ -13,6 +16,8 @@ import org.moboxlab.moboxbot.API.PluginService;
  */
 public class RoleplayStyler {
     private final Plugin plugin;
+    private final AtomicInteger consecutiveRejects = new AtomicInteger();
+    private final AtomicLong disabledUntil = new AtomicLong();
 
     public RoleplayStyler(Plugin plugin) {
         this.plugin = plugin;
@@ -20,6 +25,8 @@ public class RoleplayStyler {
 
     public String polish(RoleplayConfig config,RoleplayPersona persona,long groupID,
                          String text,String trigger,String examples) {
+        long now = System.currentTimeMillis();
+        if (now < disabledUntil.get()) return text;
         PluginService ai = plugin.getServer().getPluginManager().getService("MBB-AI");
         if (ai == null) return text;
         try {
@@ -41,10 +48,12 @@ public class RoleplayStyler {
                     System.currentTimeMillis() - startTime);
             if (response == null || !response.getBooleanValue("status")) return text;
             String polished = clean(response.getString("content"));
-            if (polished.isEmpty()) return text;
-            // 改写可以变短，但不允许明显变长，也不允许带回 Markdown
-            if (polished.length() > text.length() * 1.2 + 10) return text;
-            if (polished.contains("```")) return text;
+            String rejectReason = RoleplayReplyTextValidator.rejectReason(text,polished);
+            if (!rejectReason.isEmpty()) {
+                reject(config,groupID,text,polished,rejectReason);
+                return text;
+            }
+            consecutiveRejects.set(0);
             return polished;
         } catch (Exception e) {
             return text;
@@ -63,15 +72,12 @@ public class RoleplayStyler {
                 .append(persona.speechStyle == null || persona.speechStyle.isEmpty()
                         ? "自然口语" : persona.speechStyle)
                 .append("\n");
-        if (persona.catchphrases != null && !persona.catchphrases.isEmpty()) {
-            builder.append("- 角色口癖：").append(String.join("、",persona.catchphrases))
-                    .append("，低频自然使用，不要每句都带\n");
-        }
         builder.append("- 去掉书面语连接词、总结式收尾、排比和破折号\n")
                 .append("- 禁止“不是 X 而是 Y”“不仅 X 而且 Y”“与其说……不如说”“无论……都”这类模板句\n")
                 .append("- 禁止“首先/其次/最后”“值得注意的是/不难发现/由此可见/总而言之”这类总结腔\n")
                 .append("- 不要一句话单独升华，不要替对话下结论，不要写客服式安抚和收尾\n")
                 .append("- 不要用算账、记账、讨债、结账式口吻；少用“账、算账、欠账、还账、结账、账本”\n")
+                .append("- “盯、盯着、盯上”是低频词，只在确实需要描述注视或锁定目标时使用\n")
                 .append("- 波浪号低频，只在真正拖长音时使用，不要每句结尾都带~\n")
                 .append("- 长度不超过原文，但也不要比原文明显更短，不要改成过短的单句\n")
                 .append("- 长度和句式要自然不均匀，可以短句、半句、省略、反问、突然转移话题\n")
@@ -99,6 +105,28 @@ public class RoleplayStyler {
             if (quoted) value = value.substring(1,value.length() - 1).trim();
         }
         return value.replace("\r","").trim();
+    }
+
+    private String shortText(String value,int maxChars) {
+        String text = value == null ? "" : value.replace("\n"," ").trim();
+        if (text.length() <= maxChars) return text;
+        return text.substring(0,maxChars)+"...";
+    }
+
+    private void reject(RoleplayConfig config,long groupID,String original,
+                        String polished,String reason) {
+        int failures = consecutiveRejects.incrementAndGet();
+        int threshold = Math.max(1,config.styleFailureThreshold);
+        plugin.getLogger().sendWarn("[角色] 风格 群"+groupID+" 丢弃改写："
+                +reason+" 原文="+shortText(original,80)
+                +" 改写="+shortText(polished,80)
+                +" 连续失败="+failures+"/"+threshold);
+        if (failures < threshold) return;
+        int cooldown = Math.max(30,config.styleFailureCooldownSecond);
+        disabledUntil.set(System.currentTimeMillis() + cooldown * 1000L);
+        consecutiveRejects.set(0);
+        plugin.getLogger().sendWarn("[角色] 风格层连续返回无效改写，已熔断 "
+                +cooldown+" 秒；期间直接使用执行层原文");
     }
 
     private JSONObject message(String role,String content) {

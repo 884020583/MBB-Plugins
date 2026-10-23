@@ -15,7 +15,7 @@ import java.util.List;
  * Roleplay 配置迁移与缺失项补全
  */
 public class RoleplayConfigMigrator {
-    private static final String CURRENT_VERSION = "36";
+    private static final String CURRENT_VERSION = "37";
 
     private static class ConfigEntry {
         private final String key;
@@ -84,7 +84,7 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("splitMessageSuppressSecond","20",
                     "同一用户刚被回复后，多少秒内的短句视为补充不再回复，0 表示关闭"),
             new ConfigEntry("splitMessageSuppressMaxChars","20","触发补充抑制的最大字数"),
-            new ConfigEntry("shortContextMessages","120","即时上下文消息条数"),
+            new ConfigEntry("shortContextMessages","200","即时上下文消息条数"),
             new ConfigEntry("shortTermDays","3","短期记忆覆盖天数"),
             new ConfigEntry("memoryUpdateMessages","50","每累计多少条消息更新一次记忆"),
             new ConfigEntry("memoryExtractMessages","300","每次记忆整理最多读取的消息条数"),
@@ -105,7 +105,7 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("globalMemoryInjectItems","80","每次注入角色提示词的全局永久记忆条数"),
             new ConfigEntry("speechCorpusEnable","true","是否启用角色台词语料检索"),
             new ConfigEntry("speechCorpusDirectory","speech-corpus","台词语料目录，文件名为 speech-corpus-<角色>.jsonl"),
-            new ConfigEntry("speechRetrievalCount","8","每次注入多少条参考台词"),
+            new ConfigEntry("speechRetrievalCount","2","每次注入多少条参考台词"),
             new ConfigEntry("speechRetrievalMaxChars","1200","参考台词注入的最大字符数"),
             new ConfigEntry("speechRetrievalMinScore","0.35","台词检索最低分数"),
             new ConfigEntry("speechSpoilerLevel","1","允许检索的台词剧透等级：0 只取无剧透，1 允许轻度，2 全部"),
@@ -145,6 +145,19 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("messageBatchWindowSecond","2","合批窗口秒数，窗口内到达的新消息会并入同一批"),
             new ConfigEntry("messageBatchMaxMessages","10","单个批次最多合并多少条消息，超出时丢弃最旧的非直接点名消息"),
             new ConfigEntry("messageBatchMaxAgeSecond","20","合批消息最多等待多少秒，超过且没有点名时直接丢弃，0 表示不丢弃"),
+            new ConfigEntry("learnEnable","true","是否允许用 /role learn 采集训练语料"),
+            new ConfigEntry("learnDirectory","train-corpus","采集语料的存放目录，相对插件数据目录"),
+            new ConfigEntry("learnContextBefore","6","采集时向前截取多少条上下文"),
+            new ConfigEntry("learnContextAfter","3","采集时向后截取多少条上下文"),
+            new ConfigEntry("modelServiceUrl","http://127.0.0.1:8770","MBB-Model 风格层小模型服务地址"),
+            new ConfigEntry("modelServiceToken","","访问 MBB-Model 的 token，留空表示不校验"),
+            new ConfigEntry("modelServiceTimeoutSecond","120","调用 MBB-Model 的超时秒数"),
+            new ConfigEntry("trainEnable","true","是否允许用 /role train 提交训练"),
+            new ConfigEntry("trainContextBefore","4","群聊语料训练时，每条样本带多少条前文"),
+            new ConfigEntry("trainMaxSamplesPerRun","2000","单次训练最多导出多少条样本"),
+            new ConfigEntry("trainMaxChars","200","超过这个长度的群消息不参与训练"),
+            new ConfigEntry("trainIncludeBotMessages","false","是否把机器人自己的消息也算进训练语料"),
+            new ConfigEntry("trainAutoStart","true","提交数据后是否自动开始训练"),
             new ConfigEntry("batchMaxSegments","4","合批回合最多回复几段，每段可以回应批内不同的消息"),
             new ConfigEntry("turnThreads","4","角色回合的执行线程数，路由与生成都在这个线程池里跑"),
             new ConfigEntry("pokeReplyEnable","true","是否响应戳一戳；MBB-Poke 启用时本插件自动跳过"),
@@ -154,17 +167,21 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("pokeStreakWindowSecond","60","连续戳一戳的统计窗口秒数，窗口内超过阈值才算骚扰"),
             new ConfigEntry("pokeStreakThreshold","3","窗口内戳几次开始算骚扰，达到后才会涨厌烦"),
             new ConfigEntry("quoteReplyEnable","true","回复被艾特或被直接回复的消息时是否引用原消息"),
-            new ConfigEntry("promptTotalChars","26000","注入执行层的资料总字符预算，超出部分按优先级截断"),
+            new ConfigEntry("contextHardLimitEnable","false","是否启用本地提示词硬字符预算"),
+            new ConfigEntry("promptTotalChars","120000","启用本地硬预算时，单轮提示词总字符上限"),
             new ConfigEntry("routerEnable","true","是否启用 AI 路由层判断要不要回复、挂哪些技能和资料"),
             new ConfigEntry("routerProfile","","路由层使用的模型配置名，留空则使用 aiProfile"),
             new ConfigEntry("routerMaxTokens","2400","路由层输出 Token 上限，reasoning 模型建议不低于 2400"),
             new ConfigEntry("routerReasoningEffort","none","路由层思考强度：none / low / medium / high，留空表示不发送"),
             new ConfigEntry("styleEnable","true","是否在回复带 AI 味时调用风格层改写"),
             new ConfigEntry("styleMaxChars","60","回复超过多少字触发风格层"),
+            new ConfigEntry("styleLongReplyEnable","false","超长回复是否交给风格层；默认交给大模型回复复核改写"),
             new ConfigEntry("styleProfile","","风格层使用的模型配置名，留空则使用 aiProfile"),
             new ConfigEntry("styleMaxTokens","1200","风格层输出 Token 上限，reasoning 模型需要留出思考预算"),
             new ConfigEntry("styleReasoningEffort","low","风格层思考强度：low / medium / high，留空表示不发送"),
             new ConfigEntry("styleProactiveEnable","false","主动发言时是否也触发风格层"),
+            new ConfigEntry("styleFailureThreshold","2","风格层连续多少次无效改写后临时熔断"),
+            new ConfigEntry("styleFailureCooldownSecond","600","风格层熔断冷却秒数"),
             new ConfigEntry("maxLongMemories","150","最多加载多少条长期记忆"),
             new ConfigEntry("topicFatigueEnable","true","是否启用群级话题疲劳检测"),
             new ConfigEntry("topicFatigueWindowMinute","30","同一话题进入疲劳判定的时间窗口分钟数"),
@@ -186,15 +203,26 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("replyReviewTimeoutSecond","60","回复复核请求超时秒数"),
             new ConfigEntry("replyReviewMinScore","70","回复复核最低通过分"),
             new ConfigEntry("toolEnable","true","是否允许角色通过原生工具调用查询信息或维护私有工作区"),
-            new ConfigEntry("toolMaxSteps","4","单轮最多进行多少次模型-工具循环"),
-            new ConfigEntry("toolMaxCalls","8","单轮最多执行多少个工具调用"),
-            new ConfigEntry("toolResultMaxChars","8000","单个工具结果注入上下文的最大字符数"),
+            new ConfigEntry("toolMaxSteps","8","单轮最多进行多少次模型-工具循环"),
+            new ConfigEntry("toolMaxCalls","16","单轮最多执行多少个工具调用"),
+            new ConfigEntry("toolResultMaxChars","16000","单个工具结果注入上下文的最大字符数"),
             new ConfigEntry("toolLiveMessageMax","10","工具执行期间最多并入多少条新群消息"),
+            new ConfigEntry("toolLoopMaxMillis","90000","单轮工具循环总时间上限毫秒"),
+            new ConfigEntry("toolCallMaxMillis","20000","单个工具调用时间上限毫秒"),
+            new ConfigEntry("toolMemoryInjectItems","8","下一轮注入最近多少次工具调用结果"),
+            new ConfigEntry("toolMemoryInjectMaxChars","6000","工具调用结果注入字符上限"),
+            new ConfigEntry("toolMemoryKeepHours","72","工具调用记录保留小时数"),
+            new ConfigEntry("toolMemoryMaxRows","500","工具调用记录最大行数"),
             new ConfigEntry("workspaceEnable","true","是否启用角色私有工作区 plugins/MBB-Roleplay/data"),
             new ConfigEntry("workspaceMaxReadChars","32000","工作区单次读取最大字符数"),
             new ConfigEntry("workspaceMaxWriteChars","64000","工作区单次写入最大字符数"),
             new ConfigEntry("workspaceMaxFilesPerList","200","工作区列表最多返回多少个文件"),
             new ConfigEntry("workspaceMaxTotalBytes","67108864","角色工作区总大小上限，默认 64MB"),
+            new ConfigEntry("webEnable","true","是否开放受限网页浏览工具"),
+            new ConfigEntry("webWhitelist","wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com","网页允许域名，多个用英文逗号分隔"),
+            new ConfigEntry("webTimeoutSecond","15","网页连接超时秒数"),
+            new ConfigEntry("webMaxBytes","262144","网页最多读取字节数"),
+            new ConfigEntry("webMaxChars","12000","网页净化后最多注入字符数"),
             new ConfigEntry("pacingEnable","true","是否在发送前加入拟人打字延迟"),
             new ConfigEntry("pacingBaseMs","350","拟人延迟基础毫秒"),
             new ConfigEntry("pacingPerCharMs","25","每个字符增加的延迟毫秒"),
@@ -233,11 +261,11 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("evalTimeoutSecond","60","评测请求超时秒数"),
             new ConfigEntry("memoryRelevanceSort","true","长期记忆与永久记忆是否按当前对话相关性排序后注入"),
             new ConfigEntry("memoryRelevancePoolSize","600","相关性排序前先加载多少条长期记忆作为候选池"),
-            new ConfigEntry("memoryRelevanceMaxChars","5000","长期记忆按相关性注入的字符上限"),
+            new ConfigEntry("memoryRelevanceMaxChars","12000","长期记忆按相关性注入的字符上限"),
             new ConfigEntry("memoryConflictResolveEnable","true","是否在写入长期记忆时检测并归档冲突旧记忆"),
             new ConfigEntry("memoryConflictMinOverlap","2","冲突判定所需的最小 bigram 重合数"),
-            new ConfigEntry("globalMemoryRelevanceMaxChars","4000","永久记忆按相关性注入的字符上限"),
-            new ConfigEntry("replyMaxTokens","1200","单次角色回复最大 Token"),
+            new ConfigEntry("globalMemoryRelevanceMaxChars","10000","永久记忆按相关性注入的字符上限"),
+            new ConfigEntry("replyMaxTokens","4000","单次角色回复最大 Token"),
             new ConfigEntry("replyImageMaxTokens","4000","带图片上下文时单次角色回复最大 Token"),
             new ConfigEntry("replySegmentMaxChars","30","单段回复硬上限字符数，提示词默认按 15 到 30 字生成"),
             new ConfigEntry("replySplitPunctuation","。！？!?；;，、：,:～~…","回复拆分时优先使用的断句符号，先找句末标点，再找弱标点"),
@@ -329,6 +357,25 @@ public class RoleplayConfigMigrator {
                 && "1".equals(config.getString("memoryMergeRetryCount",""));
         boolean legacyMemoryMergeBatchSize = version < 28
                 && "60".equals(config.getString("memoryMergeBatchSize",""));
+        boolean legacySpeechRetrievalCount = version < 35
+                && "8".equals(config.getString("speechRetrievalCount",""));
+        boolean legacyShortContext = version < 37
+                && ("80".equals(config.getString("shortContextMessages",""))
+                || "120".equals(config.getString("shortContextMessages","")));
+        boolean legacyPromptTotal = version < 37
+                && "26000".equals(config.getString("promptTotalChars",""));
+        boolean legacyMemoryMaxChars = version < 37
+                && "5000".equals(config.getString("memoryRelevanceMaxChars",""));
+        boolean legacyGlobalMemoryMaxChars = version < 37
+                && "4000".equals(config.getString("globalMemoryRelevanceMaxChars",""));
+        boolean legacyReplyMaxTokens = version < 37
+                && "1200".equals(config.getString("replyMaxTokens",""));
+        boolean legacyToolSteps = version < 37
+                && "4".equals(config.getString("toolMaxSteps",""));
+        boolean legacyToolCalls = version < 37
+                && "8".equals(config.getString("toolMaxCalls",""));
+        boolean legacyToolResultChars = version < 37
+                && "8000".equals(config.getString("toolResultMaxChars",""));
         int changed = 0;
         List<ConfigEntry> missing = new ArrayList<>();
         for (ConfigEntry entry : DEFAULTS) {
@@ -342,7 +389,7 @@ public class RoleplayConfigMigrator {
                 plugin.getLogger().sendWarn("自动补全 Roleplay 配置失败，请检查 config.yml 权限！");
             }
         }
-        if (version < 33) {
+        if (version < 37) {
             config.set("configVersion",CURRENT_VERSION);
             if (!versionMissing) changed++;
         }
@@ -352,6 +399,42 @@ public class RoleplayConfigMigrator {
         }
         if (legacyMemoryMergeBatchSize) {
             config.set("memoryMergeBatchSize","100");
+            changed++;
+        }
+        if (legacySpeechRetrievalCount) {
+            config.set("speechRetrievalCount","2");
+            changed++;
+        }
+        if (legacyShortContext) {
+            config.set("shortContextMessages","200");
+            changed++;
+        }
+        if (legacyPromptTotal) {
+            config.set("promptTotalChars","120000");
+            changed++;
+        }
+        if (legacyMemoryMaxChars) {
+            config.set("memoryRelevanceMaxChars","12000");
+            changed++;
+        }
+        if (legacyGlobalMemoryMaxChars) {
+            config.set("globalMemoryRelevanceMaxChars","10000");
+            changed++;
+        }
+        if (legacyReplyMaxTokens) {
+            config.set("replyMaxTokens","4000");
+            changed++;
+        }
+        if (legacyToolSteps) {
+            config.set("toolMaxSteps","8");
+            changed++;
+        }
+        if (legacyToolCalls) {
+            config.set("toolMaxCalls","16");
+            changed++;
+        }
+        if (legacyToolResultChars) {
+            config.set("toolResultMaxChars","16000");
             changed++;
         }
         if (legacyRoleBotChance) {
