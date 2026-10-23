@@ -592,7 +592,7 @@ CREATE INDEX IF NOT EXISTS ix_trpg_trace_cleanup ON plugin_mbb_trpg_ai_trace(cre
 - 时间一律 epoch 毫秒 INTEGER；布尔一律 0/1；`aiSuspendedUntil=0` 表示未挂起，不落 NULL。
 - 有 DEFAULT 的列用默认值；`state`、`kpUserID`、`groupID`、`createTime`、`updateTime`、`eventType`、`triggerType`、`resultStatus`、`member.sessionID`、`member.userID`、`text_log.seq` 无 DEFAULT，写入必须显式给值；`summary` 缺失写空串，不写 NULL。
 - `ai_trace.eventSeq` 固定 `NOT NULL DEFAULT 0`：0 表示没有触发它的日志，否则存触发它的那条日志 `seq`（AI 事件本身不写日志）。
-- `ai_trace.triggerType` 取值冻结为 `scene / check / opposed / san / begin / merged / player_action`（与 §9.3 的触发路径一一对应；`player_action` 表示玩家自由文本单独触发，合并窗口结算写 `merged`）。
+- `ai_trace.triggerType` 取值冻结为 `scene / check / opposed / san / begin / merged / player_action`（与 §9.3 的触发路径一一对应）。`player_action` 只作为入窗原因，不单独落 trace：窗口结算统一写 `merged`，立即触发路径才写对应类型。
 - 仅 `id` 使用 `INTEGER PRIMARY KEY AUTOINCREMENT`；不使用 BLOB，不存图片与剧本正文。
 - 迁移补列必须带常量默认值，读取侧把 NULL 按默认值处理。
 
@@ -760,6 +760,7 @@ DELETE FROM plugin_mbb_trpg_ai_trace WHERE id < (SELECT id FROM plugin_mbb_trpg_
 ### 9.4 排队与并发
 
 - 每群一条串行队列，待发上限 3；插件全局并发 2，全局等待上限 4；超限不排队，直接 `queue_full` 降级。
+- 承载群任务的工作池另有硬上限：线程数 `max(2, 生效并发×2)`、待执行队列容量 `max(2, min(globalQueue, 生效并发))`；池满时同样按 `queue_full` 降级（先清本群积压再逐条审计），不向监听线程抛异常。
 - 队列项记入队时间，等待超过 65 秒即按 `queue_full`（reason=`queue_age`）降级并移出。
 - 超时双层：插件墙钟 45 秒（`Future.get`，到点按 timeout 降级并立即释放插件槽位）；传给 MBB-AI 的 `timeoutSeconds=10`；`retryCount=0`。
 - 调用放入插件任务线程，不阻塞事件监听线程；插件全局并发 2 是本插件上限，v1.1 启动时读 `AIService.status()` 的 `maxConcurrent`，取 `min(2, 实际值)`。
@@ -804,7 +805,7 @@ DELETE FROM plugin_mbb_trpg_ai_trace WHERE id < (SELECT id FROM plugin_mbb_trpg_
 
 - 三段：稳定前缀（剧本核心设定 + 已登场 NPC 卡）、可缓存中段（风格与规则约束摘要）、动态区（当前场景、在场角色与公开状态标签、最近事件、已解锁线索原文、未解锁线索后果摘要、KP 最近叙述）。
 - 预算总长 6000 字，动态区至少保留 1500 字，素材按优先级裁剪。
-- 在场角色只给匿名代号（玩家A、玩家B……，按加入顺序稳定编号）与公开状态标签（受伤 / 昏迷等），不给具体数值，也不给 QQ 号。
+- 在场角色只给匿名代号（玩家A、玩家B……，按当前在场成员顺序编号；成员退出后其余代号可能前移重新编排）与公开状态标签（受伤 / 昏迷等），不给具体数值，也不给 QQ 号。
 - 未解锁线索只给 `lockedSummary`，已解锁给 `unlockedText`。
 - 系统提示固定约束：你是回合叙述员；不改数值、不代替做检定结论、不推进回合、不复述系统播报与指令回执；300 字以内；只输出叙述与可选建议行。
 - 剧本无场景级 `fallbackNarration` 时，回退插件内置通用模板。
@@ -826,7 +827,8 @@ DELETE FROM plugin_mbb_trpg_ai_trace WHERE id < (SELECT id FROM plugin_mbb_trpg_
 
 ### 9.11 AI 测试缝
 
-- 主缝 `TrpgAiHostService`：注入假 `AiClient`（成功 / 空输出 / 超长 / 越权断言 / busy / timeout / network / http_5xx / disabled / cached / `finishReason=length`）、记录型 `Messaging`、可控 `Clock`、手动推进的假 `Scheduler`、假 `SessionView`、内存 `TraceStore`。覆盖降级表每一行、单请求 2 次调用与计次、挂起惰性与重启生效、去重与 60 秒缓存、合并窗口三种收口、队列超龄、stale、300 字截断、建议白名单、审计字段与 240 字截断、审计失败不影响叙述、全局关零调用零审计零发送。
+- 主缝 `AiHostEngine`：直接构造引擎，注入假 `AiClient`（成功 / 空输出 / 超长 / 越权断言 / busy / timeout / network / http_5xx / disabled / cached / `finishReason=length`）、假 `Scheduler`、可控 `Clock`、假 `SessionView`、内存 `TraceStore`、假 `AiNarrationSink` 与假 `AiFailureRecorder`。覆盖降级表每一行、单请求 2 次调用与计次、挂起惰性与重启生效、去重与 60 秒缓存、合并窗口三种收口、队列超龄、stale、300 字截断、建议白名单、审计字段与 240 字截断、审计失败不影响叙述、全局关零调用零审计零发送。
+- 门面缝 `TrpgAiHostService`：开关判定与挂起清缓存只测门面，不重复覆盖引擎内部路径。
 - 次缝 `TrpgCommand` 的 `/trpg ai` 与监听器入口：参数、无参数提示、私聊拒绝、权限与状态判定、全局关拒绝、自由文本与指令前缀分流。`SessionView` 的实现委托 `SessionService.readSnapshot`，测试只注入假实现。
 
 ## 10. 呈现规范

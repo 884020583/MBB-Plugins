@@ -55,13 +55,15 @@ final class AiTraceWriter {
         }
     }
 
+    /** 按码点截断，避免把 emoji 等代理对劈开写进审计预览。 */
     private static String truncate(String text, int maxChars) {
         if (text == null || text.isEmpty()) {
             return "";
         }
-        if (text.length() <= maxChars) {
+        if (text.codePointCount(0, text.length()) <= maxChars) {
             return text;
         }
-        return text.substring(0, maxChars);
+        int end = text.offsetByCodePoints(0, maxChars);
+        return text.substring(0, end);
     }
 }

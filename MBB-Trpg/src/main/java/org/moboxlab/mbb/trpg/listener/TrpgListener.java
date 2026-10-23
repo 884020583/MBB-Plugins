@@ -29,13 +29,13 @@ import org.moboxlab.mbb.trpg.store.BlacklistService;
 /**
  * 群/私聊消息入口：黑名单静默拦截 → 导入暂存吞消息（含控制字）→ 局内活动刷新 → 玩家行动触发 AI。
  *
- * <p>监听器只做入口分流，不做任何业务判定：命中黑名单只把消息取消掉、不回复；导入暂存期间
+ * <p>监听器做入口分流与轻量门禁，不写库、不发消息：命中黑名单只把消息取消掉、不回复；导入暂存期间
  * 把该用户同一会话的消息原文交给 {@link ScriptImportService#append}，并就地处理
  * {@code /trpg script import end|cancel} 两个控制字（§S10：控制字优先于指令分发）。
  * 其余群消息先刷新局内活动（60 秒节流由 {@link SessionService#touchActivity} 内部判定），
- * 再把「进行中且本局开启 AI」的非指令自由文本交给局面服务记为玩家行动并触发合并窗口（§9.4）；
- * 命中后取消事件，避免再被指令分发处理。是否算玩家行动（KP 不识别、局状态、AI 开关）
- * 全部由 {@link SessionService#playerAction} 判定。</p>
+ * 再对「进行中且本局开启 AI」的非指令自由文本做一次快速预判（局状态、AI 开关、KP 不识别），
+ * 通过后交给 {@link SessionService#playerAction} 复核并写日志，再触发合并窗口（§9.4）；
+ * 命中后取消事件，避免再被指令分发处理。写入与最终判定以 {@code playerAction} 为准。</p>
  */
 public final class TrpgListener implements Listener {
 
