@@ -231,6 +231,13 @@ public class RoleplayToolRegistry {
         return name == null ? null : tools.get(name.trim());
     }
 
+    /**
+     * 工具是否对当前配置开放。未进入本轮暴露集合的工具由工具循环按需自动装载。
+     */
+    public boolean isEnabled(String name,RoleplayConfig config) {
+        return enabled(get(name),config);
+    }
+
     public RoleplayToolResult execute(RoleplayToolContext context,String name,JSONObject args) {
         RoleplayTool tool = get(name);
         if (tool == null) return RoleplayToolResult.failed("未知工具："+name);

@@ -265,7 +265,14 @@ public class RoleplayToolLoopService {
             if (tool == null) {
                 call.invalid = "未知工具："+call.name;
             } else if (!exposedTools.contains(call.name)) {
-                call.invalid = "工具尚未加载，请先调用 tool_search";
+                if (!registry.isEnabled(call.name,service.config())) {
+                    call.invalid = "工具未启用："+call.name;
+                } else {
+                    //模型已经明确点名了注册表中的工具，直接按需装载并执行，
+                    //避免“tool_search 后仍提示未加载”的重复往返。
+                    exposedTools.add(call.name);
+                    call.invalid = registry.validateArguments(call.name,call.args);
+                }
             } else {
                 call.invalid = registry.validateArguments(call.name,call.args);
             }
