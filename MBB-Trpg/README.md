@@ -6,13 +6,36 @@ MoBoxBot 的跑团主持插件：在群里开一局 TRPG，提供 CoC 风格 d10
 
 ## 当前阶段
 
-S7 指令层 A 切片：QQ 侧第一次能真正开一局（开团到开局，不含 KP 局内推进）。
+S8 指令层 B 切片：KP 局内推进、剧本库与黑名单、群消息与离群监听。
+
+- `KpCommandHandler` 注册 `scene` / `check` / `opposed` / `san` / `adjust` / `invite` /
+  `take` / `skip` / `ai`，`AdminCommandHandler` 注册 `script` / `blacklist`；
+  分派主干仍是 S7 的 handler 注册表，本片只追加 handler，不改分派与门禁。
+- `scene`：按标题推进幕次并解锁该幕线索，群内只发线索名与公开钩子，线索全文只私聊 KP；
+  场景图降级为纯文本，触发提示只私聊 KP。
+- `check`：KP 可代掷或由玩家本人发起，支持 `bp` / `pp` 各 1～2 颗奖惩骰，
+  回执按冻结样例给骰面、目标值与成功等级，奖惩骰抵消与十位取值的说明附在正文。
+- `opposed`：对手可以是玩家技能，也可以是 0～99 的目标值；纯数字一律按目标值解析，
+  只有提及形式（`<@QQ>` 或 `[CQ:at,qq=]`）才按玩家解析，避免把「50」当成用户号。
+- `san`：损失写成「成功损失/失败损失」，支持常数与 `NdM+K`；SAN 归零按永久疯狂退场，
+  触发 INT 检定失败按 `1D10` 小时临时疯狂，回执写明持续时间。
+- `adjust` 招募期与进行中都能改技能值并封顶 0～99；`invite` 进行中补人并恢复离场成员的局籍；
+  `take` 记录代管、`skip` 记录跳过原因。
+- `script list` / `script show` 仅机器人管理员可用，`script <剧本ID>` 只在招募期更换本局剧本；
+  `import` / `delete` / `gen` 仍回「将在后续版本启用」（S10）。
+- `blacklist add|remove|list`：群管理员管理本群名单，私聊机器人管理员可按「群号 QQ」移除；
+  黑名单成员在群内发言被静默取消，指令也不回任何话。
+- 监听器：`TrpgListener` 在群消息入口做黑名单拦截、导入暂存吞消息（S10 前不吞）与局内活动刷新；
+  `TrpgNoticeListener` 在 KP 离群时按 `kp_left` 收尾，非 KP 离群只记日志不归档。
+- `DiceExpressions` 统一 `NdM+K` 解析（SAN 损失与剧本检定共用口径）。
+
+S7 已落地的指令层 A 继续保留：
 
 - `TrpgCommand`（`/trpg`）与 `DiceCommand`（`/r`、`/roll`）：主类只做转发，框架权限一律 `EVERYONE`，
   真正的权限、状态与冷却判定全在 `SessionService`。
 - `TrpgSubcommand`：主名与中文别名（`start / 开团`、`pc reroll / 重掷`、`pc set / 微调` 等）
-  只在这一处定义，指令分派、帮助列表与拒绝话术共用；未实现子命令先回「将在后续版本启用」。
-- 生命周期与只读：`start` / `join` / `leave` / `begin` / `end`（二次确认按「群 + 发起者」计）/
+  只在这一处定义，指令分派、帮助列表与拒绝话术共用；本片起全部子命令均已启用。
+- 生命周期与只读：`start` / `join` / `leave` / `begin` / `end`（二次确认按「群 + 局 + 发起者」计）/
   `resume` / `status` / `help` / `pc` / `pc reroll` / `pc set` / `log`；命令层只解析与委托，
   不写库、不持状态，一条指令只回一条回执，拒绝话术统一走 `TrpgPresenter` 的【错误】模板。
 - 指令分派用 `TrpgSubcommandHandler` 注册表 + `TrpgCommandContext`（共享冷却、错误去重、
@@ -25,7 +48,7 @@ S7 指令层 A 切片：QQ 侧第一次能真正开一局（开团到开局，�
 - `CardGenerator` / `Profession`：`join` 时随机生成八属性角色卡（3D6×5、SAN=POW、
   HP=(CON+SIZ)/10、MP=POW/5、物品取剧本起始物品）；`pc reroll` 只重掷自己的卡，
   `pc set` 只改八属性 15～90 且改 POW 不联动 SAN。
-- 插件启用时注册 `/trpg`、`/r`、`/roll`，注册失败只记错误日志、其余能力照常。
+- 插件启用时注册 `/trpg`、`/r`、`/roll` 与两个群监听器，注册失败只记错误日志、其余能力照常。
 
 S6 已落地的呈现层继续保留：
 

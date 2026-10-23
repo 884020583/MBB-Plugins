@@ -101,7 +101,12 @@ public final class GroupLockRegistry {
         return entries.size();
     }
 
-    /** 清空缓存（停用与测试用；不强制解除仍持有的锁）。 */
+    /**
+     * 清空缓存（停用与测试用）。
+     *
+     * <p>不强制解除仍持有的锁：调用方必须保证此刻没有线程持有或即将获取群锁，
+     * 否则同一群可能被分配到两把不同的锁，互斥随之失效。</p>
+     */
     public void clear() {
         synchronized (monitor) {
             entries.clear();

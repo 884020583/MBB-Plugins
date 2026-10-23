@@ -32,7 +32,7 @@ import org.moboxlab.moboxbot.API.PluginLogger;
  * 所有写操作在群锁内完成，事件在解锁后统一发布（临界区不含网络发送）。</p>
  *
  * <p>场景、邀请、接管、跳过与检定类迁移由 S7 / S8 在此之上落地；本切片只暴露
- * {@code sceneIndex} 与 {@link #aiState(SessionActor, boolean)} 等子状态写接口。</p>
+ * {@code sceneIndex} 与 {@link #aiState(SessionActor, String)} 等子状态写接口。</p>
  */
 public final class SessionService {
 
@@ -66,6 +66,10 @@ public final class SessionService {
     private final SessionReader reader;
     /** 角色卡指令（pc / pc reroll / pc set）。 */
     private final SessionCardService cardService;
+    /** 局内推进（场景、检定、对抗、理智、调整、邀请、接管、跳过、换剧本）。 */
+    private final SessionPlayService playService;
+    /** 检定、对抗与理智（S8 拆出，避免单类继续膨胀）。 */
+    private final SessionCheckService checkService;
 
     /** 启动后尚未确认恢复的局（内存事实，不落库）；只包含进行中的局。 */
     private final Set<Long> pendingRecovery = ConcurrentHashMap.newKeySet();
@@ -121,6 +125,8 @@ public final class SessionService {
         this.reader = new SessionReader(store, archiver, locks, clock, config, publisher, logger,
                 this::isRecovered);
         this.cardService = new SessionCardService(this, store, cooldowns, config);
+        this.playService = new SessionPlayService(this, store, catalog, config);
+        this.checkService = new SessionCheckService(this, store, catalog, random, config, logger);
     }
 
     /** 请求者不能为空：与构造函数一样用 IllegalArgumentException 表达契约违例。 */
@@ -241,6 +247,11 @@ public final class SessionService {
                     return reject(turn, SessionReject.STATE_UNAVAILABLE,
                             "本群已开局，进行中加入需由 KP 邀请");
                 }
+                Script script = loadScript(row.scriptId());
+                if (script != null && insideCount(row, actor.userId()) >= script.maxPlayers()) {
+                    return reject(turn, SessionReject.MEMBER_STATE,
+                            "本局人数已满（" + script.maxPlayers() + " 人）");
+                }
                 MemberRow existing = turn.member(row, actor.userId());
                 if (existing != null && existing.leftAt() <= 0L) {
                     return reject(turn, SessionReject.MEMBER_STATE, "你已在局内");
@@ -251,8 +262,9 @@ public final class SessionService {
                 }
                 long now = turn.now;
                 if (existing != null) {
+                    // 重新入局同时清掉代管标记（§6.1）：代管只对被代管的本次在场有效。
                     int affected = store.updateMember(existing.toBuilder()
-                            .leftAt(0L).updateTime(now).build());
+                            .leftAt(0L).takenOver(false).updateTime(now).build());
                     if (affected < 0) {
                         return SessionResult.storageFailure("重新入局写入未生效");
                     }
@@ -475,7 +487,7 @@ public final class SessionService {
      *
      * <p>招募期与进行中都可调（§6.1 / §6.3 / §9.2）；结束的局不在活跃查询范围。</p>
      */
-    public SessionResult aiState(SessionActor actor, final boolean enabled) {
+    public SessionResult aiState(SessionActor actor, final String rawWord) {
         if (!requireActor(actor).inGroup()) {
             return SessionResult.rejected(SessionReject.NOT_IN_GROUP, "请在群内使用");
         }
@@ -488,6 +500,16 @@ public final class SessionService {
                     return reject(turn, SessionReject.STATE_UNAVAILABLE, "本群暂无局");
                 }
                 boolean kpActor = actor.userId() == row.kpUserId();
+                Boolean parsed = parseAiWord(rawWord);
+                if (parsed == null) {
+                    if (!kpActor && !actor.botAdmin() && !actor.groupAdmin()) {
+                        return reject(turn, SessionReject.NO_PERMISSION,
+                                "只有 KP 或群管理员能调整 AI");
+                    }
+                    return reject(turn, SessionReject.BAD_ARGUMENT,
+                            "参数不对：AI 主持只支持 on 或 off");
+                }
+                boolean enabled = parsed.booleanValue();
                 boolean allowed = kpActor || actor.botAdmin() || (!enabled && actor.groupAdmin());
                 if (!allowed) {
                     return reject(turn, SessionReject.NO_PERMISSION,
@@ -539,7 +561,10 @@ public final class SessionService {
                     return SessionResult.ok(turn.snapshot(row), "KP 未变更");
                 }
                 boolean settleGrowth = row.state() == SessionState.RUNNING;
-                return finish(turn, archiver.archive(row, "kp_left", settleGrowth, turn.now), "KP 已离群");
+                // 招募期离群按取消归档、进行中才记 kp_left（§7.7 endReason 口径）。
+                String endReason = settleGrowth ? END_REASON_KP_LEFT : END_REASON_CANCELLED;
+                return finish(turn, archiver.archive(row, endReason, settleGrowth, turn.now),
+                        "KP 已离群");
             }
         });
     }
@@ -593,6 +618,55 @@ public final class SessionService {
         return cardService.setAttribute(actor, field, rawValue);
     }
 
+    /** 推进场景（§6.1 scene）：仅 KP、仅进行中，同时解锁本场景尚未解锁的线索。 */
+    public PlayResult<SessionOutcomes.Scene> scene(SessionActor actor, String title) {
+        return playService.scene(actor, title);
+    }
+
+    /** 技能检定（§6.1 check）：本人或 KP 代掷，成功技能记入成长集合。 */
+    public PlayResult<SessionOutcomes.Check> check(SessionActor actor, long targetUserId,
+                                                  String skill, String diceKind, String diceCount) {
+        return checkService.check(actor, targetUserId, skill, diceKind, diceCount);
+    }
+
+    /** 对抗检定（§6.1 opposed）：右侧可以是玩家技能或 0～99 的目标值。 */
+    public PlayResult<SessionOutcomes.Opposed> opposed(SessionActor actor, long leftUserId,
+                                                      String leftSkill, long rightUserId,
+                                                      String rightSkill, int rightValue) {
+        return checkService.opposed(actor, leftUserId, leftSkill, rightUserId, rightSkill, rightValue);
+    }
+
+    /** 理智检定（§6.1 san）：仅 KP、仅进行中；损失达阈值追 INT 检定。 */
+    public PlayResult<SessionOutcomes.San> san(SessionActor actor, long targetUserId, String lossSpec) {
+        return checkService.san(actor, targetUserId, lossSpec);
+    }
+
+    /** 技能调整（§6.1 adjust）：仅 KP，招募期与进行中都可执行。 */
+    public PlayResult<SessionOutcomes.Adjust> adjust(SessionActor actor, long targetUserId,
+                                                    String skill, String delta) {
+        return playService.adjust(actor, targetUserId, skill, delta);
+    }
+
+    /** 进行中邀请入局（§6.1 invite）：仅 KP；离场成员重进清离场与代管标记。 */
+    public SessionResult invite(SessionActor actor, long targetUserId, CardData card) {
+        return playService.invite(actor, targetUserId, card);
+    }
+
+    /** KP 代管（§6.1 take）：标记由 KP 代掷，目标重新加入时清除。 */
+    public SessionResult takeover(SessionActor actor, long targetUserId) {
+        return playService.takeover(actor, targetUserId);
+    }
+
+    /** 跳过（§6.1 skip）：只写日志，不改角色卡。 */
+    public SessionResult skip(SessionActor actor, long targetUserId, String reason) {
+        return playService.skip(actor, targetUserId, reason);
+    }
+
+    /** 换本局剧本（§6.1 script）：仅 KP、仅招募期。 */
+    public SessionResult changeScript(SessionActor actor, String scriptId) {
+        return playService.changeScript(actor, scriptId);
+    }
+
     /** 读取本群当前局面；无活跃局返回空快照（读状态会先惰性归档过期局）。 */
     public SessionSnapshot readSnapshot(long groupId) {
         return reader.readSnapshot(groupId);
@@ -637,6 +711,44 @@ public final class SessionService {
             publish(event);
         }
         return result;
+    }
+
+    /**
+     * 与 {@link #withGroupLock} 同构，但返回带明细的 {@link PlayResult}。
+     *
+     * <p>判定顺序、群锁生命周期与事件发布时机完全一致：明细在锁内算好，事件在解锁后发布。</p>
+     */
+    <T> PlayResult<T> withGroupLockValue(SessionActor actor, String action, LockedOutcome<T> body) {
+        long groupId = actor.groupId();
+        long now = clock.nowMillis();
+        if (!locks.tryLock(groupId)) {
+            return PlayResult.rejected(rejectRaw(groupId, SessionReject.BUSY, "本群正在处理上一条", now));
+        }
+        Turn turn = new Turn(actor, now);
+        PlayResult<T> result;
+        try {
+            result = body.run(turn);
+        } catch (StorageAbort abort) {
+            warn("局面操作中止：" + abort.getMessage());
+            result = PlayResult.rejected(SessionResult.storageFailure(abort.getMessage()));
+        } catch (RuntimeException error) {
+            error("局面操作异常：" + action + "：group=" + groupId + "，原因=" + error);
+            result = PlayResult.rejected(SessionResult.storageFailure("局面操作异常，请稍后重试"));
+        } finally {
+            locks.unlock(groupId);
+        }
+        for (SessionEvent event : turn.events) {
+            publish(event);
+        }
+        if (result == null) {
+            return PlayResult.rejected(SessionResult.storageFailure("局面操作未返回结果，请稍后重试"));
+        }
+        return result;
+    }
+
+    /** 成功执行后登记冷却（按动作、请求者与群号）。 */
+    void markCooldown(String action, Turn turn) {
+        cooldowns.mark(action, turn.actor.userId(), turn.groupId, turn.now);
     }
 
     /** 收尾结果转成对外结果，并登记战报事件。 */
@@ -684,7 +796,8 @@ public final class SessionService {
         return ruleSet == null ? RuleRegistry.BUILTIN_RULE_SET_ID : ruleSet.id();
     }
 
-    private Script loadScript(String scriptId) {
+    /** 读取剧本（持剧本库读锁）；未知返回 null。 */
+    Script loadScript(String scriptId) {
         if (scriptId == null || scriptId.isEmpty()) {
             return null;
         }
@@ -720,12 +833,25 @@ public final class SessionService {
         return !pendingRecovery.contains(Long.valueOf(sessionId));
     }
 
-    private void appendLog(long sessionId, String eventType, long actorId, String content, long now) {
+    /** 追加一条事件日志（seq 在群锁内取 MAX(seq)+1，写失败只告警不阻断）。 */
+    void appendLog(long sessionId, String eventType, long actorId, String content, long now) {
         long seq = store.maxLogSeq(sessionId) + 1L;
         int affected = store.appendLog(new LogRow(0L, sessionId, seq, eventType, actorId, content, now));
         if (affected != 1) {
             warn("事件日志写入未生效：session=" + sessionId + "，seq=" + seq + "，type=" + eventType);
         }
+    }
+
+    /** 解析 AI 开关词：on/开 为开启，off/关 为关闭，其余返回 null。 */
+    private static Boolean parseAiWord(String rawWord) {
+        String word = rawWord == null ? "" : rawWord.trim();
+        if ("on".equalsIgnoreCase(word) || "开".equals(word)) {
+            return Boolean.TRUE;
+        }
+        if ("off".equalsIgnoreCase(word) || "关".equals(word)) {
+            return Boolean.FALSE;
+        }
+        return null;
     }
 
     private static MemberRow findMember(List<MemberRow> members, long userId) {
@@ -735,6 +861,14 @@ public final class SessionService {
             }
         }
         return null;
+    }
+
+    /** 本局在场人数（可排除某人，供人数上限与回执使用）。 */
+    int insideCount(SessionRow row, long excludedUserId) {
+        if (row == null) {
+            return 0;
+        }
+        return insideCountExcluding(store.loadMembers(row.id()), excludedUserId);
     }
 
     private static int insideCountExcluding(List<MemberRow> members, long excludedUserId) {
@@ -763,10 +897,22 @@ public final class SessionService {
         }
     }
 
+    /** 进行中 KP 离群的归档原因。 */
+    static final String END_REASON_KP_LEFT = "kp_left";
+
+    /** 招募期取消的归档原因。 */
+    static final String END_REASON_CANCELLED = "cancelled";
+
     /** 群锁内执行的动作。 */
     interface LockedAction {
 
         SessionResult run(Turn turn);
+    }
+
+    /** 群锁内执行并返回明细的动作。 */
+    interface LockedOutcome<T> {
+
+        PlayResult<T> run(Turn turn);
     }
 
     /** 一次请求的群锁上下文：持有当次时间、请求者与待发布事件。 */

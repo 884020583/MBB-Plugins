@@ -9,6 +9,8 @@ import org.moboxlab.mbb.trpg.command.DiceCommand;
 import org.moboxlab.mbb.trpg.command.TrpgCommand;
 import org.moboxlab.mbb.trpg.command.TrpgCommandService;
 import org.moboxlab.mbb.trpg.config.TrpgConfig;
+import org.moboxlab.mbb.trpg.listener.TrpgListener;
+import org.moboxlab.mbb.trpg.listener.TrpgNoticeListener;
 import org.moboxlab.mbb.trpg.present.ImageUtilRenderer;
 import org.moboxlab.mbb.trpg.present.OneBotMessaging;
 import org.moboxlab.mbb.trpg.present.OneBotNameResolver;
@@ -47,7 +49,7 @@ import java.util.List;
  *
  * <p>当前职责：加载配置、注册内置规则集并选定生效规则集、建表并保持幂等，装配存储实现、
  * 审计端口、拉黑名单、会话状态机、呈现层与归档清理，按冻结顺序执行启动序列并排入每小时
- * 清理任务；随后注册 /trpg 与 /r 指令。检定与场景、群监听器由后续切片继续装配。</p>
+ * 清理任务；随后注册 /trpg 与 /r 指令与群监听器。AI 主持由后续切片继续装配。</p>
  */
 public class TrpgPlugin extends Plugin {
 
@@ -67,6 +69,8 @@ public class TrpgPlugin extends Plugin {
     private TrpgPresenter presenter;
     private SessionLogService sessionLogService;
     private TrpgCommandService commandService;
+    private TrpgListener listener;
+    private TrpgNoticeListener noticeListener;
     /** 指令层共用登记：同群同类错误 10 秒只回一次、冷却窗口跨指令生效。 */
     private CooldownRegistry cooldowns;
     private ErrorDedupe dedupe;
@@ -193,7 +197,10 @@ public class TrpgPlugin extends Plugin {
         sessionLogService = new SessionLogService(store, trpgConfig, clock, cooldowns, dedupe, getLogger());
         commandService = new TrpgCommandService(sessionService, sessionLogService, scriptCatalog,
                 new CardGenerator(randomSource), presenter, nameResolver, trpgConfig, clock, getLogger(),
-                cooldowns, dedupe);
+                cooldowns, dedupe, blacklistService);
+        // 导入暂存服务由 S10 提供，这里先留空：不吞消息，只保留调用点。
+        listener = new TrpgListener(sessionService, blacklistService, null, getLogger());
+        noticeListener = new TrpgNoticeListener(sessionService, getLogger());
         retentionService = new TrpgRetentionService(store, getLogger(), clock,
                 trpgConfig.retentionSessionDays(), trpgConfig.aiTraceKeepHours(),
                 trpgConfig.aiTraceMaxRows());
@@ -234,6 +241,7 @@ public class TrpgPlugin extends Plugin {
             return;
         }
         registerCommands(pluginManager, clock);
+        registerListeners(pluginManager);
         try {
             retentionTask = retentionService.scheduleHourly(
                     new PluginManagerScheduler(this, pluginManager, getLogger()));
@@ -261,6 +269,22 @@ public class TrpgPlugin extends Plugin {
         }
     }
 
+    /** 注册群消息与离群通知监听器；任一失败只影响该监听器。 */
+    private void registerListeners(PluginManager pluginManager) {
+        try {
+            pluginManager.registerListener(this, listener);
+        } catch (RuntimeException e) {
+            getLogger().sendError("[MBB-Trpg] 群消息监听器注册失败，黑名单与局内活动刷新不可用："
+                    + e.getMessage());
+        }
+        try {
+            pluginManager.registerListener(this, noticeListener);
+        } catch (RuntimeException e) {
+            getLogger().sendError("[MBB-Trpg] 离群通知监听器注册失败，KP 离群不会自动收尾："
+                    + e.getMessage());
+        }
+    }
+
     @Override
     public void onDisable() {
         if (retentionTask != null) {
@@ -278,6 +302,8 @@ public class TrpgPlugin extends Plugin {
         presenter = null;
         sessionLogService = null;
         commandService = null;
+        listener = null;
+        noticeListener = null;
         cooldowns = null;
         dedupe = null;
         getLogger().sendInfo("[MBB-Trpg] 已停用");
@@ -351,5 +377,15 @@ public class TrpgPlugin extends Plugin {
     /** 指令服务；未启用时为 null。 */
     public TrpgCommandService commandService() {
         return commandService;
+    }
+
+    /** 群消息监听器；未启用时为 null。 */
+    public TrpgListener listener() {
+        return listener;
+    }
+
+    /** 离群通知监听器；未启用时为 null。 */
+    public TrpgNoticeListener noticeListener() {
+        return noticeListener;
     }
 }

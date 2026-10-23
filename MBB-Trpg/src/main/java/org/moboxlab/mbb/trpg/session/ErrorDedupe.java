@@ -35,12 +35,15 @@ public final class ErrorDedupe {
             return true;
         }
         String dedupeKey = groupId + ":" + key;
-        Long last = lastReply.get(dedupeKey);
-        if (last != null && windowMillis > 0L && now - last.longValue() < windowMillis) {
-            return false;
+        // 判定与登记必须在同一把锁内：两个并发请求否则可能都判定为「未回复过」。
+        synchronized (lastReply) {
+            Long last = lastReply.get(dedupeKey);
+            if (last != null && windowMillis > 0L && now - last.longValue() < windowMillis) {
+                return false;
+            }
+            lastReply.put(dedupeKey, Long.valueOf(now));
+            return true;
         }
-        lastReply.put(dedupeKey, Long.valueOf(now));
-        return true;
     }
 
     /** 清空登记（停用与测试用）。 */

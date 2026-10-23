@@ -23,17 +23,17 @@ public enum TrpgSubcommand {
     PC_REROLL("pc reroll", "重掷", "", true, true),
     PC_SET("pc set", "微调", "<字段> <值>", true, true),
     LOG("log", "日志", "[页码]", true, true),
-    SCENE("scene", "场景", "<标题>", true, false),
-    CHECK("check", "检定", "[@玩家] <技能> [bp/pp [次数]]", true, false),
-    OPPOSED("opposed", "对抗", "<@A> <技能> vs <@B> <技能>", true, false),
-    SAN("san", "理智", "<@玩家> <X/Y>", true, false),
-    ADJUST("adjust", "调整", "<@玩家> <技能> <±值>", true, false),
-    INVITE("invite", "邀请", "<QQ>", true, false),
-    TAKE("take", "接管", "<@玩家>", true, false),
-    SKIP("skip", "跳过", "<@玩家> [原因]", true, false),
-    SCRIPT("script", "剧本", "[list|show|import|delete|gen] ...", false, false),
-    BLACKLIST("blacklist", "黑名单", "add|remove|list", false, false),
-    AI("ai", "AI 主持", "on|off", true, false);
+    SCENE("scene", "场景", "<标题>", true, true),
+    CHECK("check", "检定", "[@玩家] <技能> [bp/pp [次数]]", true, true),
+    OPPOSED("opposed", "对抗", "<@A> <技能> vs <@B> <技能或目标值>", true, true),
+    SAN("san", "理智", "<@玩家> <X/Y>", true, true),
+    ADJUST("adjust", "调整", "<@玩家> <技能> <±值>", true, true),
+    INVITE("invite", "邀请", "<QQ>", true, true),
+    TAKE("take", "接管", "<@玩家>", true, true),
+    SKIP("skip", "跳过", "<@玩家> [原因]", true, true),
+    SCRIPT("script", "剧本", "[list|show|import|delete|gen] ...", false, true),
+    BLACKLIST("blacklist", "黑名单", "add|remove|list（私聊 remove <群号> <QQ>）", false, true),
+    AI("ai", "AI 主持", "on|off", true, true);
 
     private final String primary;
     private final String alias;

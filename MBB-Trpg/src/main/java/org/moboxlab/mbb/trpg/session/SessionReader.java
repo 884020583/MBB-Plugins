@@ -82,33 +82,40 @@ final class SessionReader {
         if (groupId <= 0L || userId <= 0L) {
             return false;
         }
-        SessionRow row = store.findActiveByGroup(groupId);
-        if (row == null) {
-            return false;
-        }
-        MemberRow member = findMember(store.loadMembers(row.id()), userId);
-        if (member == null || member.leftAt() > 0L) {
-            return false;
-        }
-        long now = clock.nowMillis();
-        long throttle = config.activityThrottleSeconds() * MILLIS_PER_SECOND;
-        long anchor = SessionArchiver.activityAnchor(row);
-        if (now - anchor < throttle) {
-            return false;
-        }
-        int affected = store.touchActivity(row.id(), now, now);
-        if (affected < 0) {
-            warn("活动时间写入未生效：session=" + row.id());
-            return false;
-        }
-        if (affected == 0) {
-            SessionRow current = store.findActiveByGroup(groupId);
-            if (current == null || current.id() != row.id()) {
-                warn("活动时间无匹配行，本局已归档或切换：session=" + row.id());
+        try {
+            SessionRow row = store.findActiveByGroup(groupId);
+            if (row == null) {
                 return false;
             }
+            // 节流判定放在加载成员之前：被节流掉的消息不再付出一次成员表查询与角色卡解析。
+            long now = clock.nowMillis();
+            long throttle = config.activityThrottleSeconds() * MILLIS_PER_SECOND;
+            long anchor = SessionArchiver.activityAnchor(row);
+            if (now - anchor < throttle) {
+                return false;
+            }
+            MemberRow member = findMember(store.loadMembers(row.id()), userId);
+            if (member == null || member.leftAt() > 0L) {
+                return false;
+            }
+            int affected = store.touchActivity(row.id(), now, now);
+            if (affected < 0) {
+                warn("活动时间写入未生效：session=" + row.id());
+                return false;
+            }
+            if (affected == 0) {
+                SessionRow current = store.findActiveByGroup(groupId);
+                if (current == null || current.id() != row.id()) {
+                    warn("活动时间无匹配行，本局已归档或切换：session=" + row.id());
+                    return false;
+                }
+            }
+            return true;
+        } catch (RuntimeException error) {
+            // 群消息入口每条都会走到这里，异常必须吞在读取层，不能抛回事件线程。
+            warn("刷新局内活动异常：group=" + groupId + "，原因=" + error);
+            return false;
         }
-        return true;
     }
 
     /** 只读路径上的惰性过期：最多连续归档 {@link SessionArchiver#maxExpiryRounds()} 次。 */

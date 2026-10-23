@@ -46,6 +46,9 @@ public interface SessionStore {
     int casScene(long sessionId, SessionState expected, int sceneIndex, String sceneTitle,
                  long updateTime);
 
+    /** CAS 更换本局剧本（期望状态由调用方给出，招募期换本局用）。 */
+    int casScript(long sessionId, SessionState expected, String scriptId, long updateTime);
+
     /** CAS 更新 AI 子状态。 */
     int casAiState(long sessionId, SessionState expected, boolean aiEnabled,
                    long aiSuspendedUntil, int aiFailStreak, long updateTime);

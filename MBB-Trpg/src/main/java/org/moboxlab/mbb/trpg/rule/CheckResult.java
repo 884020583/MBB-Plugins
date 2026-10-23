@@ -21,6 +21,10 @@ public final class CheckResult {
     /** 大成功。 */
     public static final int DEGREE_CRITICAL = 4;
 
+    /** 等级标签，下标 = degree - DEGREE_FUMBLE。 */
+    private static final String[] DEGREE_LABELS = {"大失败", "失败", "常规成功", "困难成功",
+            "极难成功", "大成功"};
+
     private final boolean success;
     private final int degree;
     private final RollTrace roll;
@@ -49,6 +53,19 @@ public final class CheckResult {
     /** 失败结果，供规则实现构造。 */
     public static CheckResult failure(RollTrace roll, String summary) {
         return new CheckResult(false, DEGREE_FAILURE, roll, summary, null, false, 0);
+    }
+
+    /**
+     * 等级标签（与呈现层 TrpgCheckView 的六档一致）。
+     *
+     * @param degree -1..4
+     * @return 中文标签；越界返回空串
+     */
+    public static String degreeLabel(int degree) {
+        if (degree < DEGREE_FUMBLE || degree > DEGREE_CRITICAL) {
+            return "";
+        }
+        return DEGREE_LABELS[degree - DEGREE_FUMBLE];
     }
 
     public boolean success() {

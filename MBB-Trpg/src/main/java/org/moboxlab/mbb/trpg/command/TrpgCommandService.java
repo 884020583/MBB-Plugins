@@ -11,6 +11,7 @@ import org.moboxlab.moboxbot.API.PluginLogger;
 import org.moboxlab.mbb.trpg.card.CardGenerator;
 import org.moboxlab.mbb.trpg.config.TrpgConfig;
 import org.moboxlab.mbb.trpg.present.TrpgNameResolver;
+import org.moboxlab.mbb.trpg.present.TrpgMessageTemplates;
 import org.moboxlab.mbb.trpg.present.TrpgPresenter;
 import org.moboxlab.mbb.trpg.script.ScriptCatalog;
 import org.moboxlab.mbb.trpg.session.Clock;
@@ -19,6 +20,7 @@ import org.moboxlab.mbb.trpg.session.ErrorDedupe;
 import org.moboxlab.mbb.trpg.session.SessionActor;
 import org.moboxlab.mbb.trpg.session.SessionLogService;
 import org.moboxlab.mbb.trpg.session.SessionService;
+import org.moboxlab.mbb.trpg.store.BlacklistService;
 
 /**
  * /trpg 指令的分发门面。
@@ -55,12 +57,27 @@ public final class TrpgCommandService {
                               TrpgNameResolver names,
                               TrpgConfig config, Clock clock, PluginLogger logger,
                               CooldownRegistry cooldowns, ErrorDedupe dedupe) {
+        this(sessions, logs, catalog, cards, presenter, names, config, clock, logger, cooldowns,
+                dedupe, null);
+    }
+
+    /**
+     * 生产装配（含黑名单）：黑名单命中时静默丢弃群内指令，不产生任何回执。
+     */
+    public TrpgCommandService(SessionService sessions, SessionLogService logs, ScriptCatalog catalog,
+                              CardGenerator cards, TrpgPresenter presenter,
+                              TrpgNameResolver names,
+                              TrpgConfig config, Clock clock, PluginLogger logger,
+                              CooldownRegistry cooldowns, ErrorDedupe dedupe,
+                              BlacklistService blacklist) {
         this.context = new TrpgCommandContext(sessions, logs, catalog, cards, presenter, names, config,
-                clock, logger, cooldowns, dedupe);
+                clock, logger, cooldowns, dedupe, blacklist);
         Map<TrpgSubcommand, TrpgSubcommandHandler> registered =
                 new EnumMap<TrpgSubcommand, TrpgSubcommandHandler>(TrpgSubcommand.class);
         registered.putAll(LifecycleCommandHandler.handlers());
         registered.putAll(ReadOnlyCommandHandler.handlers());
+        registered.putAll(KpCommandHandler.handlers());
+        registered.putAll(AdminCommandHandler.handlers());
         this.handlers = registered;
     }
 
@@ -93,6 +110,11 @@ public final class TrpgCommandService {
             return false;
         }
         SessionActor actor = actorOf(sender);
+        if (actor.inGroup() && context.blacklist() != null
+                && context.blacklist().contains(actor.groupId(), actor.userId())) {
+            // 黑名单命中：静默丢弃，不处理、不刷新局内活动、不产生任何回执（§5.4）。
+            return true;
+        }
         if (actor.inGroup()) {
             // 局内活动节流由 SessionService 内部按 60 秒窗口判定，这里忽略返回值。
             context.sessions().touchActivity(actor.groupId(), actor.userId());
@@ -125,7 +147,7 @@ public final class TrpgCommandService {
     private void runHelp(SessionActor actor, String[] params) {
         TrpgSubcommandHandler help = handlers.get(TrpgSubcommand.HELP);
         if (help == null) {
-            context.reply(actor, org.moboxlab.mbb.trpg.present.TrpgMessageTemplates.notice("帮助暂不可用"));
+            context.reply(actor, TrpgMessageTemplates.notice("帮助暂不可用"));
             return;
         }
         help.handle(context, actor, params);
@@ -175,7 +197,10 @@ public final class TrpgCommandService {
                 groupAdmin, botAdmin);
     }
 
-    /** 从 {@code <@123>}、{@code <@!123>} 或纯数字里取用户号，失败返回 -1。 */
+    /**
+     * 从 {@code <@123>}、{@code <@!123>}、{@code [CQ:at,qq=123]} 或纯数字里取用户号，
+     * 失败返回 -1。
+     */
     static long parseUserId(String token) {
         if (token == null) {
             return -1L;
@@ -184,7 +209,16 @@ public final class TrpgCommandService {
         if (value.isEmpty()) {
             return -1L;
         }
-        if (value.startsWith("<@") && value.endsWith(">")) {
+        if (value.startsWith("[CQ:at,") && value.endsWith("]")) {
+            String body = value.substring("[CQ:at,".length(), value.length() - 1);
+            for (String part : body.split(",")) {
+                String pair = part.trim();
+                if (pair.startsWith("qq=")) {
+                    value = pair.substring("qq=".length()).trim();
+                    break;
+                }
+            }
+        } else if (value.startsWith("<@") && value.endsWith(">")) {
             value = value.substring(2, value.length() - 1);
             if (value.startsWith("!")) {
                 value = value.substring(1);

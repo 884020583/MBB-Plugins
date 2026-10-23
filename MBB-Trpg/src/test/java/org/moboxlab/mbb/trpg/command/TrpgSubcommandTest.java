@@ -88,14 +88,14 @@ public class TrpgSubcommandTest {
 
     @Test
     public void implementedFlagsMatchSliceBoundary() {
+        for (TrpgSubcommand subcommand : TrpgSubcommand.values()) {
+            assertTrue("S8 之后全部子指令都应启用：" + subcommand.label(),
+                    subcommand.implemented());
+        }
         assertTrue(TrpgSubcommand.START.implemented());
-        assertTrue(TrpgSubcommand.PC_REROLL.implemented());
-        assertTrue(TrpgSubcommand.LOG.implemented());
-        assertFalse(TrpgSubcommand.SCENE.implemented());
-        assertFalse(TrpgSubcommand.CHECK.implemented());
-        assertFalse(TrpgSubcommand.SCRIPT.implemented());
-        assertFalse(TrpgSubcommand.BLACKLIST.implemented());
-        assertFalse(TrpgSubcommand.AI.implemented());
+        assertTrue(TrpgSubcommand.SCENE.implemented());
+        assertTrue(TrpgSubcommand.BLACKLIST.implemented());
+        assertTrue(TrpgSubcommand.AI.implemented());
     }
 
     @Test
