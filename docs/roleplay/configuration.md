@@ -219,7 +219,7 @@ workspaceHistoryEnable: true
 workspaceHistoryMaxVersions: 10
 workspaceTrashKeepDays: 30
 webEnable: true
-webWhitelist: "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,fandom.com,namu.wiki,arca.live,pixiv.net,x.com,youtube.com,b23.tv"
+webWhitelist: "wikipedia.org,baike.baidu.com,bilibili.com,biligame.com,wiki.biligame.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,bangumi.tv,bgm.tv,huijiwiki.com,prts.wiki,wiki.gg,game8.jp,appmedia.jp,kamigame.jp,ani.gamer.com.tw,fandom.com,namu.wiki,arca.live,github.com,raw.githubusercontent.com,deepwiki.com,duckduckgo.com,bing.com"
 webSearchUrl: "https://www.bing.com/search?q={query}"
 webSearchFallbackUrl: "https://html.duckduckgo.com/html/?q={query}"
 webSearchMaxResults: 5

@@ -9,6 +9,12 @@ import java.util.Locale;
  */
 public class RoleplayConfig {
     public static final double DEFAULT_OTHER_ROLE_BOT_REPLY_CHANCE = 0.50;
+    public static final String DEFAULT_WEB_WHITELIST =
+            "wikipedia.org,baike.baidu.com,bilibili.com,biligame.com,wiki.biligame.com,"
+                    +"gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,bangumi.tv,bgm.tv,"
+                    +"huijiwiki.com,prts.wiki,wiki.gg,game8.jp,appmedia.jp,kamigame.jp,"
+                    +"ani.gamer.com.tw,fandom.com,namu.wiki,arca.live,github.com,"
+                    +"raw.githubusercontent.com,deepwiki.com,duckduckgo.com,bing.com";
     public static final int DEFAULT_MAX_CONSECUTIVE_OTHER_ROLE_MESSAGES = 2;
     public static final String DEFAULT_OTHER_ROLE_BOT_NAMES = "";
 
@@ -217,7 +223,7 @@ public class RoleplayConfig {
     public int workspaceHistoryMaxVersions = 10;
     public int workspaceTrashKeepDays = 30;
     public boolean webEnable = true;
-    public String webWhitelist = "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,fandom.com,namu.wiki,arca.live,pixiv.net,x.com,youtube.com,b23.tv";
+    public String webWhitelist = DEFAULT_WEB_WHITELIST;
     public String webSearchUrl = "https://www.bing.com/search?q={query}";
     public String webSearchFallbackUrl = "https://html.duckduckgo.com/html/?q={query}";
     public int webSearchMaxResults = 5;
@@ -636,7 +642,7 @@ public class RoleplayConfig {
                 plugin.getConfig().getInt("workspaceTrashKeepDays",30);
         config.webEnable = plugin.getConfig().getBoolean("webEnable",true);
         config.webWhitelist = plugin.getConfig().getString("webWhitelist",
-                "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,fandom.com,namu.wiki,arca.live,pixiv.net,x.com,youtube.com,b23.tv");
+                DEFAULT_WEB_WHITELIST);
         config.webSearchUrl = plugin.getConfig().getString("webSearchUrl",
                 "https://www.bing.com/search?q={query}");
         config.webSearchFallbackUrl = plugin.getConfig().getString("webSearchFallbackUrl",

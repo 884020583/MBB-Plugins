@@ -36,7 +36,6 @@ public class RoleplayWebService {
             "(?is)<meta[^>]+(?:property|name)\\s*=\\s*[\"'](?:og:image|twitter:image:src|twitter:image)[\"'][^>]+content\\s*=\\s*[\"']([^\"']+)");
     private static final Pattern IMAGE_META_CONTENT_FIRST = Pattern.compile(
             "(?is)<meta[^>]+content\\s*=\\s*[\"']([^\"']+)[\"'][^>]+(?:property|name)\\s*=\\s*[\"'](?:og:image|twitter:image:src|twitter:image)[\"']");
-    private static final Pattern PIXIV_ARTWORK = Pattern.compile("(?i)/(?:en/)?artworks/(\\d+)");
     private static final Pattern TITLE_TAG = Pattern.compile("(?is)<[^>]+>");
     private static final Pattern UDDG_TARGET = Pattern.compile("[?&]uddg=([^&]+)");
 
@@ -87,14 +86,6 @@ public class RoleplayWebService {
         int pageTransitions = 0;
         while (true) {
             validateImage(current,allowInternal);
-            if (pageTransitions == 0) {
-                String pixivPreview = pixivPreview(current,allowInternal);
-                if (!pixivPreview.isEmpty()) {
-                    current = new URL(current,pixivPreview);
-                    pageTransitions++;
-                    continue;
-                }
-            }
             HttpURLConnection connection = (HttpURLConnection)current.openConnection();
             connection.setInstanceFollowRedirects(false);
             connection.setRequestMethod("GET");
@@ -104,12 +95,6 @@ public class RoleplayWebService {
             connection.setRequestProperty("Accept",
                     "image/jpeg,image/png,image/gif,image/webp,text/html;q=0.9,*/*;q=0.1");
             connection.setRequestProperty("Accept-Encoding","identity");
-            if (imageReferer(current).isEmpty() && current.getHost() != null
-                    && current.getHost().toLowerCase(Locale.ROOT).contains("pixiv")) {
-                connection.setRequestProperty("Referer","https://www.pixiv.net/");
-            }
-            String referer = imageReferer(current);
-            if (!referer.isEmpty()) connection.setRequestProperty("Referer",referer);
             int code = connection.getResponseCode();
             if (code >= 300 && code < 400) {
                 String location = connection.getHeaderField("Location");
@@ -327,10 +312,6 @@ public class RoleplayWebService {
     }
 
     private void validateImage(URL url,boolean allowInternal) {
-        String host = url.getHost() == null ? "" : url.getHost().toLowerCase(Locale.ROOT);
-        if ("pximg.net".equals(host) || host.endsWith(".pximg.net")) {
-            return;
-        }
         validate(url,allowInternal);
     }
 
@@ -434,33 +415,6 @@ public class RoleplayWebService {
         matcher = IMAGE_META_CONTENT_FIRST.matcher(raw);
         if (matcher.find()) return decodeHtml(matcher.group(1)).trim();
         return "";
-    }
-
-    private String imageReferer(URL url) {
-        String host = url == null || url.getHost() == null
-                ? "" : url.getHost().toLowerCase(Locale.ROOT);
-        if (host.contains("pixiv") || host.endsWith("pximg.net")) {
-            return "https://www.pixiv.net/";
-        }
-        return "";
-    }
-
-    private String pixivPreview(URL page,boolean allowInternal) {
-        if (page == null) return "";
-        String host = service.safe(page.getHost()).toLowerCase(Locale.ROOT);
-        if (!host.equals("pixiv.net") && !host.endsWith(".pixiv.net")) return "";
-        Matcher matcher = PIXIV_ARTWORK.matcher(page.getPath() == null ? "" : page.getPath());
-        if (!matcher.find()) return "";
-        try {
-            URL api = new URL("https://www.pixiv.net/ajax/illust/"+matcher.group(1));
-            Document document = fetchDocument(api.toString(),allowInternal);
-            JSONObject json = JSONObject.parseObject(document.raw);
-            JSONObject body = json == null ? null : json.getJSONObject("body");
-            JSONObject urls = body == null ? null : body.getJSONObject("urls");
-            return urls == null ? "" : service.safe(urls.getString("regular"));
-        } catch (Exception e) {
-            return "";
-        }
     }
 
     private String imageFormat(byte[] bytes,String contentType) {

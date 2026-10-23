@@ -43,7 +43,7 @@ tool_search
 | `kb_search` | 检索已启用的知识库，返回条目、小节与正文 |
 | `web_fetch` | 读取白名单网站中的公开网页并净化正文 |
 | `web_search` | 联网搜索公开信息，返回标题和链接 |
-| `web_image_send` | 从白名单网页或 Pixiv 作品页读取一张公开图片并发送到当前群 |
+| `web_image_send` | 从白名单网页或图片直链读取一张公开图片并发送到当前群 |
 | `sticker_save` | 当前或最近图片适合复用时，主动保存到 MBB-Sticker 表情库 |
 | `profile_get` | 查询群员个人印象 |
 | `workspace_list` / `workspace_read` / `workspace_search` | 查询角色私有工作区 |
@@ -71,6 +71,10 @@ tool_search
 | `qq_group_leave` | 退出当前群，只能由 owner 明确要求；非 owner 请求在 MBB-QQ 服务层拒绝 |
 | `qq_delete_friend` / `qq_set_friend_remark` | 删除好友、设置好友备注，仅 owner |
 | `qq_set_avatar` / `qq_set_profile` / `qq_set_signature` | 设置机器人头像、资料卡和个性签名，仅 owner |
+
+`qq_friend_request` 支持 `requestIDs` 数组一次处理多个申请，也支持传 `userID` 处理同一 QQ 的全部待处理申请。
+MBB-QQ 会按 QQ 去重后只调用一次 OneBot，避免同一用户连续申请时后续 flag 返回 `No such request`：
+成功的申请会把该 QQ 剩余 pending 记录一起标记为已处理；服务端明确表示申请不存在时标记为 `expired`。
 
 `message_send` 只负责中途补一句，最终回复仍走普通回复通道。工具循环会提醒模型不要用它重复最终正文。
 代码会把 `message_send` 限制为每轮最多一次；一旦已经拿到实质性工具结果，再调用 `message_send`
@@ -124,14 +128,13 @@ toolMemoryMaxRows: 500
 `webSearchFallbackUrl`。结果会附带每个搜索源的 HTTP、页面大小、命中数和空结果原因，
 搜索结果本身标记为不可信外部资料。
 
-`web_image_send` 支持图片直链和含 `og:image` / `twitter:image` 的网页。Pixiv 作品页会尝试读取
-预览图并携带 Pixiv Referer；`i.pximg.net` 作为 Pixiv 图片 CDN 单独放行。只接受 JPEG、PNG、GIF、WebP，
+`web_image_send` 支持图片直链和含 `og:image` / `twitter:image` 的白名单网页，只接受 JPEG、PNG、GIF、WebP，
 拒绝 SVG，单张图片受 `webImageMaxBytes` 限制。该工具是副作用工具，每轮最多发送一张图。
 网页与搜索结果有 `webCacheSecond` TTL 缓存。
 
 ```yaml
 webEnable: true
-webWhitelist: "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,fandom.com,namu.wiki,arca.live,pixiv.net,x.com,youtube.com,b23.tv"
+webWhitelist: "wikipedia.org,baike.baidu.com,bilibili.com,biligame.com,wiki.biligame.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,bangumi.tv,bgm.tv,huijiwiki.com,prts.wiki,wiki.gg,game8.jp,appmedia.jp,kamigame.jp,ani.gamer.com.tw,fandom.com,namu.wiki,arca.live,github.com,raw.githubusercontent.com,deepwiki.com,duckduckgo.com,bing.com"
 webSearchUrl: "https://www.bing.com/search?q={query}"
 webSearchFallbackUrl: "https://html.duckduckgo.com/html/?q={query}"
 webOwnerAuthWindowSecond: 300
@@ -187,6 +190,20 @@ promptTotalChars: 120000
 覆盖写入会先写临时文件再原子替换；`workspaceHistoryEnable=true` 时旧版本写入 `.history/`。
 删除默认移动到 `.trash/`，只有显式 `permanent=true` 才彻底删除。回收站按
 `workspaceTrashKeepDays` 自动清理。
+
+适合放进工作区的内容：
+
+| 目录示例 | 用途 |
+|---|---|
+| `diary/YYYY-MM-DD.md` | 角色自己的简短日记和当天心情，不直接发群 |
+| `notes/people-<QQ>.md` | 对某个群员的相处笔记和称呼偏好，敏感信息仍应由记忆系统过滤 |
+| `drafts/` | 回复草稿、剧情片段、Qzone 说说草稿和以后可能要用的标题 |
+| `plans/todo.md` | 角色自己的计划和待办，需要到点提醒时仍创建正式 reminder |
+| `references/` | 允许公开引用的资料链接、知识库条目索引和作品笔记 |
+| `sticker-ideas/` | 想收录的表情标签、来源消息和画面描述 |
+
+不建议把密钥、真实地址、其他用户的私聊原文、可执行文件或需要长期运行的程序放进工作区。
+当前工作区只处理角色自己的文本与少量媒体文件，不提供代码执行、联网下载目录或系统文件访问。
 
 ## 工具期间的新消息
 

@@ -808,7 +808,7 @@ public class RoleplayToolRegistry {
 
         @Override
         public String description() {
-            return "从白名单网页或 Pixiv 作品页获取一张公开图片并发送到当前群；支持直接图片 URL 和作品页预览图";
+            return "从白名单网页获取一张公开图片并发送到当前群；支持直接图片 URL 和作品页预览图";
         }
 
         @Override
@@ -820,7 +820,7 @@ public class RoleplayToolRegistry {
         @Override
         public JSONObject schema() {
             JSONObject properties = new JSONObject(true);
-            properties.put("url",property("string","图片直链，或包含 og:image 的公开网页/Pixiv 作品页"));
+            properties.put("url",property("string","图片直链，或包含 og:image 的白名单公开网页"));
             return functionSchema(name(),description(),properties,new String[]{"url"});
         }
 

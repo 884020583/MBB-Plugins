@@ -15,7 +15,12 @@ import java.util.List;
  * Roleplay 配置迁移与缺失项补全
  */
 public class RoleplayConfigMigrator {
-    private static final String CURRENT_VERSION = "43";
+    private static final String CURRENT_VERSION = "44";
+    private static final String LEGACY_WEB_WHITELIST =
+            "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,"
+                    +"kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,"
+                    +"reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,fandom.com,namu.wiki,"
+                    +"arca.live,pixiv.net,x.com,youtube.com,b23.tv";
 
     private static class ConfigEntry {
         private final String key;
@@ -234,7 +239,8 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("workspaceHistoryMaxVersions","10","每个文件最多保留多少个历史版本"),
             new ConfigEntry("workspaceTrashKeepDays","30","工作区回收站保留天数"),
             new ConfigEntry("webEnable","true","是否开放受限网页浏览工具"),
-            new ConfigEntry("webWhitelist","wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,fandom.com,namu.wiki,arca.live,pixiv.net,x.com,youtube.com,b23.tv","网页允许域名，多个用英文逗号分隔"),
+            new ConfigEntry("webWhitelist",RoleplayConfig.DEFAULT_WEB_WHITELIST,
+                    "网页允许域名，多个用英文逗号分隔"),
             new ConfigEntry("webSearchUrl","https://www.bing.com/search?q={query}","联网搜索地址模板"),
             new ConfigEntry("webSearchFallbackUrl","https://html.duckduckgo.com/html/?q={query}","联网搜索备用地址模板"),
             new ConfigEntry("webSearchMaxResults","5","单次联网搜索最多返回多少条摘要"),
@@ -434,6 +440,8 @@ public class RoleplayConfigMigrator {
         boolean legacyToolCoreSticker = version < 43
                 && "tool_search,end_turn,message_send"
                 .equals(config.getString("toolCoreTools",""));
+        boolean legacySocialWebWhitelist = version < 44
+                && LEGACY_WEB_WHITELIST.equals(config.getString("webWhitelist",""));
         int changed = 0;
         List<ConfigEntry> missing = new ArrayList<>();
         for (ConfigEntry entry : DEFAULTS) {
@@ -447,7 +455,7 @@ public class RoleplayConfigMigrator {
                 plugin.getLogger().sendWarn("自动补全 Roleplay 配置失败，请检查 config.yml 权限！");
             }
         }
-        if (version < 43) {
+        if (version < 44) {
             config.set("configVersion",CURRENT_VERSION);
             if (!versionMissing) changed++;
         }
@@ -496,11 +504,7 @@ public class RoleplayConfigMigrator {
             changed++;
         }
         if (legacyWebWhitelist) {
-            config.set("webWhitelist",
-                    "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,"
-                            +"kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,"
-                            +"deepwiki.com,reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,"
-                            +"fandom.com,namu.wiki,arca.live,pixiv.net,x.com,youtube.com,b23.tv");
+            config.set("webWhitelist",RoleplayConfig.DEFAULT_WEB_WHITELIST);
             changed++;
         }
         if (legacyWebSearchPrimary) {
@@ -530,6 +534,10 @@ public class RoleplayConfigMigrator {
         }
         if (legacyToolCoreSticker) {
             config.set("toolCoreTools","tool_search,end_turn,message_send,sticker");
+            changed++;
+        }
+        if (legacySocialWebWhitelist) {
+            config.set("webWhitelist",RoleplayConfig.DEFAULT_WEB_WHITELIST);
             changed++;
         }
         if (legacyRoleBotChance) {
@@ -629,7 +637,7 @@ public class RoleplayConfigMigrator {
             config.set("replySegmentMaxChars","30");
             changed++;
         }
-        if (version < 43 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
+        if (version < 44 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
                 || legacyRouterMaxTokens || legacyRouterMaxTokens1200
                 || legacyPromptTotalChars || legacyMemoryRelevanceMaxChars
                 || legacyGlobalMemoryRelevanceMaxChars || legacyRouterReasoningEffort
@@ -640,7 +648,7 @@ public class RoleplayConfigMigrator {
                 || legacyInitialTrust || legacyIntimacyClose || legacyIntimacyVeryClose
                 || legacyRelationDailyMax || legacyEmotionEventCooldown
                 || legacyEmotionAnalyzeCooldown || legacyEmotionAnalyzeMaxDelta
-                || legacyToolCoreSticker) {
+                || legacyToolCoreSticker || legacySocialWebWhitelist) {
             if (config.save()) {
                 config.load();
             } else {
