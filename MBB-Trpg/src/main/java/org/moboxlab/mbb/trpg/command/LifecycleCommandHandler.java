@@ -4,6 +4,7 @@ import java.util.Collections;
 import java.util.EnumMap;
 import java.util.Map;
 
+import org.moboxlab.mbb.trpg.ai.AiTrigger;
 import org.moboxlab.mbb.trpg.card.CardGenerator;
 import org.moboxlab.mbb.trpg.present.TrpgMessageTemplates;
 import org.moboxlab.mbb.trpg.script.Scene;
@@ -126,6 +127,7 @@ final class LifecycleCommandHandler {
                 context.playerNames(snapshot, snapshot.kpUserId()),
                 opening == null ? snapshot.sceneTitle() : opening.title()));
         context.presenter().sendScene(actor.groupId(), snapshot.sessionId(), context.sceneCard(snapshot, script));
+        context.fireAiNow(AiTrigger.BEGIN, actor.groupId());
     }
 
     static void end(TrpgCommandContext context, SessionActor actor) {

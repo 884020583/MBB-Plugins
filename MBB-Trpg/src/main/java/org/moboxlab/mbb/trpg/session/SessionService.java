@@ -7,6 +7,8 @@ import java.util.Set;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.locks.Lock;
 
+import org.moboxlab.mbb.trpg.ai.AiFailureOutcome;
+import org.moboxlab.mbb.trpg.ai.AiFailureRecorder;
 import org.moboxlab.mbb.trpg.ai.AiToggle;
 import org.moboxlab.mbb.trpg.ai.SessionView;
 import org.moboxlab.mbb.trpg.ai.TrpgAiHostService;
@@ -35,14 +37,18 @@ import org.moboxlab.moboxbot.API.PluginLogger;
  * 不进入本类。惰性过期（T5 / T6）在读取状态的同一临界区内先执行，且不受请求者权限影响。
  * 所有写操作在群锁内完成，事件在解锁后统一发布（临界区不含网络发送）。</p>
  *
- * <p>场景、邀请、接管、跳过与检定类迁移由 S7 / S8 在此之上落地。AI 子状态按 §9.10 的 v1 契约桩
- * 处理：{@link #aiState(SessionActor, String)} 只做权限、状态与全局开关判定，不写库、不写审计。</p>
+ * <p>场景、邀请、接管、跳过与检定类迁移由 S7 / S8 在此之上落地。AI 子状态由
+ * {@link #aiState(SessionActor, String)} 入口经 CAS 落库（开关、挂起时间戳与失败计数三列）；
+ * 真实调用、排队、合并窗口与审计在 {@link TrpgAiHostService} 与 AiHostEngine。</p>
  *
- * <p>本类同时实现 {@link SessionView}（{@link #readSnapshot(long)}），供 AI 主持桩在 v1.1 取只读快照。</p>
+ * <p>本类同时实现 {@link SessionView}（{@link #readSnapshot(long)}），供 AI 主持取只读快照；
+ * 实现 {@link ScriptUsageIndex} 判断剧本是否被未归档局引用；实现 {@link AiFailureRecorder}
+ * 记录 AI 连续失败与挂起。</p>
  */
-public final class SessionService implements SessionView, ScriptUsageIndex {
+public final class SessionService implements SessionView, ScriptUsageIndex, AiFailureRecorder {
 
     private static final int MILLIS_PER_SECOND = 1000;
+    private static final int ACTION_MAX_CHARS = 200;
     private static final String ACTION_START = "start";
     private static final String ACTION_JOIN = "join";
     private static final String ACTION_LEAVE = "leave";
@@ -52,11 +58,13 @@ public final class SessionService implements SessionView, ScriptUsageIndex {
     private static final String ACTION_END = "end";
     private static final String ACTION_RESUME = "resume";
     private static final String ACTION_KP_LEFT = "kp-left";
+    private static final String ACTION_PLAYER_ACTION = "player-action";
     private static final String EVENT_CREATE = "create";
     private static final String EVENT_JOIN = "join";
     private static final String EVENT_LEAVE = "leave";
     private static final String EVENT_BEGIN = "begin";
     private static final String EVENT_RESUME = "resume";
+    private static final String EVENT_PLAYER_ACTION = "action";
 
     private final SessionStore store;
     private final ScriptCatalog catalog;
@@ -517,9 +525,9 @@ public final class SessionService implements SessionView, ScriptUsageIndex {
      * {@code /trpg ai on|off}（§6.1 / §6.3 / §9.2）：KP 可开可关，群管理员只能关，
      * 机器人管理员可开可关。
      *
-     * <p>v1 只判定权限、状态、冷却与全局开关：不写 {@code aiEnabled}、不写审计、
-     * 不注册定时器（§9.10）。全局关时 {@code on} 按「当前状态不可用」拒绝，
-     * 全局开时回「AI 主持将在 v1.1 提供」，{@code off} 恒回保持关闭。</p>
+     * <p>自 v1.1 起开关经 {@code casAiState} 落库（§9.2）：{@code on} 需全局已启用，
+     * 同时清除挂起时间戳与失败计数；{@code off} 写 {@code aiEnabled=false} 并清零挂起，
+     * 使挂起自然失效。参数解析在权限与状态判定之后，保持 §5.5 的判定顺序。</p>
      */
     public SessionResult aiState(SessionActor actor, final String rawWord) {
         if (!requireActor(actor).inGroup()) {
@@ -556,23 +564,141 @@ public final class SessionService implements SessionView, ScriptUsageIndex {
                 if (cooling != null) {
                     return cooling;
                 }
-                // v1 桩（§9.10）：不写 aiEnabled、不写审计、不注册定时器，只回固定分支。
                 AiToggle toggle = aiHost.toggle(rawWord);
                 if (toggle == AiToggle.USAGE) {
                     return reject(turn, SessionReject.BAD_ARGUMENT,
                             "参数不对：AI 主持只支持 on 或 off");
                 }
-                if (!toggle.accepted()) {
+                if (!enabling) {
+                    return switchAiOff(turn, row);
+                }
+                if (!aiHost.globallyEnabled()) {
                     return reject(turn, SessionReject.STATE_UNAVAILABLE,
-                            TrpgAiHostService.DETAIL_UNAVAILABLE);
+                            TrpgAiHostService.DETAIL_GLOBAL_OFF);
+                }
+                boolean resumed = row.aiSuspendedUntil() > turn.now || row.aiFailStreak() > 0;
+                int affected = store.casAiState(row.id(), row.state(), true, 0L, 0, turn.now);
+                if (affected != 1) {
+                    return reject(turn, SessionReject.STATE_UNAVAILABLE,
+                            TrpgAiHostService.DETAIL_WRITE_FAILED);
                 }
                 cooldowns.mark(ACTION_AI, actor.userId(), turn.groupId, turn.now);
-                return SessionResult.ok(turn.snapshot(row),
-                        toggle == AiToggle.ON_PLANNED
-                                ? TrpgAiHostService.DETAIL_PLANNED
-                                : TrpgAiHostService.DETAIL_OFF);
+                return SessionResult.ok(turn.reload(row),
+                        resumed ? TrpgAiHostService.DETAIL_RESUMED
+                                : TrpgAiHostService.DETAIL_ENABLED);
             }
         });
+    }
+
+    /** 关闭 AI：写 {@code aiEnabled=false} 并清零挂起与失败计数（挂起自然失效）。 */
+    private SessionResult switchAiOff(Turn turn, SessionRow row) {
+        boolean alreadyOff = !row.aiEnabled() && row.aiSuspendedUntil() == 0L
+                && row.aiFailStreak() == 0;
+        if (alreadyOff) {
+            cooldowns.mark(ACTION_AI, turn.actor.userId(), turn.groupId, turn.now);
+            return SessionResult.ok(turn.snapshot(row), TrpgAiHostService.DETAIL_ALREADY_OFF);
+        }
+        int affected = store.casAiState(row.id(), row.state(), false, 0L, 0, turn.now);
+        if (affected != 1) {
+            return reject(turn, SessionReject.STATE_UNAVAILABLE,
+                    TrpgAiHostService.DETAIL_WRITE_FAILED);
+        }
+        cooldowns.mark(ACTION_AI, turn.actor.userId(), turn.groupId, turn.now);
+        return SessionResult.ok(turn.reload(row), TrpgAiHostService.DETAIL_OFF);
+    }
+
+    /** 局内成员自由文本行动（v1.1 §9.4）：只记日志并刷新活动时间，不推进回合。 */
+    public SessionResult playerAction(SessionActor actor, final String text) {
+        if (!requireActor(actor).inGroup()) {
+            return SessionResult.rejected(SessionReject.NOT_IN_GROUP, "请在群内使用");
+        }
+        String raw = text == null ? "" : text.trim();
+        if (raw.isEmpty()) {
+            return SessionResult.rejected(SessionReject.BAD_ARGUMENT, "行动内容不能为空");
+        }
+        final String content = raw.length() > ACTION_MAX_CHARS
+                ? raw.substring(0, ACTION_MAX_CHARS) : raw;
+        return withGroupLock(actor, ACTION_PLAYER_ACTION, new LockedAction() {
+
+            @Override
+            public SessionResult run(Turn turn) {
+                SessionRow row = turn.active();
+                if (row == null) {
+                    return reject(turn, SessionReject.STATE_UNAVAILABLE, "本群暂无局");
+                }
+                if (row.state() != SessionState.RUNNING) {
+                    return reject(turn, SessionReject.STATE_UNAVAILABLE, "本局不在进行中");
+                }
+                if (!turn.snapshot(row).insideMember(actor.userId())) {
+                    return reject(turn, SessionReject.NO_PERMISSION, "只有局内成员可以行动");
+                }
+                appendLog(row.id(), EVENT_PLAYER_ACTION, actor.userId(), content, turn.now);
+                reader.touchActivity(turn.groupId, actor.userId());
+                return SessionResult.ok(turn.reload(row), "");
+            }
+        });
+    }
+
+    /** 记录一次 AI 失败（§9.5 / §9.6）：群锁内读活跃局、累加失败计数，达到阈值即写挂起时间戳。
+     *
+     * <p>不计失败的情形（授权关闭、无进行中局、群锁被占、CAS 未生效）返回
+     * {@link AiFailureOutcome#unavailable()}，调用方据此不发挂起提示。</p>
+     */
+    public AiFailureOutcome recordFailure(long groupId) {
+        if (groupId <= 0L) {
+            return AiFailureOutcome.unavailable();
+        }
+        if (!locks.tryLock(groupId)) {
+            return AiFailureOutcome.unavailable();
+        }
+        try {
+            long now = clock.nowMillis();
+            SessionRow row = store.findActiveByGroup(groupId);
+            if (row == null || row.state() != SessionState.RUNNING || !row.aiEnabled()) {
+                return AiFailureOutcome.unavailable();
+            }
+            int streak = row.aiFailStreak() + 1;
+            boolean suspend = streak >= config.aiSuspendFailStreak();
+            long suspendedUntil = suspend
+                    ? now + config.aiSuspendMinutes() * (long) MILLIS_PER_SECOND * 60L
+                    : row.aiSuspendedUntil();
+            int nextStreak = suspend ? 0 : streak;
+            int affected = store.casAiState(row.id(), row.state(), true, suspendedUntil, nextStreak,
+                    now);
+            if (affected != 1) {
+                warn("AI 失败计数未生效：session=" + row.id() + "，affected=" + affected);
+                return AiFailureOutcome.unavailable();
+            }
+            return AiFailureOutcome.of(row.id(), suspend, suspendedUntil, nextStreak);
+        } finally {
+            locks.unlock(groupId);
+        }
+    }
+
+    /** 记录一次 AI 成功（§9.5）：群锁内把连续失败计数清零，挂起时间戳保持不变。 */
+    public boolean recordSuccess(long groupId) {
+        if (groupId <= 0L) {
+            return false;
+        }
+        if (!locks.tryLock(groupId)) {
+            return false;
+        }
+        try {
+            long now = clock.nowMillis();
+            SessionRow row = store.findActiveByGroup(groupId);
+            if (row == null || row.state() != SessionState.RUNNING) {
+                return false;
+            }
+            int affected = store.casAiState(row.id(), row.state(), row.aiEnabled(),
+                    row.aiSuspendedUntil(), 0, now);
+            if (affected != 1) {
+                warn("AI 成功计数未生效：session=" + row.id() + "，affected=" + affected);
+                return false;
+            }
+            return true;
+        } finally {
+            locks.unlock(groupId);
+        }
     }
 
     /** KP 离群（T7）：招募期按 cancelled、进行中按 kp_left 归档。 */

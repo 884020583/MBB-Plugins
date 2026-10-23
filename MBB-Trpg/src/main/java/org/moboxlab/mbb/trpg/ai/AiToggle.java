@@ -1,19 +1,17 @@
 package org.moboxlab.mbb.trpg.ai;
 
 /**
- * v1 AI 主持桩对 {@code /trpg ai on|off} 的判定结果（规格 §9.10）。
+ * {@code /trpg ai on|off} 的判定结果（规格 §9.2）。
  *
- * <p>v1 没有 AI 实现：桩只判定全局开关并给出固定分支，不改任何状态。</p>
+ * <p>自 v1.1 起开关经 {@code SessionService} 落库：枚举只表达「参数是否合法、开关是否生效」，
+ * 具体文案与写库结果由局面服务给出。</p>
  */
 public enum AiToggle {
 
-    /** 全局开、参数为 on：回「AI 主持将在 v1.1 提供」，不置位。 */
-    ON_PLANNED(true),
+    /** 参数为 on 且全局已启用：按授权写入 {@code aiEnabled=true}；是否「清除挂起」由局面服务写入后判定。 */
+    ON_ACK(true),
 
-    /** 全局关、参数为 on：按「当前状态不可用」拒绝（不新增拒绝类别）。 */
-    ON_DISABLED(false),
-
-    /** 参数为 off：回「本局 AI 主持保持关闭」，同样不写库。 */
+    /** 参数为 off：写入 {@code aiEnabled=false}，挂起自然失效。 */
     OFF_ACK(true),
 
     /** 参数为空或无法识别：回用法提示。 */

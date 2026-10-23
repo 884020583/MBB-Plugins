@@ -12,6 +12,8 @@ import java.util.Map;
 import org.junit.After;
 import org.junit.Before;
 import org.junit.Test;
+import org.moboxlab.mbb.trpg.ai.AiTrigger;
+import org.moboxlab.mbb.trpg.ai.AiTriggerSink;
 import org.moboxlab.mbb.trpg.card.CardGenerator;
 import org.moboxlab.mbb.trpg.config.TrpgConfig;
 import org.moboxlab.mbb.trpg.present.TrpgLogReportSource;
@@ -120,6 +122,19 @@ public class TrpgKpCommandTest {
     }
 
     @Test
+    public void playerCheckUsesMergedTriggerWithEventText() {
+        startRunning();
+        FakeTriggerSink triggers = new FakeTriggerSink();
+        service.bindAiTriggers(triggers);
+
+        assertTrue(run(playerSender(), "check", SKILL));
+
+        assertEquals(0, triggers.immediateCount());
+        assertEquals(1, triggers.mergedCount());
+        assertTrue(triggers.lastMergedText().contains("检定"));
+    }
+
+    @Test
     public void checkRepliesFrozenCheckLayout() {
         startRunning();
 
@@ -178,13 +193,13 @@ public class TrpgKpCommandTest {
     }
 
     @Test
-    public void aiSwitchRepliesV1Branches() {
+    public void aiSwitchRepliesGlobalOffBranch() {
         startRunning();
 
-        // 默认配置 aiHost.enabled=false：ai on 按「当前状态不可用」拒绝（§9.10 / 验收 I1）。
+        // 默认配置 aiHost.enabled=false：ai on 按「当前状态不可用」拒绝（§9.2 / 验收 I1）。
         assertTrue(run(kpSender(), "ai", "on"));
         assertTrue(groupText(), groupText().contains("【错误】"));
-        assertTrue(groupText(), groupText().contains("当前状态不可用"));
+        assertTrue(groupText(), groupText().contains("未在配置中启用"));
 
         clock.advance(ACTION_GAP_MILLIS);
         assertTrue(run(kpSender(), "ai", "off"));
@@ -193,7 +208,7 @@ public class TrpgKpCommandTest {
     }
 
     @Test
-    public void aiOnWithGlobalSwitchReportsPlannedAndStatusStaysOff() {
+    public void aiOnWithGlobalSwitchWritesStateAndStatusTurnsOn() {
         startRunning();
         Map<String, String> raw = new LinkedHashMap<String, String>();
         raw.put("aiHost.enabled", "true");
@@ -205,14 +220,13 @@ public class TrpgKpCommandTest {
                 new CooldownRegistry(), new ErrorDedupe(), blacklist);
         command = new TrpgCommand(stubbedService);
 
-        // 全局开但 v1 仍是桩：回「将在 v1.1 提供」，不置位、零调用（验收 I7）。
         assertTrue(run(kpSender(), "ai", "on"));
         assertTrue(groupText(), groupText().contains("【主持】"));
-        assertTrue(groupText(), groupText().contains("v1.1"));
+        assertTrue(groupText(), groupText().contains("已开启 AI 主持"));
 
         clock.advance(ACTION_GAP_MILLIS);
         assertTrue(run(kpSender(), "status"));
-        assertTrue(groupText(), groupText().contains("AI 主持：关"));
+        assertTrue(groupText(), groupText().contains("AI 主持：开"));
     }
 
     @Test
@@ -349,5 +363,44 @@ public class TrpgKpCommandTest {
             }
         }
         return text.toString();
+    }
+
+    /** 记录 AI 触发类型的假端口。 */
+    private static final class FakeTriggerSink implements AiTriggerSink {
+
+        private final java.util.List<AiTrigger> immediate = new java.util.ArrayList<AiTrigger>();
+        private final java.util.List<AiTrigger> merged = new java.util.ArrayList<AiTrigger>();
+        private final java.util.List<String> mergedTexts = new java.util.ArrayList<String>();
+
+        @Override
+        public void fire(AiTrigger trigger, long groupId, long eventSeq, String eventText) {
+            merged.add(trigger);
+            mergedTexts.add(eventText == null ? "" : eventText);
+        }
+
+        @Override
+        public void fireNow(AiTrigger trigger, long groupId) {
+            immediate.add(trigger);
+        }
+
+        @Override
+        public void onEnabled(long sessionNo) {
+        }
+
+        int immediateCount() {
+            return immediate.size();
+        }
+
+        int mergedCount() {
+            return merged.size();
+        }
+
+        AiTrigger lastImmediate() {
+            return immediate.isEmpty() ? null : immediate.get(immediate.size() - 1);
+        }
+
+        String lastMergedText() {
+            return mergedTexts.isEmpty() ? "" : mergedTexts.get(mergedTexts.size() - 1);
+        }
     }
 }

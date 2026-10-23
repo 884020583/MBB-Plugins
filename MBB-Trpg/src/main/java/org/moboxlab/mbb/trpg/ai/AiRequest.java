@@ -14,10 +14,11 @@ public final class AiRequest {
     private final int timeoutSeconds;
     private final int maxTokens;
     private final double temperature;
+    private final String sessionId;
 
     public AiRequest(String triggerType, String stablePrefix, String cacheable, String dynamic,
                      int timeoutSeconds) {
-        this(triggerType, stablePrefix, cacheable, dynamic, timeoutSeconds, 0, -1.0D);
+        this(triggerType, stablePrefix, cacheable, dynamic, timeoutSeconds, 0, -1.0D, "");
     }
 
     /**
@@ -28,6 +29,17 @@ public final class AiRequest {
      */
     public AiRequest(String triggerType, String stablePrefix, String cacheable, String dynamic,
                      int timeoutSeconds, int maxTokens, double temperature) {
+        this(triggerType, stablePrefix, cacheable, dynamic, timeoutSeconds, maxTokens, temperature,
+                "");
+    }
+
+    /**
+     * 带会话标识的完整构造。
+     *
+     * @param sessionId 稳定的对话标识（MBB-AI 写入 x-opencode-session 头）；空串表示不带
+     */
+    public AiRequest(String triggerType, String stablePrefix, String cacheable, String dynamic,
+                     int timeoutSeconds, int maxTokens, double temperature, String sessionId) {
         this.triggerType = triggerType == null ? "" : triggerType;
         this.stablePrefix = stablePrefix == null ? "" : stablePrefix;
         this.cacheable = cacheable == null ? "" : cacheable;
@@ -35,6 +47,7 @@ public final class AiRequest {
         this.timeoutSeconds = timeoutSeconds;
         this.maxTokens = maxTokens;
         this.temperature = temperature;
+        this.sessionId = sessionId == null ? "" : sessionId;
     }
 
     public String triggerType() {
@@ -66,6 +79,11 @@ public final class AiRequest {
     /** 采样温度，负数表示用模型默认值。 */
     public double temperature() {
         return temperature;
+    }
+
+    /** 稳定对话标识；空串表示不传。 */
+    public String sessionId() {
+        return sessionId;
     }
 
     /** 三段拼接后的字符数，用于预算校验。 */

@@ -5,6 +5,8 @@ import java.util.Collections;
 import java.util.List;
 
 import org.moboxlab.moboxbot.API.PluginLogger;
+import org.moboxlab.mbb.trpg.ai.AiTrigger;
+import org.moboxlab.mbb.trpg.ai.AiTriggerSink;
 import org.moboxlab.mbb.trpg.card.CardGenerator;
 import org.moboxlab.mbb.trpg.config.TrpgConfig;
 import org.moboxlab.mbb.trpg.present.TrpgLogEntry;
@@ -60,6 +62,7 @@ public final class TrpgCommandContext {
     private final ErrorDedupe dedupe;
     private final BlacklistService blacklist;
     private final ScriptAdmin scriptAdmin;
+    private AiTriggerSink aiTriggers;
 
     public TrpgCommandContext(SessionService sessions, SessionLogService logs, ScriptCatalog catalog,
                               CardGenerator cards, TrpgPresenter presenter, TrpgNameResolver names,
@@ -130,6 +133,56 @@ public final class TrpgCommandContext {
     /** 剧本管理三件套；未装配时为 null（script 库管理动作不可用）。 */
     public ScriptAdmin scriptAdmin() {
         return scriptAdmin;
+    }
+
+    /** 装配 AI 触发端口（v1.1）；未装配时为 null，所有触发静默跳过。 */
+    public void bindAiTriggers(AiTriggerSink aiTriggers) {
+        this.aiTriggers = aiTriggers;
+    }
+
+    /** AI 触发端口；未装配时为 null。 */
+    public AiTriggerSink aiTriggers() {
+        return aiTriggers;
+    }
+
+    /**
+     * 事件落库后触发 AI 叙述；端口未装配或群号非法时静默跳过。
+     *
+     * @param trigger 触发类型
+     * @param groupId 群号
+     */
+    public void fireAi(AiTrigger trigger, long groupId) {
+        fireAi(trigger, groupId, 0L, "");
+    }
+
+    /** 带真实事件序号与文本的合并触发（§9.3）：玩家行动原文会进入提示词动态段。 */
+    public void fireAi(AiTrigger trigger, long groupId, long eventSeq, String eventText) {
+        if (aiTriggers != null) {
+            aiTriggers.fire(trigger, groupId, eventSeq, eventText);
+        }
+    }
+
+    /**
+     * 立即触发 AI 叙述（覆盖可合并类型的默认窗口语义）。
+     *
+     * @param trigger 触发类型
+     * @param groupId 群号
+     */
+    public void fireAiNow(AiTrigger trigger, long groupId) {
+        if (aiTriggers != null) {
+            aiTriggers.fireNow(trigger, groupId);
+        }
+    }
+
+    /**
+     * 通知 AI 端口本局开关已打开（清去重缓存）。
+     *
+     * @param sessionNo 局号
+     */
+    public void notifyAiEnabled(long sessionNo) {
+        if (aiTriggers != null) {
+            aiTriggers.onEnabled(sessionNo);
+        }
     }
 
     /** 拉黑名单服务；未装配时为 null（黑名单指令不可用）。 */

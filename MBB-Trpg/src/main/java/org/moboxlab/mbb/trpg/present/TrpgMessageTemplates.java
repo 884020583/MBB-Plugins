@@ -346,6 +346,76 @@ public final class TrpgMessageTemplates {
         return message.toString();
     }
 
+    /** AI 主持引擎输出（已含建议行）：标题加正文，正文已由解析器清洗与截断，落款注明 AI 参与。 */
+    public static String aiNarrated(String narration, String kpName) {
+        String name = kpName == null || kpName.trim().isEmpty() ? "KP" : kpName.trim();
+        return TrpgTitles.of(TrpgTitles.AI_NARRATION) + "\n"
+                + FORMATTER.truncate(FORMATTER.clean(narration), LIMIT_AI_NARRATION * 2)
+                + "\n\n—— 主持人 · " + name + "（AI 叙述）";
+    }
+
+    /** AI 不可用时的降级提示：不发叙述，只说明原因（原因统一翻成中文标签）。 */
+    public static String aiDegraded(String reason) {
+        String text = degradeLabel(reason);
+        StringBuilder body = new StringBuilder();
+        // 冻结子标题表不允许「降级」这类新词，提示放在正文里。
+        body.append(TrpgTitles.of(TrpgTitles.AI_NARRATION))
+                .append("\nAI 主持暂时不可用");
+        if (!text.isEmpty()) {
+            body.append("（").append(text).append("）");
+        }
+        body.append("，本回合由 KP 继续。");
+        return limit(body.toString(), LIMIT_AI_NARRATION);
+    }
+
+    /** AI 连续失败后挂起提示（§9.6）：每个挂起周期只发一次。 */
+    public static String aiSuspended() {
+        return limit(TrpgTitles.of(TrpgTitles.AI_NARRATION)
+                + "\nAI 主持已持续失败，暂时停用到本局结束或被重新开启。", LIMIT_NOTICE);
+    }
+
+    /** 引擎降级原因的内部码翻成群内可见的中文标签。 */
+    static String degradeLabel(String reason) {
+        String code = reason == null ? "" : reason.trim();
+        if ("queue_full".equals(code)) {
+            return "队列已满";
+        }
+        if ("queue_age".equals(code)) {
+            return "队列等待超时";
+        }
+        if ("busy".equals(code)) {
+            return "服务繁忙";
+        }
+        if ("timeout".equals(code)) {
+            return "超时";
+        }
+        if ("network".equals(code)) {
+            return "网络错误";
+        }
+        if (code.startsWith("http_") || "http".equals(code)) {
+            return "服务端错误";
+        }
+        if ("verification".equals(code)) {
+            return "输出校验失败";
+        }
+        if ("disabled".equals(code)) {
+            return "服务未启用";
+        }
+        if ("unavailable".equals(code)) {
+            return "服务不可用";
+        }
+        if ("interrupted".equals(code)) {
+            return "已中断";
+        }
+        if ("params".equals(code)) {
+            return "参数错误";
+        }
+        if ("unknown".equals(code)) {
+            return "未知错误";
+        }
+        return "";
+    }
+
     /** 重启恢复提示（招募期的局不发）。 */
     public static String recovered(Script script, SessionSnapshot snapshot, int playerCount) {
         String name = scriptName(script);

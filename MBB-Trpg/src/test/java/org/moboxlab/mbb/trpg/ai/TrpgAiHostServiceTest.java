@@ -53,18 +53,10 @@ public class TrpgAiHostServiceTest {
     }
 
     @Test
-    public void toggleOnIsDisabledWhenGlobalSwitchIsOff() {
-        TrpgAiHostService host = new TrpgAiHostService(config(false));
-
-        assertEquals(AiToggle.ON_DISABLED, host.toggle("on"));
-        assertFalse(host.toggle("on").accepted());
-    }
-
-    @Test
-    public void toggleOnIsPlannedWhenGlobalSwitchIsOn() {
+    public void toggleOnIsAcknowledgedWhenGlobalSwitchIsOn() {
         TrpgAiHostService host = new TrpgAiHostService(config(true));
 
-        assertEquals(AiToggle.ON_PLANNED, host.toggle("on"));
+        assertEquals(AiToggle.ON_ACK, host.toggle("on"));
         assertTrue(host.toggle("on").accepted());
     }
 

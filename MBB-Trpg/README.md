@@ -6,17 +6,24 @@ MoBoxBot 的跑团主持插件：在群里开一局 TRPG，提供 CoC 风格 d10
 
 ## 当前阶段
 
-S11 端到端验收与交付切片：按规格第 12 节逐条验收并留证据，版本 `V0.1.9.1.2011`（v1 交付）。
+v1.1 AI 主持切片已交付，版本 `V0.1.10.0.2155`（接 issue #15；v1 的 S1–S11 已合并）。
 
-- 验收结论：`build.ps1 -Test` → OK（497 个测试、45 个测试类），根 `build-all.ps1` 全仓构建成功；
-  逐条记录见 [docs/MBB-Trpg-acceptance.md](../docs/MBB-Trpg-acceptance.md)。
-- 新增端到端测试：`FullSessionAcceptanceTest`（AI 全关时 B–H 指令跑完整局，`ai_trace` 0 行、
-  收尾结算幂等）与 `ThousandCommandsLoadTest`（千次/两千次连续指令下群锁缓存有界、表行数不增、堆占用趋稳）。
-- 规格裁决：E1「招募中重启」改为招募期不发恢复提示、`recovered=true`；标题词表计数纠正为 29 个
-  （§10/§12 原写 24），并补「86 条 / 表内 87 行 / J12 N/A」计数口径。
-- 已知遗留（不阻断 v1）：B4 命中顺序、C1 状态机非法路径矩阵、B2 五角色 × 指令矩阵等留作后续切片。
+- `/trpg ai on|off` 升级为真实开关：`on` 写 `aiEnabled=1` 并清除 `aiSuspendedUntil`，
+  `off` 写 `aiEnabled=0`；AI 子状态三列（`aiEnabled` / `aiSuspendedUntil` / `aiFailStreak`）
+  统一由 `SessionService` 在群锁内 CAS 落库，命令层不直接写库。
+- 触发点：`begin` 开场、`scene` 推进、KP 代掷 `check` / `opposed` / `san` 立即触发；
+  玩家自由文本行动与玩家自助检定结果进入 20 秒或 5 条先到的合并窗口，按事件序号拼接。
+- 队列与并发：每群一条串行队列、待发上限 3，全局并发默认 2、全局等待上限 4（均可在
+  `aiHost.*` 配置）；超过上限不排队，直接按 `queue_full` 降级，不挤出已在队的请求。
+  忙碌、超时、网络、HTTP、输出校验、配置关闭等 12 类降级按规格表落审计与计数。
+- 失败与挂起：可计类失败连续 3 次后写 `aiSuspendedUntil` 并清队列；挂起期零调用，
+  每周期只发一次挂起提示；`/trpg ai on` 即清除挂起重新计数。
+- 审计：`ai_trace` 每请求至多 1 行；全局关、未授权、窗口无内容不写行，挂起丢弃写 `skipped`、换局换场景写 `stale`；`traceEnabled=false` 不写。
+- 叙述呈现：正文按 300 字截断、建议最多 3 条、数值变化/检定结论/推进句式越权即拒；
+  落款 `—— 主持人 · <KP 名>（AI 叙述）`；降级与挂起文案见
+  [docs/MBB-Trpg-presentation.md](../docs/MBB-Trpg-presentation.md) §3.6。
 
-S10 剧本导入与生成切片已交付：`ScriptLibrary`、`ScriptImportSessions`、`ScriptGenerationService`、
+S10 剧本导入与生成切片继续保留：`ScriptLibrary`、`ScriptImportSessions`、`ScriptGenerationService`、
 `MbbAiClient`、`ScriptRejectedStore` 与删除/替换的引用保护（`E_IN_USE`）全部接到 `/trpg script` 链路。
 
 - `ScriptLibrary`：真正的 `ScriptCatalog` 实现，内置剧本只读、导入剧本落在
@@ -37,19 +44,18 @@ S10 剧本导入与生成切片已交付：`ScriptLibrary`、`ScriptImportSessio
 - 共享端口微调：`AiRequest` 增加 `maxTokens` / `temperature`（旧 5 参构造保留），
   `Messaging` 增加 `sendGroupAt` 供生成结果只 @ 发起人。
 
-S9 AI 契约桩切片继续保留：按 §9.10 交付 v1 的「空 AI」——零调用、零审计、不注册定时器。
+S9 的「空 AI」契约桩已在 v1.1 升级为真实实现：
 
-- `TrpgAiHostService`：只读 `aiHost.*` 配置并判定全局开关，不持有 `AiClient`、`TraceStore`、
-  `Scheduler`，因此「零 AI 调用、零审计写入、无 AI 定时器」是结构性的（设计上满足 I5；装配层显式断言仍记在验收记录 §4 P2）。
-- `/trpg ai on|off`：开关词解析（`on`/`开`、`off`/`关`）与权限、状态、冷却判定仍留在
-  `SessionService`；全局关时 `ai on` 按「当前状态不可用」拒绝，全局开时回
-  「AI 主持将在 v1.1 提供」，两种情况都不写 `aiEnabled`、不写审计（验收 I1 / I7）。
-- `ai off` 对 KP、群管理员与机器人管理员恒回执，回【主持】「本局 AI 主持保持关闭。」；
-  无参数或其他词回用法提示（验收 I6）。
-- `status` 的 AI 行按库里的 `aiEnabled` / `aiSuspendedUntil` 投影；v1 桩不写这两列，
-  因此这一行在 v1 恒显「关」（验收 I4）。
-- `SessionService` 实现 `SessionView`（`readSnapshot(群号)`），插件装配时把只读视图交给桩，
-  v1.1 的叙述链路可直接复用而不新增测试缝（§9.11）。
+- `TrpgAiHostService` 现在实现 `AiTriggerSink` 并持有 `AiHostEngine`；全局关时仍保持
+  零调用、零审计、不注册定时器（结构性成立）。全局开时装配 `MbbAiClient`、
+  `SqlTraceStore`、`PluginManagerScheduler` 与 `TrpgAiNarrationSink`。
+- `/trpg ai on|off`：开关词解析仍在服务里，权限、状态、冷却判定仍留在 `SessionService`；
+  `on` 写库并清除挂起，`off` 幂等回执；全局关时 `ai on` 按「当前状态不可用」拒绝。
+- `status` 的 AI 行按库里的 `aiEnabled` / `aiSuspendedUntil` / `aiFailStreak` 投影。
+- `SessionService` 实现 `SessionView`（`readSnapshot(群号)`）与 `AiFailureRecorder`，
+  引擎按群号只读局面、失败计数经同一群锁 CAS 落库（§9.11 测试缝）。
+- 触发接线：`LifecycleCommandHandler.begin`、`KpCommandHandler` 的 `scene` / `check` /
+  `opposed` / `san` 与 `TrpgListener` 的玩家自由文本行动都已接入 `AiTriggerSink`。
 
 S8 已落地的指令层 B 继续保留：
 
@@ -162,8 +168,8 @@ S2 已落地的存储层继续保留：
 - `TrpgRetentionService`：启动清一轮，之后每小时清一次过期已结算局
   （先日志、再成员、最后主行，失败留待下一轮）与过期/超量审计行。
 
-v1 已注册 `/trpg`、`/r`、`/roll` 与 `/trpg script` 全链路；AI 主持按 S9 契约桩交付（零调用、零审计、
-不注册定时器），真实 AI 叙述归 v1.1。
+`/trpg`、`/r`、`/roll`、`/trpg script` 与 AI 主持全链路均已注册；AI 主持在配置
+`aiHost.enabled=true` 时装配引擎与每秒一次的合并窗口结算，否则保持零调用桩；模型与密钥由 MBB-AI 侧配置。
 
 ## 剧本文件
 

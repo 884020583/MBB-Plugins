@@ -1,6 +1,7 @@
 package org.moboxlab.mbb.trpg.session;
 
 import org.junit.Test;
+import org.moboxlab.mbb.trpg.ai.AiFailureOutcome;
 import org.moboxlab.mbb.trpg.ai.TrpgAiHostService;
 import org.moboxlab.mbb.trpg.config.TrpgConfig;
 import org.moboxlab.mbb.trpg.rule.DefaultRandomSource;
@@ -496,12 +497,12 @@ public class SessionServiceTest extends SessionTestFixture {
         assertTrue("群管理员不能开 AI", adminOn.rejected());
         assertEquals(SessionReject.NO_PERMISSION, adminOn.reject());
 
-        // v1 契约桩：全局开关关闭时 ai on 按「当前状态不可用」拒绝，且不写 aiEnabled（§9.10）。
+        // 全局开关关闭时 ai on 按「当前状态不可用」拒绝，且不写 aiEnabled（§9.2）。
         SessionResult kpOn = service.aiState(actor(KP), "on");
         assertTrue(kpOn.rejected());
         assertEquals(SessionReject.STATE_UNAVAILABLE, kpOn.reject());
-        assertTrue(kpOn.detail(), kpOn.detail().contains("当前状态不可用"));
-        assertFalse("v1 桩不写 aiEnabled", row(activeSessionId()).aiEnabled());
+        assertTrue(kpOn.detail(), kpOn.detail().contains("未在配置中启用"));
+        assertFalse("全局关不写 aiEnabled", row(activeSessionId()).aiEnabled());
 
         clock.advance(2000L);
         SessionResult adminOff = service.aiState(admin(OTHER), "off");
@@ -516,20 +517,61 @@ public class SessionServiceTest extends SessionTestFixture {
     }
 
     @Test
-    public void aiOnWithGlobalSwitchReportsPlannedWithoutWritingState() {
-        startJoining();
+    public void aiOnWithGlobalSwitchWritesStateAndClearsSuspension() {
+        startRunning();
         Map<String, String> raw = new LinkedHashMap<String, String>();
         raw.put("aiHost.enabled", "true");
         TrpgConfig enabled = TrpgConfig.fromValues(raw);
         SessionService stubbed = new SessionService(store, catalog, clock, DefaultRandomSource.INSTANCE,
                 enabled, collectingPublisher(), null, locks, new CooldownRegistry(), new ErrorDedupe(),
                 new TrpgAiHostService(enabled));
+        store.casAiState(activeSessionId(), SessionState.RUNNING, false, 123L, 2,
+                clock.nowMillis());
 
         SessionResult result = stubbed.aiState(actor(KP), "on");
 
         assertTrue(result.detail(), result.ok());
-        assertTrue(result.detail(), result.detail().contains("v1.1"));
-        assertFalse("v1 桩不写 aiEnabled", row(activeSessionId()).aiEnabled());
+        assertEquals(TrpgAiHostService.DETAIL_RESUMED, result.detail());
+        assertTrue("ai on 写 aiEnabled", row(activeSessionId()).aiEnabled());
+        assertEquals(0L, row(activeSessionId()).aiSuspendedUntil());
+        assertEquals(0, row(activeSessionId()).aiFailStreak());
+
+        clock.advance(2000L);
+        SessionResult off = stubbed.aiState(actor(KP), "off");
+        assertTrue(off.ok());
+        assertEquals(TrpgAiHostService.DETAIL_OFF, off.detail());
+        assertFalse(row(activeSessionId()).aiEnabled());
+    }
+
+    @Test
+    public void recordFailureSuspendsAtThresholdAndSuccessClearsStreak() {
+        startRunning();
+        Map<String, String> raw = new LinkedHashMap<String, String>();
+        raw.put("aiHost.enabled", "true");
+        TrpgConfig enabled = TrpgConfig.fromValues(raw);
+        SessionService stubbed = new SessionService(store, catalog, clock, DefaultRandomSource.INSTANCE,
+                enabled, collectingPublisher(), null, locks, new CooldownRegistry(), new ErrorDedupe(),
+                new TrpgAiHostService(enabled));
+        stubbed.aiState(actor(KP), "on");
+        store.casAiState(activeSessionId(), SessionState.RUNNING, true, 0L, 0, clock.nowMillis());
+
+        AiFailureOutcome first = stubbed.recordFailure(GROUP);
+        assertTrue(first.available());
+        assertEquals(1, first.failStreak());
+        assertFalse(first.suspendedNow());
+
+        assertTrue(stubbed.recordSuccess(GROUP));
+        assertEquals(0, row(activeSessionId()).aiFailStreak());
+
+        AiFailureOutcome second = stubbed.recordFailure(GROUP);
+        assertEquals(1, second.failStreak());
+        AiFailureOutcome third = stubbed.recordFailure(GROUP);
+        assertEquals(2, third.failStreak());
+        assertFalse(third.suspendedNow());
+        AiFailureOutcome fourth = stubbed.recordFailure(GROUP);
+        assertTrue(fourth.suspendedNow());
+        assertTrue(fourth.suspendedUntil() > clock.nowMillis());
+        assertEquals(0, row(activeSessionId()).aiFailStreak());
     }
 
     @Test
