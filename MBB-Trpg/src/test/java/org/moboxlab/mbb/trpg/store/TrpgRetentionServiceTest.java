@@ -355,6 +355,12 @@ public class TrpgRetentionServiceTest {
         }
 
         @Override
+        public int casScript(long sessionId, SessionState expected, String scriptId,
+                             long updateTime) {
+            return delegate.casScript(sessionId, expected, scriptId, updateTime);
+        }
+
+        @Override
         public int touchActivity(long sessionId, long lastActivityAt, long updateTime) {
             return delegate.touchActivity(sessionId, lastActivityAt, updateTime);
         }

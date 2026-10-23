@@ -19,6 +19,7 @@ import org.moboxlab.mbb.trpg.session.ErrorDedupe;
 import org.moboxlab.mbb.trpg.session.SessionActor;
 import org.moboxlab.mbb.trpg.session.SessionLogService;
 import org.moboxlab.mbb.trpg.session.SessionService;
+import org.moboxlab.mbb.trpg.store.BlacklistService;
 
 /**
  * /trpg 指令的分发门面。
@@ -55,12 +56,27 @@ public final class TrpgCommandService {
                               TrpgNameResolver names,
                               TrpgConfig config, Clock clock, PluginLogger logger,
                               CooldownRegistry cooldowns, ErrorDedupe dedupe) {
+        this(sessions, logs, catalog, cards, presenter, names, config, clock, logger, cooldowns,
+                dedupe, null);
+    }
+
+    /**
+     * 生产装配（含黑名单）：黑名单命中时静默丢弃群内指令，不产生任何回执。
+     */
+    public TrpgCommandService(SessionService sessions, SessionLogService logs, ScriptCatalog catalog,
+                              CardGenerator cards, TrpgPresenter presenter,
+                              TrpgNameResolver names,
+                              TrpgConfig config, Clock clock, PluginLogger logger,
+                              CooldownRegistry cooldowns, ErrorDedupe dedupe,
+                              BlacklistService blacklist) {
         this.context = new TrpgCommandContext(sessions, logs, catalog, cards, presenter, names, config,
-                clock, logger, cooldowns, dedupe);
+                clock, logger, cooldowns, dedupe, blacklist);
         Map<TrpgSubcommand, TrpgSubcommandHandler> registered =
                 new EnumMap<TrpgSubcommand, TrpgSubcommandHandler>(TrpgSubcommand.class);
         registered.putAll(LifecycleCommandHandler.handlers());
         registered.putAll(ReadOnlyCommandHandler.handlers());
+        registered.putAll(KpCommandHandler.handlers());
+        registered.putAll(AdminCommandHandler.handlers());
         this.handlers = registered;
     }
 
@@ -111,6 +127,11 @@ public final class TrpgCommandService {
         TrpgSubcommand subcommand = resolved.subcommand();
         if (!actor.inGroup() && subcommand.groupOnly()) {
             context.rejectError(actor, KEY_PRIVATE, "请在群内使用", PRIVATE_NEXT);
+            return true;
+        }
+        if (actor.inGroup() && context.blacklist() != null
+                && context.blacklist().contains(actor.groupId(), actor.userId())) {
+            // 黑名单命中：静默丢弃，不产生任何回执（§6.2）。
             return true;
         }
         TrpgSubcommandHandler handler = handlers.get(subcommand);
@@ -175,7 +196,10 @@ public final class TrpgCommandService {
                 groupAdmin, botAdmin);
     }
 
-    /** 从 {@code <@123>}、{@code <@!123>} 或纯数字里取用户号，失败返回 -1。 */
+    /**
+     * 从 {@code <@123>}、{@code <@!123>}、{@code [CQ:at,qq=123]} 或纯数字里取用户号，
+     * 失败返回 -1。
+     */
     static long parseUserId(String token) {
         if (token == null) {
             return -1L;
@@ -184,7 +208,16 @@ public final class TrpgCommandService {
         if (value.isEmpty()) {
             return -1L;
         }
-        if (value.startsWith("<@") && value.endsWith(">")) {
+        if (value.startsWith("[CQ:at,") && value.endsWith("]")) {
+            String body = value.substring("[CQ:at,".length(), value.length() - 1);
+            for (String part : body.split(",")) {
+                String pair = part.trim();
+                if (pair.startsWith("qq=")) {
+                    value = pair.substring("qq=".length()).trim();
+                    break;
+                }
+            }
+        } else if (value.startsWith("<@") && value.endsWith(">")) {
             value = value.substring(2, value.length() - 1);
             if (value.startsWith("!")) {
                 value = value.substring(1);

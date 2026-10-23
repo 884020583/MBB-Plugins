@@ -60,6 +60,8 @@ public final class SqlSessionStore implements SessionStore {
             + " summary = ?, updateTime = ? WHERE id = ? AND state = ?";
     private static final String SQL_CAS_SCENE = "UPDATE " + TrpgSchemaService.TABLE_SESSION
             + " SET sceneIndex = ?, sceneTitle = ?, updateTime = ? WHERE id = ? AND state = ?";
+    private static final String SQL_CAS_SCRIPT = "UPDATE " + TrpgSchemaService.TABLE_SESSION
+            + " SET scriptID = ?, updateTime = ? WHERE id = ? AND state = ?";
     private static final String SQL_CAS_AI_STATE = "UPDATE " + TrpgSchemaService.TABLE_SESSION
             + " SET aiEnabled = ?, aiSuspendedUntil = ?, aiFailStreak = ?, updateTime = ?"
             + " WHERE id = ? AND state = ?";
@@ -154,6 +156,7 @@ public final class SqlSessionStore implements SessionStore {
         all.add(SQL_INSERT_SESSION);
         all.add(SQL_CAS_TRANSITION);
         all.add(SQL_CAS_SCENE);
+        all.add(SQL_CAS_SCRIPT);
         all.add(SQL_CAS_AI_STATE);
         all.add(SQL_TOUCH_ACTIVITY);
         all.add(SQL_SETTLE_SUMMARY);
@@ -223,6 +226,12 @@ public final class SqlSessionStore implements SessionStore {
                         long updateTime) {
         return storage.update(SQL_CAS_SCENE, sceneIndex, sceneTitle == null ? "" : sceneTitle,
                 updateTime, sessionId, stateText(expected));
+    }
+
+    @Override
+    public int casScript(long sessionId, SessionState expected, String scriptId, long updateTime) {
+        return storage.update(SQL_CAS_SCRIPT, scriptId == null ? "" : scriptId, updateTime,
+                sessionId, stateText(expected));
     }
 
     @Override

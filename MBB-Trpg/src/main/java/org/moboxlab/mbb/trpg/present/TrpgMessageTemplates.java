@@ -46,6 +46,8 @@ public final class TrpgMessageTemplates {
     private static final int LIMIT_SAN = 200;
     private static final int LIMIT_GROWTH = 300;
     private static final int LIMIT_ADJUST = 160;
+    private static final int LIMIT_TAKE = 120;
+    private static final int LIMIT_SCRIPT_CHANGED = 200;
     private static final int LIMIT_TRIGGER = 200;
     private static final int LIMIT_AI_NARRATION = 300;
     private static final int LIMIT_RECOVERED = 200;
@@ -243,6 +245,45 @@ public final class TrpgMessageTemplates {
     public static String adjust(String name, String item, String from, String to) {
         return limit(TrpgTitles.of(TrpgTitles.ADJUST, name) + "\n" + item + "：" + from + " → " + to + "。",
                 LIMIT_ADJUST);
+    }
+
+    /** KP 代管某一成员的行动。 */
+    public static String takeoverAction(String name) {
+        return limit(TrpgTitles.of(TrpgTitles.TAKE, name) + "\n"
+                + "KP 接管了该成员的回合，本局由其代掷。", LIMIT_TAKE);
+    }
+
+    /** 跳过回执：只记日志，不改角色卡。 */
+    public static String skipped(String name, String reason) {
+        StringBuilder body = new StringBuilder();
+        body.append(TrpgTitles.of(TrpgTitles.NOTICE)).append("\n已记录跳过：").append(name);
+        String trimmed = reason == null ? "" : reason.trim();
+        if (!trimmed.isEmpty()) {
+            body.append("。原因：").append(trimmed);
+        } else {
+            body.append('。');
+        }
+        return limit(body.toString(), LIMIT_NOTICE);
+    }
+
+    /** 对抗无胜者（双方都失败或都大失败）。 */
+    public static String opposedDraw(TrpgCheckView left, TrpgCheckView right, String reason) {
+        StringBuilder body = new StringBuilder();
+        body.append(TrpgTitles.of(TrpgTitles.OPPOSED, left.skillLabel())).append('\n');
+        body.append(left.rollerName()).append("：1D100 = ").append(left.rolled()).append(" / ")
+                .append(left.target()).append(' ').append(degreeClause(left)).append('\n');
+        body.append(right.rollerName()).append("：1D100 = ").append(right.rolled()).append(" / ")
+                .append(right.target()).append(' ').append(degreeClause(right)).append('\n');
+        String trimmed = reason == null ? "" : reason.trim();
+        body.append(trimmed.isEmpty() ? "双方均未成功，无胜者。" : "双方均未成功，无胜者（" + trimmed + "）。");
+        return limit(body.toString(), LIMIT_OPPOSED);
+    }
+
+    /** 本局剧本已切换（仅招募期）。 */
+    public static String scriptChanged(Script script) {
+        String name = script == null ? "" : script.name();
+        return limit(TrpgTitles.of(TrpgTitles.SCRIPT) + "\n本局剧本已切换为《" + name + "》。",
+                LIMIT_SCRIPT_CHANGED);
     }
 
     /** KP 触发提示（只私聊 KP）。 */

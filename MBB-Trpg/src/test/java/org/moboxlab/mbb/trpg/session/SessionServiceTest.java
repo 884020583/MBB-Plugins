@@ -484,30 +484,30 @@ public class SessionServiceTest extends SessionTestFixture {
     @Test
     public void aiToggleFollowsPermissionMatrix() {
         startJoining();
-        SessionResult playerOn = service.aiState(actor(PLAYER), true);
+        SessionResult playerOn = service.aiState(actor(PLAYER), "on");
         assertTrue(playerOn.rejected());
         assertEquals(SessionReject.NO_PERMISSION, playerOn.reject());
 
-        SessionResult adminOn = service.aiState(admin(OTHER), true);
+        SessionResult adminOn = service.aiState(admin(OTHER), "on");
         assertTrue("群管理员不能开 AI", adminOn.rejected());
         assertEquals(SessionReject.NO_PERMISSION, adminOn.reject());
 
-        SessionResult kpOn = service.aiState(actor(KP), true);
+        SessionResult kpOn = service.aiState(actor(KP), "on");
         assertTrue(kpOn.detail(), kpOn.ok());
         assertTrue(row(activeSessionId()).aiEnabled());
 
-        SessionResult adminOff = service.aiState(admin(OTHER), false);
+        SessionResult adminOff = service.aiState(admin(OTHER), "off");
         assertTrue(adminOff.detail(), adminOff.ok());
         assertFalse(row(activeSessionId()).aiEnabled());
 
         clock.advance(2000L);
-        SessionResult kpOff = service.aiState(botAdmin(OTHER), false);
+        SessionResult kpOff = service.aiState(botAdmin(OTHER), "off");
         assertTrue(kpOff.ok());
     }
 
     @Test
     public void aiToggleWithoutSessionIsRejected() {
-        SessionResult result = service.aiState(actor(KP), true);
+        SessionResult result = service.aiState(actor(KP), "on");
         assertTrue(result.rejected());
         assertEquals(SessionReject.STATE_UNAVAILABLE, result.reject());
     }

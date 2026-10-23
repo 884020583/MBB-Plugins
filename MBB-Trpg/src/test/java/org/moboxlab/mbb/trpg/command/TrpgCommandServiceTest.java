@@ -101,14 +101,16 @@ public class TrpgCommandServiceTest {
     }
 
     @Test
-    public void helpListsImplementedCommandsAndPendingOnes() {
+    public void helpListsAllImplementedCommands() {
         assertTrue(run(kpSender(), "help"));
         String text = lastGroupText();
         assertTrue(text, text.contains("【帮助】"));
         assertTrue(text, text.contains("start / 开团"));
         assertTrue(text, text.contains("pc reroll / 重掷"));
-        assertTrue(text, text.contains("后续版本启用："));
         assertTrue(text, text.contains("scene / 场景"));
+        assertTrue(text, text.contains("blacklist / 黑名单"));
+        assertFalse("全部子指令都已落地，帮助里不再有后续启用行：" + text,
+                text.contains("后续版本启用："));
         assertTrue(text, text.contains("直接发送 /r 3d6"));
     }
 
@@ -120,7 +122,8 @@ public class TrpgCommandServiceTest {
         assertTrue(text, text.contains("已启用"));
         clock.advance(2000L);
         assertTrue(run(kpSender(), "help", "scene"));
-        assertTrue(lastGroupText(), lastGroupText().contains("该指令将在后续版本启用"));
+        assertTrue(lastGroupText(), lastGroupText().contains("scene / 场景 <标题>"));
+        assertTrue(lastGroupText(), lastGroupText().contains("已启用"));
     }
 
     @Test
@@ -412,11 +415,11 @@ public class TrpgCommandServiceTest {
     }
 
     @Test
-    public void unimplementedSubcommandRepliesNotice() {
+    public void kpCommandWithoutSessionRepliesStateError() {
         assertTrue(run(kpSender(), "scene", "书房"));
         String text = lastGroupText();
-        assertTrue(text, text.contains("【提示】"));
-        assertTrue(text, text.contains("该指令将在后续版本启用：scene / 场景"));
+        assertTrue(text, text.contains("【错误】"));
+        assertTrue(text, text.contains("本群暂无局"));
     }
 
     @Test

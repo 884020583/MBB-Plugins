@@ -27,6 +27,7 @@ import org.moboxlab.mbb.trpg.session.SessionReject;
 import org.moboxlab.mbb.trpg.session.SessionResult;
 import org.moboxlab.mbb.trpg.session.SessionService;
 import org.moboxlab.mbb.trpg.session.SessionSnapshot;
+import org.moboxlab.mbb.trpg.store.BlacklistService;
 import org.moboxlab.mbb.trpg.store.CardData;
 import org.moboxlab.mbb.trpg.store.LogRow;
 
@@ -56,11 +57,22 @@ public final class TrpgCommandContext {
     private final PluginLogger logger;
     private final CooldownRegistry cooldowns;
     private final ErrorDedupe dedupe;
+    private final BlacklistService blacklist;
 
     public TrpgCommandContext(SessionService sessions, SessionLogService logs, ScriptCatalog catalog,
                               CardGenerator cards, TrpgPresenter presenter, TrpgNameResolver names,
                               TrpgConfig config, Clock clock, PluginLogger logger,
                               CooldownRegistry cooldowns, ErrorDedupe dedupe) {
+        this(sessions, logs, catalog, cards, presenter, names, config, clock, logger, cooldowns,
+                dedupe, null);
+    }
+
+    /** 生产装配：额外注入拉黑名单服务，供 blacklist 指令与消息入口判定使用。 */
+    public TrpgCommandContext(SessionService sessions, SessionLogService logs, ScriptCatalog catalog,
+                              CardGenerator cards, TrpgPresenter presenter, TrpgNameResolver names,
+                              TrpgConfig config, Clock clock, PluginLogger logger,
+                              CooldownRegistry cooldowns, ErrorDedupe dedupe,
+                              BlacklistService blacklist) {
         if (sessions == null) {
             throw new IllegalArgumentException("局面服务不能为空");
         }
@@ -99,6 +111,12 @@ public final class TrpgCommandContext {
         this.logger = logger;
         this.cooldowns = cooldowns;
         this.dedupe = dedupe;
+        this.blacklist = blacklist;
+    }
+
+    /** 拉黑名单服务；未装配时为 null（黑名单指令不可用）。 */
+    public BlacklistService blacklist() {
+        return blacklist;
     }
 
     public SessionService sessions() {
