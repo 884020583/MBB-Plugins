@@ -27,7 +27,7 @@ MoBoxBot 独立插件仓库。
 | [MBB-Random](docs/MBB-Random.md) | `/random` | `EVERYONE` | 指定范围随机数 |
 | [MBB-Reload](docs/MBB-Reload.md) | `/reload` | `OWNER` | 重载主程序配置 |
 | [MBB-Remind](docs/MBB-Remind.md) | `/remind` | `BOT_ADMIN` | 定时提醒 |
-| [MBB-Roleplay](docs/MBB-Roleplay.md) | `/role ...` | `BOT_ADMIN` | 按角色设定参与群聊，支持记忆、情绪、原生工具、联网检索与私有工作区 |
+| [MBB-Roleplay](docs/MBB-Roleplay.md) | `/role ...` | `BOT_ADMIN` | 按角色设定参与群聊和私聊，支持跨群语义记忆、随机刻主动互动、情绪、原生工具、联网检索与私有工作区 |
 | [MBB-Status](docs/MBB-Status.md) | `/status` | `BOT_ADMIN` | 系统运行状态 |
 | [MBB-Sticker](docs/MBB-Sticker.md) | `/sticker ...` | `EVERYONE` / `BOT_ADMIN` | 表情包收录、AI 情绪标签检索与发送 |
 | [MBB-Vision](docs/MBB-Vision.md) | `/vision ...` | `BOT_ADMIN` | 公用识图与本地缓存，供表情包和角色扮演调用 |

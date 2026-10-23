@@ -70,6 +70,8 @@ public class RoleplayService {
     private final RoleplayPromptAssembler promptAssembler;
     private final RoleplayMemoryBackupService memoryBackupService;
     private final RoleplayMemoryUpdateService memoryUpdateService;
+    private final RoleplayPrivateChatService privateChatService;
+    private final RoleplayRandomTickService randomTickService;
     private final RoleplayBatchScheduler batchScheduler;
     private final RoleplayPokeService pokeService;
     private final RoleplayReplyExecutor replyExecutor;
@@ -294,6 +296,8 @@ public class RoleplayService {
         this.promptAssembler = new RoleplayPromptAssembler(this);
         this.memoryBackupService = new RoleplayMemoryBackupService(this);
         this.memoryUpdateService = new RoleplayMemoryUpdateService(this);
+        this.privateChatService = new RoleplayPrivateChatService(plugin,config,this);
+        this.randomTickService = new RoleplayRandomTickService(plugin,config,this);
         this.batchScheduler = new RoleplayBatchScheduler(this);
         this.pokeService = new RoleplayPokeService(this);
         this.replyExecutor = new RoleplayReplyExecutor(this);
@@ -349,10 +353,13 @@ public class RoleplayService {
         toolMemoryService.init();
         toolTurnService.init();
         threadService.init();
+        privateChatService.init();
+        randomTickService.init();
         attentionService.reload(config);
         executorService.ensureTurnExecutor();
         executorService.ensureBackgroundExecutor();
         dailyReviewService.ensureTask();
+        randomTickService.ensureTask();
     }
 
     public void reload(RoleplayConfig config,RoleplayPersona persona) {
@@ -364,6 +371,8 @@ public class RoleplayService {
         knowledgeService.reload(config);
         emotionService.reload(config,persona);
         memberService.reload(config);
+        privateChatService.reload(config);
+        randomTickService.reload(config);
         quietService.reload(config);
         replyFeedbackService.reload(config);
         expressionService.reload(config);
@@ -377,6 +386,7 @@ public class RoleplayService {
         executorService.ensureTurnExecutor();
         executorService.ensureBackgroundExecutor();
         dailyReviewService.ensureTask();
+        randomTickService.ensureTask();
     }
 
     /**
@@ -459,6 +469,13 @@ public class RoleplayService {
      */
     public void handlePoke(NoticeEvent event) {
         pokeService.handlePoke(event);
+    }
+
+    /**
+     * 私聊消息入口。私聊使用独立上下文，不进入群合批和群话题疲劳。
+     */
+    public void handlePrivate(org.moboxlab.moboxbot.API.Event.PrivateMessageEvent event) {
+        privateChatService.handle(event);
     }
 
 
@@ -601,6 +618,14 @@ public class RoleplayService {
 
     RoleplayMemoryQueryService memoryQueryService() {
         return memoryQueryService;
+    }
+
+    RoleplayPrivateChatService privateChatService() {
+        return privateChatService;
+    }
+
+    RoleplayRandomTickService randomTickService() {
+        return randomTickService;
     }
 
     RoleplayBatchScheduler batchScheduler() {

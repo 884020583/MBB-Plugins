@@ -69,11 +69,12 @@ public class RoleplayPromptAssembler {
 
     private String assembleStableMaterials() {
         List<RoleplayMaterial> materials = new ArrayList<>();
-        materials.add(new RoleplayMaterial("persona.core",true,100,6000,
+        //角色设定是背景，不抢占当前对话和记忆的优先级
+        materials.add(new RoleplayMaterial("persona.core",true,78,5000,
                 () -> service.persona().coreText()));
-        materials.add(new RoleplayMaterial("persona.appearance",true,93,1200,
+        materials.add(new RoleplayMaterial("persona.appearance",true,72,1000,
                 () -> service.persona().appearanceText()));
-        materials.add(new RoleplayMaterial("students.brief",true,91,4000,
+        materials.add(new RoleplayMaterial("students.brief",true,74,3000,
                 () -> service.studentBriefText()));
         return RoleplayMaterialBudget.assemble(materials,null,0);
     }
@@ -142,6 +143,9 @@ public class RoleplayPromptAssembler {
                 +"不要把待办、提醒或清单列成一行念出来，那像工单播报；一次只说其中一件，或者用聊天的方式提一句。"
                 +"角色设定里的职业、特长和长期项目只是背景，不代表角色随时都在做那件事；"
                 +"除非当前消息明确问到或当前对话本来就在聊，否则不要主动反复提自己的职业、兴趣或项目进度。"
+                +"社团分工、画笔、画稿、剧本、游戏开发、工具和长期计划都只是背景，不是口头禅；"
+                +"当前话题没有直接涉及这些内容时，宁可聊眼前的人、天气、吃饭、休息或对方刚说的事。"
+                +"同一类兴趣词或项目词不要连续出现在多条回复里；最近回复已经提过时，本轮换一个具体话题。"
                 +"优先回应当前话题和眼前的人。"
                 +"如果当前消息带有 [表情包：...]，它只表示对方附带的情绪，不要单独评价或回复这个表情包本身。"
                 +"如果消息里出现 [引用 某人：内容]，那是对方引用回复的原话，要结合这句话理解对方在回应什么。"

@@ -8,8 +8,9 @@ MoBoxBot 角色扮演插件。插件读取 persona 文件，让角色以普通�
 
 | 分区 | 主要能力 | 详细文档 |
 |---|---|---|
-| 会话与回复 | 群级开关、参与概率、冷却、消息合批、路由判断、引用回复、结构化输出 | [回复架构](../docs/roleplay/architecture.md) |
-| 记忆系统 | 短期、长期、永久、群员个人记忆；相关性注入、合并、备份与恢复 | [记忆系统](../docs/roleplay/memory.md) |
+| 会话与回复 | 群聊与 owner/白名单私聊、参与概率、冷却、消息合批、路由判断、引用回复、结构化输出 | [回复架构](../docs/roleplay/architecture.md) |
+| 记忆系统 | 跨群短期、长期、永久、个人记忆；来源保留、私聊上下文、相关性注入、合并、备份与恢复 | [记忆系统](../docs/roleplay/memory.md) |
+| 随机刻 | 10 到 30 分钟主动行为，夜间静默、去重、频率限制和 `NO_OP` | [配置与部署](../docs/roleplay/configuration.md) |
 | 情绪与关系 | 群级情绪、好感、信任、厌烦、黑名单、用户关系原因 | [情绪与关系](../docs/roleplay/emotion.md) |
 | 反馈与表达 | 主动发言反馈、注意力漂移、每日复盘、群内表达候选提取与管理员复核 | [回复架构](../docs/roleplay/architecture.md) |
 | 资料与提示词 | persona、台词语料、知识库、提示词缓存前缀 | [回复架构](../docs/roleplay/architecture.md) / [技能与集成](../docs/roleplay/integrations.md) |
@@ -81,11 +82,11 @@ flowchart TD
 ```mermaid
 flowchart TD
     MSG["已过滤的群聊消息"] --> EXTRACT["记忆整理：MBB-AI 分批提取"]
-    EXTRACT --> ST["短期记忆：每群一份，滚动重写"]
-    EXTRACT --> LT["长期记忆：每群按条目，带 subjectID"]
+    EXTRACT --> ST["短期记忆：跨群滚动摘要，原群状态保留"]
+    EXTRACT --> LT["长期记忆：跨群读取，保留来源和 subjectID"]
     EXTRACT --> GM["永久记忆：跨群共享，仅白名单群学习"]
 
-    EMO["情绪分析（异步，MBB-AI）"] --> MM["群员个人记忆：每群每 QQ"]
+    EMO["情绪分析（异步，MBB-AI）"] --> MM["群员个人记忆：每个 QQ 一份全局档案"]
     EMO --> REL["关系状态：好感 / 信任 / 厌烦 + 情绪原因"]
 
     ST --> ASSEMBLE["本轮资料装配"]
@@ -103,7 +104,7 @@ flowchart TD
     EMO --> BACKUP
 ```
 
-记忆只作为背景资料注入，不等于每轮都要复述。短期记忆偏近期事件，长期记忆偏群内结论，永久记忆跨群共享，群员个人记忆按 `(群号, QQ)` 维护。
+记忆只作为背景资料注入，不等于每轮都要复述。短期记忆维护跨群滚动摘要，长期记忆保留来源后跨群读取，永久记忆继续跨群共享，群员个人记忆按 QQ 维护；其他群的原始流水不会直接注入当前群。
 
 ## 分层回复
 

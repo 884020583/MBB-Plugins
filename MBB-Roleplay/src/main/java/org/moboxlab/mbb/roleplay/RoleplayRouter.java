@@ -105,7 +105,8 @@ public class RoleplayRouter {
         }
         builder.append("\n");
         if (!persona.interests.isEmpty()) {
-            builder.append("角色兴趣：").append(String.join("、",persona.interests)).append("\n");
+            builder.append("角色兴趣（只是弱信号，不要仅因兴趣命中就抢答，也不要把兴趣词当口头禅）：")
+                    .append(String.join("、",persona.interests)).append("\n");
         }
         if (config.toolEnable) {
             builder.append("能力分类（回复层会按需加载）：\n")
@@ -124,7 +125,7 @@ public class RoleplayRouter {
                 .append("- 明确艾特或回复其他群成员的句子，默认不是对角色说的，reply 用 false\n")
                 .append("- 群里其他人之间的闲聊、互相点名、与角色无关的话题，reply 用 false\n")
                 .append("- 有人直接艾特、回复或点名角色时，reply 必须为 true，addressed 为 direct\n")
-                .append("- 话题明显符合角色兴趣，或角色刚参与过同一话题时，可以 reply 为 true\n")
+                .append("- 话题明显符合角色兴趣只是弱加分；只有当前消息确实需要角色、或角色刚参与过同一话题时，才可以 reply 为 true\n")
                 .append("- 普通闲聊、别人的私事、别人之间的对话、机器人之间无关的互动，")
                 .append("reply 用 false，不要为了刷存在感而回复\n")
                 .append(config.toolEnable

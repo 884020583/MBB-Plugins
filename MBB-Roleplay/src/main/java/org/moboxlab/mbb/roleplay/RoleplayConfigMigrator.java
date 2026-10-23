@@ -15,7 +15,7 @@ import java.util.List;
  * Roleplay 配置迁移与缺失项补全
  */
 public class RoleplayConfigMigrator {
-    private static final String CURRENT_VERSION = "39";
+    private static final String CURRENT_VERSION = "40";
 
     private static class ConfigEntry {
         private final String key;
@@ -312,7 +312,23 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("commandPrefixes","/,!,＃,#","忽略以这些前缀开头的指令消息，英文逗号分隔"),
             new ConfigEntry("personaFile","persona-aris.json","角色设定文件；内置示例可用 /role persona 查看"),
             new ConfigEntry("quietReplyEnable","true","是否启用免打扰名单：名单内群员只在主动叫到角色时才回复"),
-            new ConfigEntry("minMessageLength","2","忽略少于多少字的纯文本消息"));
+            new ConfigEntry("minMessageLength","2","忽略少于多少字的纯文本消息"),
+            new ConfigEntry("privateChatEnable","true","是否允许私聊；默认只响应 owner 和白名单用户"),
+            new ConfigEntry("privateChatWhitelist","","允许私聊的 QQ，多个用英文逗号分隔；owner 始终允许"),
+            new ConfigEntry("privateChatContextMessages","40","私聊上下文保留条数"),
+            new ConfigEntry("privateChatMaxReplyChars","160","私聊单条回复最大字符数"),
+            new ConfigEntry("randomTickEnable","true","是否启用随机刻主动互动"),
+            new ConfigEntry("randomTickMinMinute","10","随机刻最短间隔分钟数"),
+            new ConfigEntry("randomTickMaxMinute","30","随机刻最长间隔分钟数"),
+            new ConfigEntry("randomTickQuietStartHour","0","随机刻静默开始小时"),
+            new ConfigEntry("randomTickQuietEndHour","8","随机刻静默结束小时"),
+            new ConfigEntry("randomTickGroupWindowMinute","360","群主动话题统计窗口分钟数"),
+            new ConfigEntry("randomTickGroupMaxActions","2","窗口内最多执行多少次群主动话题"),
+            new ConfigEntry("randomTickQzoneDailyMax","2","每天最多发布多少条 Qzone 说说"),
+            new ConfigEntry("randomTickDedupeHours","24","相同主动行为指纹的去重小时数"),
+            new ConfigEntry("randomTickMaxTokens","1200","随机刻决策输出 Token 上限"),
+            new ConfigEntry("randomTickTimeoutSecond","90","随机刻请求超时秒数"),
+            new ConfigEntry("randomTickReasoningEffort","none","随机刻思考强度：none / low / medium / high"));
 
     public static int ensure(Plugin plugin) {
         if (plugin == null) return 0;
@@ -421,7 +437,7 @@ public class RoleplayConfigMigrator {
                 plugin.getLogger().sendWarn("自动补全 Roleplay 配置失败，请检查 config.yml 权限！");
             }
         }
-        if (version < 39) {
+        if (version < 40) {
             config.set("configVersion",CURRENT_VERSION);
             if (!versionMissing) changed++;
         }
@@ -591,7 +607,7 @@ public class RoleplayConfigMigrator {
             config.set("replySegmentMaxChars","30");
             changed++;
         }
-        if (version < 33 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
+        if (version < 40 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
                 || legacyRouterMaxTokens || legacyRouterMaxTokens1200
                 || legacyPromptTotalChars || legacyMemoryRelevanceMaxChars
                 || legacyGlobalMemoryRelevanceMaxChars || legacyRouterReasoningEffort

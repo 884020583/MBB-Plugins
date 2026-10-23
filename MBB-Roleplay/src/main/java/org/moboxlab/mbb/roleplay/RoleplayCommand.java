@@ -82,6 +82,7 @@ public class RoleplayCommand extends BotCommand {
         return Arrays.asList(
                 "/role help [分类]",
                 "/role status",
+                "/role random",
                 "/role quiet add|remove");
     }
 
@@ -107,6 +108,16 @@ public class RoleplayCommand extends BotCommand {
                     +"\n长期记忆数："+result.getIntValue("memoryCount")
                     +"\n短期记忆："+result.getString("shortSummary")
                     +"\n当前情绪："+result.getJSONObject("mood").getString("label"));
+            return true;
+        }
+        if ("random".equals(action)) {
+            JSONObject result = service.randomTickService().status();
+            sender.sendMessage("随机刻："+(result.getBooleanValue("enable") ? "开" : "关")
+                    +"\n下次时间："+service.formatMemoryTime(result.getLongValue("dueTime"))
+                    +"\n上次执行："+service.formatMemoryTime(result.getLongValue("lastRunTime"))
+                    +"\n上次行为："+result.getString("lastAction")
+                    +" "+result.getString("lastStatus")
+                    +"\n原因："+result.getString("lastReason"));
             return true;
         }
         if ("groups".equals(action)) {
@@ -246,7 +257,7 @@ public class RoleplayCommand extends BotCommand {
             sender.sendMessage(changed ? "角色设定已切换："+args[2] : "切换失败，请检查文件名是否存在。");
             return true;
         }
-        sender.sendMessage("用法：/role status | enable/disable | groups | reload | memory | forget | persona");
+        sender.sendMessage("用法：/role status | random | enable/disable | groups | reload | memory | forget | persona");
         return true;
     }
 

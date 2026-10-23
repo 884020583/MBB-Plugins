@@ -5,12 +5,14 @@ import com.alibaba.fastjson.JSONObject;
 import org.moboxlab.moboxbot.API.Plugin;
 import org.moboxlab.moboxbot.API.Storage.StorageService;
 
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 /**
  * 群员个人记忆
  *
- * 每个 (群号, QQ) 一条，记录角色对这个群员的认知：
+ * 每个 QQ 一条全局档案，sourceGroupID 记录最近来源群，记录角色对这个群员的认知：
  * 应该怎么称呼他、他喜欢什么、不喜欢什么、应该怎么和他相处。
  * 由情绪分析那一轮 AI 调用顺手产出，不额外增加调用次数。
  */
@@ -29,6 +31,7 @@ public class RoleplayMemberService {
         storage().update("CREATE TABLE IF NOT EXISTS `"+TABLE+"` ("
                 + "`ID` INTEGER PRIMARY KEY AUTOINCREMENT,"
                 + "`groupID` INTEGER NOT NULL DEFAULT 0,"
+                + "`sourceGroupID` INTEGER NOT NULL DEFAULT 0,"
                 + "`userID` INTEGER NOT NULL DEFAULT 0,"
                 + "`userName` TEXT NOT NULL DEFAULT '',"
                 + "`alias` TEXT NOT NULL DEFAULT '',"
@@ -40,6 +43,8 @@ public class RoleplayMemberService {
                 + ")");
         storage().update("CREATE UNIQUE INDEX IF NOT EXISTS `idx_plugin_mbb_roleplay_member_key` "
                 + "ON `"+TABLE+"` (`groupID`,`userID`)");
+        ensureColumn("sourceGroupID","INTEGER NOT NULL DEFAULT 0");
+        migrateLegacyProfiles();
     }
 
     public void reload(RoleplayConfig config) {
@@ -47,12 +52,17 @@ public class RoleplayMemberService {
     }
 
     public JSONObject profile(long groupID,long userID) {
-        if (groupID <= 0 || userID <= 0) return null;
+        if (userID <= 0) return null;
         JSONObject row = storage().queryOne("SELECT * FROM `"+TABLE
-                +"` WHERE `groupID`=? AND `userID`=?",groupID,userID);
+                +"` WHERE `groupID`=0 AND `userID`=?",userID);
+        if (row == null && groupID > 0) {
+            row = storage().queryOne("SELECT * FROM `"+TABLE
+                    +"` WHERE `groupID`=? AND `userID`=?",groupID,userID);
+        }
         if (row == null) return null;
         JSONObject item = new JSONObject(true);
         item.put("userID",row.getLongValue("userID"));
+        item.put("sourceGroupID",row.getLongValue("sourceGroupID"));
         item.put("userName",row.getString("userName"));
         item.put("alias",row.getString("alias"));
         item.put("likes",row.getString("likes"));
@@ -75,7 +85,10 @@ public class RoleplayMemberService {
         String notes = limit(member.getString("notes"));
         if (alias.isEmpty() && likes.isEmpty() && dislikes.isEmpty() && notes.isEmpty()) return false;
 
-        JSONObject existing = profile(groupID,userID);
+        JSONObject global = storage().queryOne("SELECT * FROM `"+TABLE
+                +"` WHERE `groupID`=0 AND `userID`=?",userID);
+        JSONObject existing = global;
+        if (existing == null) existing = profile(groupID,userID);
         long now = System.currentTimeMillis();
         String mergedAlias = alias.isEmpty() ? field(existing,"alias") : alias;
         String mergedLikes = likes.isEmpty() ? field(existing,"likes") : likes;
@@ -85,18 +98,18 @@ public class RoleplayMemberService {
         if (name.isEmpty()) name = field(existing,"userName");
 
         boolean changed = !alias.isEmpty() || !likes.isEmpty() || !dislikes.isEmpty() || !notes.isEmpty();
-        if (existing == null) {
+        if (global == null) {
             storage().insert("INSERT INTO `"+TABLE+"` "
-                            + "(`groupID`,`userID`,`userName`,`alias`,`likes`,`dislikes`,`notes`,"
-                            + "`createTime`,`updateTime`) VALUES (?,?,?,?,?,?,?,?,?)",
-                    groupID,userID,name,mergedAlias,mergedLikes,mergedDislikes,mergedNotes,now,now);
+                            + "(`groupID`,`sourceGroupID`,`userID`,`userName`,`alias`,`likes`,`dislikes`,`notes`,"
+                            + "`createTime`,`updateTime`) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    0L,groupID,userID,name,mergedAlias,mergedLikes,mergedDislikes,mergedNotes,now,now);
         } else {
             storage().update("UPDATE `"+TABLE+"` SET `userName`=?,`alias`=?,`likes`=?,`dislikes`=?,"
-                            + "`notes`=?,`updateTime`=? WHERE `groupID`=? AND `userID`=?",
-                    name,mergedAlias,mergedLikes,mergedDislikes,mergedNotes,now,groupID,userID);
+                            + "`notes`=?,`sourceGroupID`=?,`updateTime`=? WHERE `groupID`=0 AND `userID`=?",
+                    name,mergedAlias,mergedLikes,mergedDislikes,mergedNotes,groupID,now,userID);
         }
         if (!changed) return false;
-        plugin.getLogger().sendInfo("[群员记忆] 群"+groupID+" 用户"+userID+" "+shortText(name,20)
+        plugin.getLogger().sendInfo("[群员记忆] 来源群"+groupID+" 用户"+userID+" "+shortText(name,20)
                 +" 称呼="+shortText(mergedAlias,20)
                 +" 喜欢="+shortText(mergedLikes,24)
                 +" 不喜欢="+shortText(mergedDislikes,24)
@@ -128,6 +141,7 @@ public class RoleplayMemberService {
         for (JSONObject row : rows) {
             JSONObject item = new JSONObject(true);
             item.put("groupID",row.getLongValue("groupID"));
+            item.put("sourceGroupID",row.getLongValue("sourceGroupID"));
             item.put("userID",row.getLongValue("userID"));
             item.put("userName",row.getString("userName"));
             item.put("alias",row.getString("alias"));
@@ -142,7 +156,7 @@ public class RoleplayMemberService {
 
     public boolean remove(long groupID,long userID) {
         int changed = storage().update("DELETE FROM `"+TABLE
-                +"` WHERE `groupID`=? AND `userID`=?",groupID,userID);
+                +"` WHERE `userID`=? AND (`groupID`=0 OR `groupID`=?)",userID,groupID);
         return changed > 0;
     }
 
@@ -155,22 +169,82 @@ public class RoleplayMemberService {
             JSONObject item = (JSONObject) object;
             long groupID = item.getLongValue("groupID");
             long userID = item.getLongValue("userID");
-            if (groupID <= 0 || userID <= 0) continue;
+            if (groupID < 0 || userID <= 0) continue;
             storage().insert("INSERT OR REPLACE INTO `"+TABLE+"` "
-                            + "(`groupID`,`userID`,`userName`,`alias`,`likes`,`dislikes`,`notes`,"
-                            + "`createTime`,`updateTime`) VALUES (?,?,?,?,?,?,?,?,?)",
-                    groupID,userID,safe(item.getString("userName")),safe(item.getString("alias")),
+                            + "(`groupID`,`sourceGroupID`,`userID`,`userName`,`alias`,`likes`,`dislikes`,`notes`,"
+                            + "`createTime`,`updateTime`) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    groupID,item.getLongValue("sourceGroupID"),userID,
+                    safe(item.getString("userName")),safe(item.getString("alias")),
                     safe(item.getString("likes")),safe(item.getString("dislikes")),
                     safe(item.getString("notes")),
                     item.getLongValue("updateTime") <= 0 ? now : item.getLongValue("updateTime"),
                     item.getLongValue("updateTime") <= 0 ? now : item.getLongValue("updateTime"));
         }
+        migrateLegacyProfiles();
     }
 
     public int count(long groupID) {
         JSONObject row = storage().queryOne("SELECT COUNT(*) AS `count` FROM `"+TABLE
-                +"` WHERE `groupID`=?",groupID);
+                +"` WHERE `groupID`=0");
         return row == null ? 0 : row.getIntValue("count");
+    }
+
+    private void migrateLegacyProfiles() {
+        List<JSONObject> rows = storage().query("SELECT * FROM `"+TABLE
+                +"` WHERE `groupID`>0 ORDER BY `updateTime` DESC,`ID` DESC");
+        if (rows == null || rows.isEmpty()) return;
+        Map<Long,JSONObject> merged = new LinkedHashMap<>();
+        for (JSONObject row : rows) {
+            long userID = row.getLongValue("userID");
+            if (userID <= 0) continue;
+            JSONObject target = merged.get(userID);
+            if (target == null) {
+                target = new JSONObject(true);
+                target.put("userID",userID);
+                target.put("sourceGroupID",row.getLongValue("groupID"));
+                target.put("userName",safe(row.getString("userName")));
+                target.put("alias","");
+                target.put("likes","");
+                target.put("dislikes","");
+                target.put("notes","");
+                target.put("updateTime",row.getLongValue("updateTime"));
+                merged.put(userID,target);
+            }
+            copyIfEmpty(target,row,"alias");
+            copyIfEmpty(target,row,"likes");
+            copyIfEmpty(target,row,"dislikes");
+            copyIfEmpty(target,row,"notes");
+        }
+        long now = System.currentTimeMillis();
+        for (JSONObject item : merged.values()) {
+            long userID = item.getLongValue("userID");
+            JSONObject global = storage().queryOne("SELECT `ID` FROM `"+TABLE
+                    +"` WHERE `groupID`=0 AND `userID`=?",userID);
+            if (global != null) continue;
+            storage().insert("INSERT INTO `"+TABLE+"` "
+                            + "(`groupID`,`sourceGroupID`,`userID`,`userName`,`alias`,`likes`,`dislikes`,`notes`,"
+                            + "`createTime`,`updateTime`) VALUES (?,?,?,?,?,?,?,?,?,?)",
+                    0L,item.getLongValue("sourceGroupID"),userID,safe(item.getString("userName")),
+                    safe(item.getString("alias")),safe(item.getString("likes")),
+                    safe(item.getString("dislikes")),safe(item.getString("notes")),now,
+                    item.getLongValue("updateTime") <= 0 ? now : item.getLongValue("updateTime"));
+        }
+    }
+
+    private void copyIfEmpty(JSONObject target,JSONObject source,String key) {
+        if (!safe(target.getString(key)).isEmpty()) return;
+        String value = safe(source.getString(key));
+        if (!value.isEmpty()) target.put(key,value);
+    }
+
+    private void ensureColumn(String column,String definition) {
+        List<JSONObject> columns = storage().query("PRAGMA table_info(`"+TABLE+"`)");
+        if (columns != null) {
+            for (JSONObject item : columns) {
+                if (column.equalsIgnoreCase(safe(item.getString("name")))) return;
+            }
+        }
+        storage().update("ALTER TABLE `"+TABLE+"` ADD COLUMN `"+column+"` "+definition);
     }
 
     private void appendLine(StringBuilder builder,String label,String value) {

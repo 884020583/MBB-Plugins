@@ -6,6 +6,8 @@ import org.moboxlab.moboxbot.API.Plugin;
 import org.moboxlab.moboxbot.API.Storage.StorageService;
 
 import java.util.List;
+import java.util.LinkedHashSet;
+import java.util.Set;
 
 /**
  * 按群用户黑名单
@@ -84,6 +86,21 @@ public class RoleplayBlacklistService {
         JSONObject row = storage().queryOne("SELECT COUNT(*) AS `count` FROM `"+TABLE
                 +"` WHERE `groupID`=?",groupID);
         return row == null ? 0 : row.getIntValue("count");
+    }
+
+    /**
+     * 查询某个群的用户黑名单，供跨群长期记忆过滤使用。
+     */
+    public Set<Long> userIDs(long groupID) {
+        Set<Long> result = new LinkedHashSet<>();
+        if (groupID <= 0) return result;
+        List<JSONObject> rows = storage().query("SELECT `userID` FROM `"+TABLE+"` WHERE `groupID`=?",groupID);
+        if (rows == null) return result;
+        for (JSONObject row : rows) {
+            long userID = row.getLongValue("userID");
+            if (userID > 0) result.add(userID);
+        }
+        return result;
     }
 
     public JSONArray exportAll() {

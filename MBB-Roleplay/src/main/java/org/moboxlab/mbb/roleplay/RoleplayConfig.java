@@ -292,6 +292,22 @@ public class RoleplayConfig {
     public String personaFile = "persona-aris.json";
     public int minMessageLength = 2;
     public boolean quietReplyEnable = true;
+    public boolean privateChatEnable = true;
+    public String privateChatWhitelist = "";
+    public int privateChatContextMessages = 40;
+    public int privateChatMaxReplyChars = 160;
+    public boolean randomTickEnable = true;
+    public int randomTickMinMinute = 10;
+    public int randomTickMaxMinute = 30;
+    public int randomTickQuietStartHour = 0;
+    public int randomTickQuietEndHour = 8;
+    public int randomTickGroupWindowMinute = 360;
+    public int randomTickGroupMaxActions = 2;
+    public int randomTickQzoneDailyMax = 2;
+    public int randomTickDedupeHours = 24;
+    public int randomTickMaxTokens = 1200;
+    public int randomTickTimeoutSecond = 90;
+    public String randomTickReasoningEffort = "none";
     public String commandPrefixes = "/,!,＃,#";
 
     private static double parseDouble(String value,double defaultValue) {
@@ -706,6 +722,23 @@ public class RoleplayConfig {
         config.personaFile = plugin.getConfig().getString("personaFile","persona-aris.json");
         config.minMessageLength = plugin.getConfig().getInt("minMessageLength",2);
         config.quietReplyEnable = plugin.getConfig().getBoolean("quietReplyEnable",true);
+        config.privateChatEnable = plugin.getConfig().getBoolean("privateChatEnable",true);
+        config.privateChatWhitelist = plugin.getConfig().getString("privateChatWhitelist","");
+        config.privateChatContextMessages = plugin.getConfig().getInt("privateChatContextMessages",40);
+        config.privateChatMaxReplyChars = plugin.getConfig().getInt("privateChatMaxReplyChars",160);
+        config.randomTickEnable = plugin.getConfig().getBoolean("randomTickEnable",true);
+        config.randomTickMinMinute = plugin.getConfig().getInt("randomTickMinMinute",10);
+        config.randomTickMaxMinute = plugin.getConfig().getInt("randomTickMaxMinute",30);
+        config.randomTickQuietStartHour = plugin.getConfig().getInt("randomTickQuietStartHour",0);
+        config.randomTickQuietEndHour = plugin.getConfig().getInt("randomTickQuietEndHour",8);
+        config.randomTickGroupWindowMinute = plugin.getConfig().getInt("randomTickGroupWindowMinute",360);
+        config.randomTickGroupMaxActions = plugin.getConfig().getInt("randomTickGroupMaxActions",2);
+        config.randomTickQzoneDailyMax = plugin.getConfig().getInt("randomTickQzoneDailyMax",2);
+        config.randomTickDedupeHours = plugin.getConfig().getInt("randomTickDedupeHours",24);
+        config.randomTickMaxTokens = plugin.getConfig().getInt("randomTickMaxTokens",1200);
+        config.randomTickTimeoutSecond = plugin.getConfig().getInt("randomTickTimeoutSecond",90);
+        config.randomTickReasoningEffort = normalizeEffort(
+                plugin.getConfig().getString("randomTickReasoningEffort","none"));
         config.commandPrefixes = plugin.getConfig().getString("commandPrefixes","/,!,＃,#");
         if (config.aiProfile == null || config.aiProfile.trim().isEmpty()) config.aiProfile = "default";
         if (config.memoryProfile == null) config.memoryProfile = "";
@@ -1127,6 +1160,33 @@ public class RoleplayConfig {
         if (config.repeatCheckMinChars < 2) config.repeatCheckMinChars = 2;
         if (config.repeatOpeningLimit < 1) config.repeatOpeningLimit = 1;
         if (config.minMessageLength < 1) config.minMessageLength = 1;
+        if (config.privateChatWhitelist == null) config.privateChatWhitelist = "";
+        if (config.privateChatContextMessages < 4) config.privateChatContextMessages = 4;
+        if (config.privateChatContextMessages > 200) config.privateChatContextMessages = 200;
+        if (config.privateChatMaxReplyChars < 20) config.privateChatMaxReplyChars = 20;
+        if (config.privateChatMaxReplyChars > 1000) config.privateChatMaxReplyChars = 1000;
+        if (config.randomTickMinMinute < 1) config.randomTickMinMinute = 1;
+        if (config.randomTickMinMinute > 1440) config.randomTickMinMinute = 1440;
+        if (config.randomTickMaxMinute < config.randomTickMinMinute) {
+            config.randomTickMaxMinute = config.randomTickMinMinute;
+        }
+        if (config.randomTickMaxMinute > 1440) config.randomTickMaxMinute = 1440;
+        if (config.randomTickQuietStartHour < 0) config.randomTickQuietStartHour = 0;
+        if (config.randomTickQuietStartHour > 23) config.randomTickQuietStartHour = 23;
+        if (config.randomTickQuietEndHour < 0) config.randomTickQuietEndHour = 0;
+        if (config.randomTickQuietEndHour > 24) config.randomTickQuietEndHour = 24;
+        if (config.randomTickGroupWindowMinute < 1) config.randomTickGroupWindowMinute = 1;
+        if (config.randomTickGroupWindowMinute > 10080) config.randomTickGroupWindowMinute = 10080;
+        if (config.randomTickGroupMaxActions < 0) config.randomTickGroupMaxActions = 0;
+        if (config.randomTickGroupMaxActions > 100) config.randomTickGroupMaxActions = 100;
+        if (config.randomTickQzoneDailyMax < 0) config.randomTickQzoneDailyMax = 0;
+        if (config.randomTickQzoneDailyMax > 20) config.randomTickQzoneDailyMax = 20;
+        if (config.randomTickDedupeHours < 1) config.randomTickDedupeHours = 1;
+        if (config.randomTickDedupeHours > 720) config.randomTickDedupeHours = 720;
+        if (config.randomTickMaxTokens < 200) config.randomTickMaxTokens = 200;
+        if (config.randomTickMaxTokens > 8000) config.randomTickMaxTokens = 8000;
+        if (config.randomTickTimeoutSecond < 20) config.randomTickTimeoutSecond = 20;
+        if (config.randomTickTimeoutSecond > 600) config.randomTickTimeoutSecond = 600;
         if (config.commandPrefixes == null) config.commandPrefixes = "/,!,＃,#";
         return config;
     }

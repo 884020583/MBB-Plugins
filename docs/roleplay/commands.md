@@ -7,6 +7,7 @@
 | 指令 | 权限 | 说明 |
 |---|---|---|
 | `/role status` | `BOT_ADMIN` | 查看当前群状态 |
+| `/role random` | `BOT_ADMIN` | 查看随机刻开关、下次时间、上次行为和原因 |
 | `/role enable [群号]` | `BOT_ADMIN` | 开启当前群或指定群 |
 | `/role disable [群号]` | `BOT_ADMIN` | 关闭当前群或指定群 |
 | `/role groups` | `BOT_ADMIN` | 查看已开启群 |

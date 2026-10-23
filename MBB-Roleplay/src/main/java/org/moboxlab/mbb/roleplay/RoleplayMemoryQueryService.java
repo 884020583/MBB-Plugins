@@ -52,7 +52,7 @@ public class RoleplayMemoryQueryService {
             used += line.length();
             count++;
         }
-        service.plugin().getLogger().sendInfo("[记忆] 群"+groupID+" 长期记忆按相关性注入 "+count
+        service.plugin().getLogger().sendInfo("[记忆] 当前上下文"+groupID+" 长期记忆按相关性注入 "+count
                 +"/"+memories.size()+" 条，占用 "+used+" 字符");
         return builder.length() == 0 ? "暂无长期记忆。" : builder.toString();
     }
@@ -116,26 +116,20 @@ public class RoleplayMemoryQueryService {
     JSONArray longMemories(long groupID,boolean excludeBlacklisted,int limit) {
         JSONArray result = new JSONArray();
         int capped = limit < 1 ? service.config().maxLongMemories : limit;
-        List<JSONObject> rows;
-        if (excludeBlacklisted) {
-            rows = service.storage().query(
-                    "SELECT `memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime` FROM `"+RoleplayService.MEMORY_TABLE+"` "
-                            + "WHERE `groupID`=? AND (`subjectID`=0 OR `subjectID` NOT IN "
-                            + "(SELECT `userID` FROM `plugin_mbb_roleplay_blacklist` "
-                            + "WHERE `groupID`=?)) AND `memoryStatus`='active' "
-                            + "ORDER BY `importance` DESC,`updateTime` DESC LIMIT ?",
-                    groupID,groupID,capped);
-        } else {
-            rows = service.storage().query(
-                    "SELECT `memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime` FROM `"+RoleplayService.MEMORY_TABLE+"` "
-                            + "WHERE `groupID`=? AND `memoryStatus`='active' ORDER BY `importance` DESC,`updateTime` DESC LIMIT ?",
-                    groupID,capped);
-        }
+        //长期记忆已经升级为跨群共享；groupID 只保留为来源，不再作为读取隔离条件。
+        List<JSONObject> rows = service.storage().query(
+                "SELECT `memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime` FROM `"+RoleplayService.MEMORY_TABLE+"` "
+                        + "WHERE `memoryStatus`='active' ORDER BY `importance` DESC,`updateTime` DESC LIMIT ?",
+                capped);
         if (rows == null) return result;
+        Set<Long> blacklisted = excludeBlacklisted
+                ? service.blacklistService().userIDs(groupID) : Collections.<Long>emptySet();
         for (JSONObject row : rows) {
+            long subjectID = row.getLongValue("subjectID");
+            if (subjectID > 0 && blacklisted.contains(subjectID)) continue;
             JSONObject item = new JSONObject(true);
             item.put("type",row.getString("memoryType"));
-            item.put("subjectID",row.getLongValue("subjectID"));
+            item.put("subjectID",subjectID);
             item.put("content",row.getString("content"));
             item.put("importance",row.getIntValue("importance"));
             item.put("eventTime",row.getLongValue("eventTime"));
@@ -195,7 +189,14 @@ public class RoleplayMemoryQueryService {
     }
 
     String shortSummary(long groupID) {
-        JSONObject row = service.storage().queryOne("SELECT `shortSummary` FROM `"+RoleplayService.STATE_TABLE+"` WHERE `groupID`=?",groupID);
+        JSONObject global = service.storage().queryOne(
+                "SELECT `shortSummary` FROM `"+RoleplayService.STATE_TABLE+"` WHERE `groupID`=0");
+        if (global != null && global.getString("shortSummary") != null
+                && !global.getString("shortSummary").trim().isEmpty()) {
+            return global.getString("shortSummary");
+        }
+        JSONObject row = service.storage().queryOne(
+                "SELECT `shortSummary` FROM `"+RoleplayService.STATE_TABLE+"` WHERE `groupID`=?",groupID);
         return row == null || row.getString("shortSummary") == null || row.getString("shortSummary").isEmpty()
                 ? "暂无短期记忆。" : row.getString("shortSummary");
     }
@@ -209,7 +210,9 @@ public class RoleplayMemoryQueryService {
     }
 
     int memoryCount(long groupID) {
-        List<JSONObject> rows = service.storage().query("SELECT COUNT(*) AS `count` FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=? AND `memoryStatus`='active'",groupID);
+        List<JSONObject> rows = service.storage().query(
+                "SELECT COUNT(*) AS `count` FROM `"+RoleplayService.MEMORY_TABLE+"` "
+                        + "WHERE `memoryStatus`='active'");
         return rows == null || rows.isEmpty() ? 0 : rows.get(0).getIntValue("count");
     }
 

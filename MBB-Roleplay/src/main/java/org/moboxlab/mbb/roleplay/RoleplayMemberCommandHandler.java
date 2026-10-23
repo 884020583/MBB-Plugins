@@ -68,6 +68,7 @@ public class RoleplayMemberCommandHandler {
         if ("basic".equals(category)) {
             sender.sendMessage("基础命令："
                     +"\n/role status"
+                    +"\n/role random"
                     +"\n/role enable [群号]"
                     +"\n/role disable [群号]"
                     +"\n/role groups"

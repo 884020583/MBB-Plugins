@@ -29,6 +29,11 @@ public class RoleplaySchemaService {
         service.storage().update("CREATE TABLE IF NOT EXISTS `"+RoleplayService.MEMORY_TABLE+"` ("
                 + "`ID` INTEGER PRIMARY KEY AUTOINCREMENT,"
                 + "`groupID` INTEGER NOT NULL DEFAULT 0,"
+                + "`scopeType` TEXT NOT NULL DEFAULT 'global',"
+                + "`scopeID` INTEGER NOT NULL DEFAULT 0,"
+                + "`sourceGroupID` INTEGER NOT NULL DEFAULT 0,"
+                + "`sourceChannel` TEXT NOT NULL DEFAULT 'group',"
+                + "`visibility` TEXT NOT NULL DEFAULT 'shared',"
                 + "`memoryType` TEXT NOT NULL DEFAULT '',"
                 + "`subjectID` INTEGER NOT NULL DEFAULT 0,"
                 + "`content` TEXT NOT NULL DEFAULT '',"
@@ -52,6 +57,16 @@ public class RoleplaySchemaService {
         ensureColumn(RoleplayService.MEMORY_TABLE,"eventTime","INTEGER NOT NULL DEFAULT 0");
         ensureColumn(RoleplayService.MEMORY_TABLE,"memoryStatus","TEXT NOT NULL DEFAULT 'active'");
         ensureColumn(RoleplayService.MEMORY_TABLE,"supersededBy","INTEGER NOT NULL DEFAULT 0");
+        ensureColumn(RoleplayService.MEMORY_TABLE,"scopeType","TEXT NOT NULL DEFAULT 'global'");
+        ensureColumn(RoleplayService.MEMORY_TABLE,"scopeID","INTEGER NOT NULL DEFAULT 0");
+        ensureColumn(RoleplayService.MEMORY_TABLE,"sourceGroupID","INTEGER NOT NULL DEFAULT 0");
+        ensureColumn(RoleplayService.MEMORY_TABLE,"sourceChannel","TEXT NOT NULL DEFAULT 'group'");
+        ensureColumn(RoleplayService.MEMORY_TABLE,"visibility","TEXT NOT NULL DEFAULT 'shared'");
+        //旧数据保留原群号作为来源，新的长期记忆默认跨群可读。
+        service.storage().update("UPDATE `"+RoleplayService.MEMORY_TABLE+"` SET "
+                + "`scopeType`='global',`scopeID`=0,`sourceGroupID`=`groupID`,"
+                + "`sourceChannel`='group',`visibility`='shared' "
+                + "WHERE `scopeType` IS NULL OR `scopeType`='' OR `sourceGroupID`=0");
         service.storage().update("CREATE TABLE IF NOT EXISTS `"+RoleplayService.GROUP_TABLE+"` ("
                 + "`ID` INTEGER PRIMARY KEY AUTOINCREMENT,"
                 + "`groupID` INTEGER NOT NULL DEFAULT 0 UNIQUE,"
@@ -74,6 +89,8 @@ public class RoleplaySchemaService {
                 System.currentTimeMillis() - Math.max(1,service.config().topicFatigueKeepHours) * 3600000L);
         ensureColumn(RoleplayService.GROUP_TABLE,"contextToken","TEXT NOT NULL DEFAULT ''");
         service.storage().update("CREATE INDEX IF NOT EXISTS `idx_plugin_mbb_roleplay_msg_group` ON `"+RoleplayService.MSG_TABLE+"` (`groupID`,`messageTime`)");
+        service.storage().update("CREATE INDEX IF NOT EXISTS `idx_plugin_mbb_roleplay_memory_scope` "
+                + "ON `"+RoleplayService.MEMORY_TABLE+"` (`scopeType`,`memoryStatus`,`updateTime`)");
     }
 
     void ensureColumn(String table,String column,String definition) {

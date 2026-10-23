@@ -30,7 +30,7 @@ public class RoleplayMemoryBackupService {
         try {
             File directory = backupDirectory();
             JSONObject root = new JSONObject(true);
-            root.put("version",3);
+            root.put("version",4);
             root.put("type","mbb-roleplay-memory-backup");
             root.put("createTime",System.currentTimeMillis());
             root.put("reason",service.safe(reason));
@@ -159,12 +159,18 @@ public class RoleplayMemoryBackupService {
     private JSONArray exportLongTerm() {
         JSONArray result = new JSONArray();
         List<JSONObject> rows = service.storage().query(
-                "SELECT `groupID`,`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`memoryStatus`,`supersededBy`,`updateTime` "
+                "SELECT `groupID`,`scopeType`,`scopeID`,`sourceGroupID`,`sourceChannel`,`visibility`,"
+                        + "`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`memoryStatus`,`supersededBy`,`updateTime` "
                         + "FROM `"+RoleplayService.MEMORY_TABLE+"` ORDER BY `groupID` ASC,`ID` ASC");
         if (rows == null) return result;
         for (JSONObject row : rows) {
             JSONObject item = new JSONObject(true);
             item.put("groupID",row.getLongValue("groupID"));
+            item.put("scopeType",row.getString("scopeType"));
+            item.put("scopeID",row.getLongValue("scopeID"));
+            item.put("sourceGroupID",row.getLongValue("sourceGroupID"));
+            item.put("sourceChannel",row.getString("sourceChannel"));
+            item.put("visibility",row.getString("visibility"));
             item.put("type",row.getString("memoryType"));
             item.put("subjectID",row.getLongValue("subjectID"));
             item.put("content",row.getString("content"));
@@ -181,17 +187,37 @@ public class RoleplayMemoryBackupService {
     private int restoreShortTerm(JSONArray memories) {
         if (memories == null) return 0;
         int saved = 0;
+        boolean hasGlobal = false;
+        String firstSummary = "";
+        long firstTime = 0L;
+        long firstID = 0L;
+        long firstUpdate = 0L;
         for (Object object : memories) {
             if (!(object instanceof JSONObject)) continue;
             JSONObject item = (JSONObject) object;
             long groupID = item.getLongValue("groupID");
-            if (groupID <= 0) continue;
+            if (groupID < 0) continue;
+            if (groupID == 0) hasGlobal = true;
+            if (firstSummary.isEmpty() && !service.safe(item.getString("shortSummary")).trim().isEmpty()) {
+                firstSummary = service.safe(item.getString("shortSummary"));
+                firstTime = item.getLongValue("lastMemoryTime");
+                firstID = item.getLongValue("lastMemoryID");
+                firstUpdate = item.getLongValue("updateTime");
+            }
             service.storage().insert("INSERT OR REPLACE INTO `"+RoleplayService.STATE_TABLE+"` "
                             + "(`groupID`,`shortSummary`,`lastMemoryTime`,`lastMemoryID`,`lastMergeTime`,`updateTime`) "
                             + "VALUES (?,?,?,?,?,?)",
                     groupID,service.safe(item.getString("shortSummary")),
                     item.getLongValue("lastMemoryTime"),item.getLongValue("lastMemoryID"),
                     item.getLongValue("lastMergeTime"),item.getLongValue("updateTime"));
+            saved++;
+        }
+        if (!hasGlobal && !firstSummary.isEmpty()) {
+            long now = System.currentTimeMillis();
+            service.storage().insert("INSERT OR REPLACE INTO `"+RoleplayService.STATE_TABLE+"` "
+                            + "(`groupID`,`shortSummary`,`lastMemoryTime`,`lastMemoryID`,`lastMergeTime`,`updateTime`) "
+                            + "VALUES (?,?,?,?,?,?)",
+                    0L,firstSummary,firstTime,firstID,0L,firstUpdate > 0 ? firstUpdate : now);
             saved++;
         }
         return saved;
@@ -205,11 +231,22 @@ public class RoleplayMemoryBackupService {
             JSONObject item = (JSONObject) object;
             long groupID = item.getLongValue("groupID");
             String content = service.safe(item.getString("content")).trim();
-            if (groupID <= 0 || content.isEmpty()) continue;
+            if (groupID < 0 || content.isEmpty()) continue;
+            String scopeType = service.safe(item.getString("scopeType"));
+            if (scopeType.isEmpty()) scopeType = "global";
+            long scopeID = item.getLongValue("scopeID");
+            long sourceGroupID = item.getLongValue("sourceGroupID");
+            if (sourceGroupID <= 0) sourceGroupID = groupID;
+            String sourceChannel = service.safe(item.getString("sourceChannel"));
+            if (sourceChannel.isEmpty()) sourceChannel = "group";
+            String visibility = service.safe(item.getString("visibility"));
+            if (visibility.isEmpty()) visibility = "shared";
             service.storage().insert("INSERT INTO `"+RoleplayService.MEMORY_TABLE+"` "
-                            + "(`groupID`,`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`memoryStatus`,`supersededBy`,`updateTime`) "
-                            + "VALUES (?,?,?,?,?,?,?,?,?)",
-                    groupID,service.safe(item.getString("type")),item.getLongValue("subjectID"),
+                            + "(`groupID`,`scopeType`,`scopeID`,`sourceGroupID`,`sourceChannel`,`visibility`,"
+                            + "`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`memoryStatus`,`supersededBy`,`updateTime`) "
+                            + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                    groupID,scopeType,scopeID,sourceGroupID,sourceChannel,visibility,
+                    service.safe(item.getString("type")),item.getLongValue("subjectID"),
                     content,item.getIntValue("importance"),
                     item.getLongValue("eventTime") > 0 ? item.getLongValue("eventTime")
                             : item.getLongValue("updateTime"),
