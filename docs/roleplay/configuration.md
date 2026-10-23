@@ -133,6 +133,7 @@ stickerAttachEnable: true
 stickerAttachWindowSecond: 5
 stickerAttachMaxWaitSecond: 15
 stickerAttachWaitUntilNextMessage: true
+stickerSendChance: 0.35
 messageBatchEnable: true
 messageBatchWindowSecond: 2
 messageBatchMaxMessages: 10
@@ -189,7 +190,7 @@ replyReviewReasoningEffort: "none"
 replyReviewTimeoutSecond: 60
 replyReviewMinScore: 70
 toolEnable: true
-toolCoreTools: "tool_search,end_turn,message_send"
+toolCoreTools: "tool_search,end_turn,message_send,sticker"
 toolLoadedMaxTools: 8
 toolSearchMaxResults: 4
 toolMaxSteps: 16

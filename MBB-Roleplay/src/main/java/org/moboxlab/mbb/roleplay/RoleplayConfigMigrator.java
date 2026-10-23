@@ -15,7 +15,7 @@ import java.util.List;
  * Roleplay 配置迁移与缺失项补全
  */
 public class RoleplayConfigMigrator {
-    private static final String CURRENT_VERSION = "42";
+    private static final String CURRENT_VERSION = "43";
 
     private static class ConfigEntry {
         private final String key;
@@ -142,6 +142,7 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("stickerAttachMaxWaitSecond","15","表情包已开始识别时，最多额外等待多少秒"),
             new ConfigEntry("stickerAttachWaitUntilNextMessage","true",
                     "同一用户又发言或表情包已附带时立刻结束等待，不再干等到窗口结束"),
+            new ConfigEntry("stickerSendChance","0.35","提示词中的表情包参考使用率，0 到 1"),
             new ConfigEntry("messageBatchEnable","true","是否启用群消息合批：连续快速发言会合并成一个回合处理"),
             new ConfigEntry("messageBatchWindowSecond","2","合批窗口秒数，窗口内到达的新消息会并入同一批"),
             new ConfigEntry("messageBatchMaxMessages","10","单个批次最多合并多少条消息，超出时丢弃最旧的非直接点名消息"),
@@ -204,7 +205,7 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("replyReviewTimeoutSecond","60","回复复核请求超时秒数"),
             new ConfigEntry("replyReviewMinScore","70","回复复核最低通过分"),
             new ConfigEntry("toolEnable","true","是否允许角色通过原生工具调用查询信息或维护私有工作区"),
-            new ConfigEntry("toolCoreTools","tool_search,end_turn,message_send","首轮直接开放的工具"),
+            new ConfigEntry("toolCoreTools","tool_search,end_turn,message_send,sticker","首轮直接开放的工具"),
             new ConfigEntry("toolLoadedMaxTools","8","单轮最多同时加载多少个工具 schema"),
             new ConfigEntry("toolSearchMaxResults","4","tool_search 单次最多返回多少个工具"),
             new ConfigEntry("toolMaxSteps","16","单轮最多进行多少次模型-工具循环"),
@@ -430,6 +431,9 @@ public class RoleplayConfigMigrator {
                 && "16".equals(config.getString("toolMaxCalls",""));
         boolean legacyToolLoopBalance = version < 38
                 && "90000".equals(config.getString("toolLoopMaxMillis",""));
+        boolean legacyToolCoreSticker = version < 43
+                && "tool_search,end_turn,message_send"
+                .equals(config.getString("toolCoreTools",""));
         int changed = 0;
         List<ConfigEntry> missing = new ArrayList<>();
         for (ConfigEntry entry : DEFAULTS) {
@@ -443,7 +447,7 @@ public class RoleplayConfigMigrator {
                 plugin.getLogger().sendWarn("自动补全 Roleplay 配置失败，请检查 config.yml 权限！");
             }
         }
-        if (version < 42) {
+        if (version < 43) {
             config.set("configVersion",CURRENT_VERSION);
             if (!versionMissing) changed++;
         }
@@ -522,6 +526,10 @@ public class RoleplayConfigMigrator {
         }
         if (legacyToolLoopBalance) {
             config.set("toolLoopMaxMillis","75000");
+            changed++;
+        }
+        if (legacyToolCoreSticker) {
+            config.set("toolCoreTools","tool_search,end_turn,message_send,sticker");
             changed++;
         }
         if (legacyRoleBotChance) {
@@ -621,7 +629,7 @@ public class RoleplayConfigMigrator {
             config.set("replySegmentMaxChars","30");
             changed++;
         }
-        if (version < 42 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
+        if (version < 43 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
                 || legacyRouterMaxTokens || legacyRouterMaxTokens1200
                 || legacyPromptTotalChars || legacyMemoryRelevanceMaxChars
                 || legacyGlobalMemoryRelevanceMaxChars || legacyRouterReasoningEffort
@@ -631,7 +639,8 @@ public class RoleplayConfigMigrator {
                 || legacyReplySplitPunctuation || legacyInitialAffinity
                 || legacyInitialTrust || legacyIntimacyClose || legacyIntimacyVeryClose
                 || legacyRelationDailyMax || legacyEmotionEventCooldown
-                || legacyEmotionAnalyzeCooldown || legacyEmotionAnalyzeMaxDelta) {
+                || legacyEmotionAnalyzeCooldown || legacyEmotionAnalyzeMaxDelta
+                || legacyToolCoreSticker) {
             if (config.save()) {
                 config.load();
             } else {

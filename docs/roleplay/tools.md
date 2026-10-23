@@ -17,7 +17,7 @@
 `/role tool test` 会离线检查所有启用工具的 schema、必填与未知参数、工作区路径隔离和网页白名单边界。
 
 回复层不再一次收到全部工具 schema。首轮只开放 `toolCoreTools`（默认
-`tool_search,end_turn,message_send`），其他工具必须由模型先调用 `tool_search` 搜索并加载，
+`tool_search,end_turn,message_send,sticker`），其他工具必须由模型先调用 `tool_search` 搜索并加载，
 下一轮才会收到对应 schema。这样能减少每轮固定 Token、降低工具选错概率，也保留多轮检索能力：
 
 如果模型直接点名了注册表中已启用的工具，但还没有调用过 `tool_search`，工具循环会自动装载并执行该工具，
@@ -81,6 +81,10 @@ tool_search
 旧 `draw`、`reminder`、`memory`、`global-memory`、`sticker`、`poke-back` 动作已经适配成原生工具。
 `toolEnable=true` 时，执行层不再选择独立 `actions`，统一使用 `tool_search` + `tools/tool_calls`。
 `toolEnable=false` 时仍保留旧动作协议作为兼容路径。
+
+`sticker` 默认加入首轮核心工具，情绪和语境合适时可以直接调用，不必先搜索工具。`tags` 可以留空，
+由 `MBB-Sticker` 从全部可用表情中随机选择；`stickerSendChance` 只作为提示词中的参考使用率，
+不是代码强制抽样。连续两条回复仍应避免连发表情包。
 
 ## 工具结果上下文
 

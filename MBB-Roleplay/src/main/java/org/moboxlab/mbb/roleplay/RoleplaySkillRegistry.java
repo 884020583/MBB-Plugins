@@ -277,7 +277,7 @@ public class RoleplaySkillRegistry {
 
         @Override
         public String description() {
-            return "按当前真实标签集发送一张匹配表情包";
+            return "按当前情绪发送一张匹配表情包；tags 可留空随机选择";
         }
 
         @Override
@@ -297,15 +297,20 @@ public class RoleplaySkillRegistry {
 
         @Override
         public String promptFragment(RoleplaySkillContext context) {
-            return service.stickerPrompt();
+            String action = service.config().toolEnable
+                    ? "调用 sticker 工具发送；tags 可选，留空时从全部表情包中随机选择。"
+                    : "适合时输出 {\"type\":\"sticker\",\"args\":{\"tags\":\"tag1,tag2\"}}；"
+                    +"tags 也可以留空，由插件随机选择。";
+            return service.stickerPrompt()+"\n"+action;
         }
 
         @Override
         public RoleplaySkillResult execute(RoleplaySkillContext context) {
             String tags = context.arg("tags");
-            if (tags.isEmpty()) return RoleplaySkillResult.ignored(id());
-            service.sendStickerMessage(context.groupID,context.userID,tags);
-            return RoleplaySkillResult.ok(id(),"已发送表情包");
+            boolean sent = service.sendStickerMessage(context.groupID,context.userID,tags);
+            return sent
+                    ? RoleplaySkillResult.ok(id(),"已发送表情包")
+                    : RoleplaySkillResult.failed(id(),"表情包发送失败或没有可用表情包");
         }
     }
 

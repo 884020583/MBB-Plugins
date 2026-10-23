@@ -199,6 +199,8 @@ stickerAttachWindowSecond: 7
 stickerAttachMaxWaitSecond: 15
 #同一用户又发言或表情包已附带时立刻结束等待，不再干等到窗口结束
 stickerAttachWaitUntilNextMessage: true
+#提示词中的表情包参考使用率，0 到 1；不是代码强制抽样
+stickerSendChance: 0.35
 #是否启用群消息合批：短时间内连续到达的消息会合并成一个回合处理，避免刷屏时逐条排队
 messageBatchEnable: true
 #合批窗口秒数，窗口内到达的新消息会并入同一批
@@ -308,7 +310,7 @@ replyReviewMinScore: 70
 #是否允许角色通过原生工具调用查询信息或维护私有工作区
 toolEnable: true
 #首轮直接开放的轻量工具，其他工具通过 tool_search 按需加载
-toolCoreTools: "tool_search,end_turn,message_send"
+toolCoreTools: "tool_search,end_turn,message_send,sticker"
 #单轮最多同时加载多少个工具 schema
 toolLoadedMaxTools: 8
 #tool_search 单次最多返回多少个工具

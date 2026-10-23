@@ -59,30 +59,36 @@ public class RoleplayStickerService {
             if (i > 0) builder.append(", ");
             builder.append(tags.getString(i));
         }
-        builder.append("\n表情包是可选表达，不是每句话都必须带；只有情绪或场景明显合适时才偶尔使用，")
-                .append("避免连续多条回复都发表情包。适合时输出 ")
-                .append("{\"type\":\"sticker\",\"args\":{\"tags\":\"tag1,tag2\"}}；")
-                .append("只能使用上面的标签，没有合适标签时不要输出。");
+        int chance = (int)Math.round(service.config().stickerSendChance * 100);
+        builder.append("\n表情包是自然表达，不是每句话都必须带；情绪、语气或场景明显合适时优先使用一张。")
+                .append("参考使用率约 ").append(chance).append("%，连续两条回复不要连发。")
+                .append("可以选择 1 到 2 个匹配标签，也可以留空让插件随机选择；")
+                .append("只有完全不合语境时才不要使用。");
         return builder.toString();
     }
 
-    void sendSticker(long groupID,long userID,String tags) {
+    boolean sendSticker(long groupID,long userID,String tags) {
         PluginService sticker = service.plugin().getServer().getPluginManager().getService("MBB-Sticker");
-        if (sticker == null) return;
+        if (sticker == null) return false;
         JSONObject params = new JSONObject(true);
         JSONArray tagArray = new JSONArray();
         for (String item : service.safe(tags).split("[,，]")) {
             if (!item.trim().isEmpty()) tagArray.add(item.trim());
         }
-        if (tagArray.isEmpty()) return;
         params.put("tags",tagArray);
         params.put("groupID",groupID);
         params.put("userID",userID);
         JSONObject result = sticker.call("random",params);
-        if (result == null || !result.getBooleanValue("status")) return;
+        if (result == null || !result.getBooleanValue("status")) {
+            service.plugin().getLogger().sendWarn("[表情包] 群"+groupID+" 随机发送失败："
+                    +service.safe(result == null ? "" : result.getString("message")));
+            return false;
+        }
         OneBotClient client = service.plugin().getServer().getOneBotClient();
-        if (client == null) return;
-        client.sendGroupMessage(groupID,MessageUtil.message(MessageUtil.image(result.getString("file"))));
+        if (client == null) return false;
+        JSONObject sent = client.sendGroupMessage(groupID,
+                MessageUtil.message(MessageUtil.image(result.getString("file"))));
+        return sent != null && sent.getIntValue("retcode") == 0;
     }
 
     void rememberStickerEmotion(long groupID,long userID,String emotion) {

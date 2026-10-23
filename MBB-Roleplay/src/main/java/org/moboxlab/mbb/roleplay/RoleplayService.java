@@ -713,8 +713,8 @@ public class RoleplayService {
         triggerMemory(groupID,"主动记忆",content);
     }
 
-    void sendStickerMessage(long groupID,long userID,String tags) {
-        stickerService.sendSticker(groupID,userID,tags);
+    boolean sendStickerMessage(long groupID,long userID,String tags) {
+        return stickerService.sendSticker(groupID,userID,tags);
     }
 
     boolean isOwnerUser(long userID) {

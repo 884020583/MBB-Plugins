@@ -126,6 +126,7 @@ public class RoleplayConfig {
     public int stickerAttachWindowSecond = 5;
     public int stickerAttachMaxWaitSecond = 15;
     public boolean stickerAttachWaitUntilNextMessage = true;
+    public double stickerSendChance = 0.35;
     public boolean messageBatchEnable = true;
     public boolean learnEnable = true;
     public String learnDirectory = "train-corpus";
@@ -187,7 +188,7 @@ public class RoleplayConfig {
     public int replyReviewTimeoutSecond = 60;
     public int replyReviewMinScore = 70;
     public boolean toolEnable = true;
-    public String toolCoreTools = "tool_search,end_turn,message_send";
+    public String toolCoreTools = "tool_search,end_turn,message_send,sticker";
     public int toolLoadedMaxTools = 8;
     public int toolSearchMaxResults = 4;
     public int toolMaxSteps = 16;
@@ -533,6 +534,8 @@ public class RoleplayConfig {
         config.stickerAttachMaxWaitSecond = plugin.getConfig().getInt("stickerAttachMaxWaitSecond",15);
         config.stickerAttachWaitUntilNextMessage =
                 plugin.getConfig().getBoolean("stickerAttachWaitUntilNextMessage",true);
+        config.stickerSendChance = parseDouble(
+                plugin.getConfig().getString("stickerSendChance","0.35"),0.35);
         config.messageBatchEnable = plugin.getConfig().getBoolean("messageBatchEnable",true);
         config.learnEnable = plugin.getConfig().getBoolean("learnEnable",true);
         config.learnDirectory = plugin.getConfig().getString("learnDirectory","train-corpus");
@@ -595,7 +598,7 @@ public class RoleplayConfig {
         config.replyReviewMinScore = plugin.getConfig().getInt("replyReviewMinScore",70);
         config.toolEnable = plugin.getConfig().getBoolean("toolEnable",true);
         config.toolCoreTools = plugin.getConfig().getString("toolCoreTools",
-                "tool_search,end_turn,message_send");
+                "tool_search,end_turn,message_send,sticker");
         config.toolLoadedMaxTools = plugin.getConfig().getInt("toolLoadedMaxTools",8);
         config.toolSearchMaxResults = plugin.getConfig().getInt("toolSearchMaxResults",4);
         config.toolMaxSteps = plugin.getConfig().getInt("toolMaxSteps",16);
@@ -936,6 +939,8 @@ public class RoleplayConfig {
             config.stickerAttachMaxWaitSecond = config.stickerAttachWindowSecond;
         }
         if (config.stickerAttachMaxWaitSecond > 60) config.stickerAttachMaxWaitSecond = 60;
+        if (config.stickerSendChance < 0) config.stickerSendChance = 0;
+        if (config.stickerSendChance > 1) config.stickerSendChance = 1;
         if (config.messageBatchWindowSecond < 1) config.messageBatchWindowSecond = 1;
         if (config.messageBatchWindowSecond > 10) config.messageBatchWindowSecond = 10;
         if (config.messageBatchMaxMessages < 2) config.messageBatchMaxMessages = 2;

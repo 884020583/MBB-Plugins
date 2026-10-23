@@ -28,7 +28,7 @@ flowchart LR
 | 情绪分析 | `MBB-AI` | `chat` | 心情、好感、信任、厌烦与群员个人记忆 | 跳过本轮情绪更新 |
 | 提醒识别 / 到点提醒 | `MBB-AI` | `chat` | 解析提醒时间、生成提醒正文 | 安静忽略，不创建任务 |
 | 识图 | `MBB-Vision` | `describe` | 图片与表情包描述、标签与本地缓存 | 图片消息不注入描述 |
-| 表情包 | `MBB-Sticker` | 查询标签 / 发送 | 角色通过原生 `sticker` 工具按标签发送表情包 | `sticker` 工具不开放 |
+| 表情包 | `MBB-Sticker` | 查询标签 / 发送 | 角色通过首轮开放的 `sticker` 工具按标签或随机发送表情包 | `sticker` 工具不开放 |
 | 生图 | `MBB-ComfyUI` | `status` / `generate` | 角色通过原生 `draw` 工具生图，包含群级冷却与完成回调 | `draw` 工具不开放 |
 | 多机器人协作 | `MBB-BotHub` | `vision_lookup` / `vision_claim` / `vision_publish` / `vision_wait` / `turn_claim` / `task_claim` / `chat_guard` | 同群多 bot 共享识图、回合权、任务去重与互聊熔断 | 完全退回单机：识图各识别一次，回复不做跨进程去重 |
 | 戳一戳 | `MBB-Poke` | `isEnabled` | 检测冲突，避免同一件事回两次 | Roleplay 自行处理戳一戳 |

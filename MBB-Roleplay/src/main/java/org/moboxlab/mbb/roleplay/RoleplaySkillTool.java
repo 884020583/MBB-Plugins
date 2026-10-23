@@ -99,7 +99,7 @@ public class RoleplaySkillTool implements RoleplayTool {
         }
         if ("sticker".equals(id)) {
             JSONObject properties = new JSONObject(true);
-            properties.put("tags",property("string","英文逗号分隔的表情标签"));
+            properties.put("tags",property("string","可选，英文逗号分隔的表情标签；留空随机选择"));
             return function(id,description,properties,new String[0]);
         }
         if ("poke-back".equals(id)) {
