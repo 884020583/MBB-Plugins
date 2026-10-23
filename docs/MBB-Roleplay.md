@@ -17,6 +17,9 @@ MoBoxBot 角色扮演插件。插件读取 persona 文件，让角色以普通�
 | 多角色部署 | 其他角色机器人 QQ、接话概率、连续往返限制、名称识别 | [多角色部署](roleplay/multi-role.md) |
 | 免打扰 | 群员自助加入名单，角色不再主动搭话，只回应主动叫到自己的消息 | [命令](roleplay/commands.md) |
 | 命令与配置 | 全部管理命令、配置项、默认性能、构建和升级 | [命令](roleplay/commands.md) / [配置与部署](roleplay/configuration.md) |
+| 训练语料采集 | `/role learn` 把任意群消息和前后文存成训练样本，供后续微调使用 | [技能与集成](roleplay/integrations.md) |
+| 风格层训练 | `/role train` 把群消息导出成 ShareGPT 交给本地 MBB-Model 训练；默认复制当前 adapter 到新任务目录后续训，可新开 adapter，截止游标避免重复喂数据 | [技能与集成](roleplay/integrations.md) |
+| 工具与工作区 | 原生 tools/tool_calls Agent Loop、角色私有 data/ 文件工具、工具期间新消息并入、连续交流节拍 | [工具与工作区](roleplay/tools.md) |
 
 ## 核心流程
 

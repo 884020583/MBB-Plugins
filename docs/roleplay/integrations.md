@@ -190,20 +190,125 @@ AI 不可用或返回空内容时，会回退到固定模板。创建时保存�
 自我提醒会保存原始上下文，并在到点生成时明确“这是角色自己该做的事”，避免把角色自己的待办误写成提醒用户。
 
 
+## 训练语料采集
+
+对着任意一条群消息回复 `/role learn [备注]`，就会把那条消息和前后文一起存成一条训练样本。
+目标消息不限于角色自己发的，群员发的也可以采集——这样既能攒「角色该怎么说话」的正样本，
+也能攒「这种语境下该接什么」的样本。
+
+```text
+/role learn                     不带引用时采集最近一条群消息
+/role learn 这条很像绿的口气     采集时附带备注
+/role learn stats               查看累计采集数量
+/role learn recent 5            查看最近 5 条记录
+```
+
+产物在插件数据目录：
+
+```text
+train-corpus/learned.jsonl
+```
+
+一行一条记录，字段是后续 SFT 直接能用的 `(上下文 → 目标消息)` 结构：
+
+```json
+{"id":"learn-20261019-015000-1234","role":"才羽绿","personaFile":"persona-midori.json",
+ "groupID":974272471,
+ "target":{"messageID":123,"userID":640562581,"userName":"老师","isBot":false,
+           "time":"2026-10-19 01:49:00","text":"小绿今天好可爱"},
+ "contextBefore":[{...}],"contextAfter":[{...}],
+ "note":"这句像绿的口气","learnedBy":640562581,"learnedAt":1792345000000}
+```
+
+用 JSONL 而不是缩进 JSON，是因为这个文件要直接喂给后续的微调流程，追加写入也不怕中途中断；
+想快速复核内容用 `/role learn recent` 就行。
+
+相关配置：
+
+```yaml
+learnEnable: true
+learnDirectory: "train-corpus"
+learnContextBefore: 6
+learnContextAfter: 3
+```
+
+命令在消息进入合批与路由之前拦截，所以采集用的 `/role learn` 本身不会触发角色回复。
+权限为 owner 或 bot 管理员。
+
+## 风格层小模型与训练
+
+`MBB-Model` 是一个独立部署的本地小模型服务（默认 Qwen3-1.7B），只负责把大模型写好的草稿
+改写成「像 QQ 群友说话」的语气。路由、决策、技能、记忆仍然走云端大模型，所以小模型输出
+不合格时不会影响主链路。
+
+Roleplay 通过 HTTP 调它，地址由 `modelServiceUrl` 配置（默认 `http://127.0.0.1:8770`）：
+
+```text
+/role train                 查看模型服务与训练状态
+/role train corpus [条数]   用上次截止到现在的新消息继续训练当前 adapter
+/role train fresh [条数]    从最早群消息开始，从底座新开 adapter
+/role train learn           用 /role learn 采集的特挑语料训练
+/role train cutoff [时间]   查看 / 设置 / 重置训练截止时间
+/role train reload          让 MBB-Model 重新加载 adapter
+```
+
+**群聊语料怎么取**：直接读本地消息表 `plugin_mbb_roleplay_messages`，按
+`(前 N 条群聊记录 → 这一条)` 切成 ShareGPT 样本。默认只取真人发言
+（`trainIncludeBotMessages=false`），跳过命令消息和超过 `trainMaxChars` 的长文。
+图片、表情包、语音、视频和文件占位符不会作为训练目标，上下文里的同类标记也会被剥离，
+避免风格模型学会输出 `[图片]`。
+
+**不重复喂老数据**：每次训练把「已处理到的行号 + 对应时间」写进插件存储
+（`trainCutoffRowID` / `trainCutoffText`）。下次 `/role train corpus` 只取这之后的新消息，
+所以可以反复执行，不用手工记位置。`/role train cutoff reset` 会退回从头开始。
+
+**adapter 续训与备份**：默认训练会读取 `MBB-Model` 的 `adapters/current.json`，
+把当前 adapter 完整复制到本次任务的新目录，再在副本上继续训练；旧目录不会被修改。
+`/role train fresh` 不加载旧 adapter，而是从底座重新初始化一个 LoRA，并从最早群消息开始取样本。
+两条链每次都使用新的 `adapters/<jobId>/`，因此历史 adapter 都保留可回退。
+
+**提交与训练是分开的两步**：先 `POST /train/dataset` 落盘，再 `POST /train/start` 排队；
+`trainAutoStart=true` 时 bot 会自动接着启动训练，一条指令就能跑完。
+只有数据提交成功才会推进截止游标，提交失败不会丢数据。
+
+**进度与回报**：训练启动后 bot 每 10 秒轮询一次 `/train/status`，
+任务完成或失败时会主动在发起训练的群里回一条结果（样本数、步数、最终 loss、耗时、adapter 路径），
+最长跟踪两小时。中途也可以随时 `/role train` 看当前进度。
+服务端控制台会同步打印每个阶段，注意 `4% 加载依赖库` 到 `8% 加载 tokenizer` 之间
+是在 import torch/transformers，显卡空闲是正常的，真正占用显存从 `25% 加载底座模型` 开始。
+
+相关配置：
+
+```yaml
+modelServiceUrl: "http://127.0.0.1:8770"
+modelServiceToken: ""
+modelServiceTimeoutSecond: 120
+trainEnable: true
+trainContextBefore: 4
+trainMaxSamplesPerRun: 2000
+trainMaxChars: 200
+trainIncludeBotMessages: false
+trainAutoStart: true
+```
+
+服务端的部署与接口见 `MBB-Model` 项目自己的 README 和 `docs/API.md`。
+
 ## 台词语料检索
 
 语料文件放在插件数据目录：
 
 ```text
+speech-corpus/speech-corpus-<persona>-qq.jsonl
 speech-corpus/speech-corpus-<persona>.jsonl
 ```
 
 语料统一在 `MBB-Persona` 私有仓库的 `corpus/` 中维护。把需要的语料复制到上述 `speech-corpus/` 目录后执行 `/role speech reload`；插件不再内置完整语料。
+`-qq.jsonl` 放人工整理的群聊语气样本，检索时获得更高权重；普通文件通常是原作剧情台词，只作保底。
 
 每行一个 JSON 对象：
 
 ```json
-{"id":"example-000001","role":"example","text":"示例台词","tags":["日常","任务"],"emotion":"curious","scene":"group_chat","source":"设定集","weight":1.0,"spoiler":0}
+{"id":"example-000001","role":"example","text":"示例台词","tags":["日常","任务"],"emotion":"curious","scene":"group_chat","register":"qq","source":"manual-qq-style","weight":1.0,"spoiler":0}
 ```
 
 插件会使用当前消息和最近群聊上下文做本地字符 n-gram 检索，把少量参考台词注入角色提示词。参考示例只用于学习表达方式，生成后还会做相似度检测，避免直接照抄台词。
@@ -215,6 +320,7 @@ speech-corpus/speech-corpus-<persona>.jsonl
 3. **同一出处只取一条**：避免整批示例来自同一段剧情，语气高度雷同。
 4. **剧透过滤**：`spoiler` 超过 `speechSpoilerLevel` 的台词直接不参与检索，默认只排除严重剧透。
 5. **参考示例不沿用话题**：台词语料只用于参考语气和表达方式，提示词会明确要求不要沿用示例里的具体话题、职业内容或项目进度。
+6. **群聊样本优先**：`register=qq` 或从 `-qq.jsonl` 加载的条目权重更高。默认每次最多只注入 2 条，避免多段剧情台词把模型带回舞台腔。
 
 情绪与场景是加成而不是过滤条件：语料里 neutral 占大多数，硬过滤会把可用台词砍掉大半，加成只影响同类候选之间的排序。
 
@@ -223,7 +329,7 @@ speech-corpus/speech-corpus-<persona>.jsonl
 ```yaml
 speechCorpusEnable: true
 speechCorpusDirectory: "speech-corpus"
-speechRetrievalCount: 8
+speechRetrievalCount: 2
 speechRetrievalMaxChars: 1200
 speechRetrievalMinScore: 0.35
 speechSpoilerLevel: 1

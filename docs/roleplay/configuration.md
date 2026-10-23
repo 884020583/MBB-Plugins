@@ -10,7 +10,7 @@ persona 支持任意作品角色或原创角色，常用字段包括：
 
 - 名称、别名、身份
 - 世界观、学园、组织、阵营或势力
-- 外貌、性格、说话方式、口癖
+- 外貌、性格、说话方式和场景语气规则
 - 人物关系、专有名词、剧情记忆
 - 行为边界、互动规则和情绪基线
 
@@ -143,10 +143,13 @@ routerMaxTokens: 2400
 routerReasoningEffort: "none"
 styleEnable: true
 styleMaxChars: 60
+styleLongReplyEnable: false
 styleProfile: ""
 styleMaxTokens: 1200
 styleReasoningEffort: "low"
 styleProactiveEnable: false
+styleFailureThreshold: 2
+styleFailureCooldownSecond: 600
 replyImageMaxTokens: 4000
 replySegmentMaxChars: 30
 replySplitPunctuation: "。！？!?；;，、：,:～~…"
@@ -168,15 +171,28 @@ replyReviewReasoningEffort: "none"
 replyReviewTimeoutSecond: 60
 replyReviewMinScore: 70
 toolEnable: true
-toolMaxSteps: 4
-toolMaxCalls: 8
-toolResultMaxChars: 8000
+toolMaxSteps: 8
+toolMaxCalls: 16
+toolResultMaxChars: 16000
 toolLiveMessageMax: 10
+toolLoopMaxMillis: 90000
+toolCallMaxMillis: 20000
+toolMemoryInjectItems: 8
+toolMemoryInjectMaxChars: 6000
+toolMemoryKeepHours: 72
+toolMemoryMaxRows: 500
 workspaceEnable: true
 workspaceMaxReadChars: 32000
 workspaceMaxWriteChars: 64000
 workspaceMaxFilesPerList: 200
 workspaceMaxTotalBytes: 67108864
+webEnable: true
+webWhitelist: "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com"
+webTimeoutSecond: 15
+webMaxBytes: 262144
+webMaxChars: 12000
+contextHardLimitEnable: false
+promptTotalChars: 120000
 pacingEnable: true
 pacingBaseMs: 350
 pacingPerCharMs: 25
@@ -253,10 +269,15 @@ quietReplyEnable: true
 
 `toolEnable` 默认 `true`，通过 `MBB-AI` 的 OpenAI `tools/tool_calls` 执行有限工具循环。
 `toolMaxSteps` 和 `toolMaxCalls` 限制单轮循环次数；工具期间新消息并入上下文受
-`toolLiveMessageMax` 限制。`workspaceEnable` 开放角色的私有工作区
+`toolLiveMessageMax` 限制。`toolLoopMaxMillis` 与 `toolCallMaxMillis` 分别限制整轮和单工具耗时，
+`toolMemoryInject*` 控制下一轮按相关性注入的工具结果上下文。`workspaceEnable` 开放角色的私有工作区
 `plugins/MBB-Roleplay/data/`，读写大小和列表数量分别由 `workspaceMaxReadChars`、
 `workspaceMaxWriteChars`、`workspaceMaxFilesPerList` 控制。具体工具见
 [工具调用、工作区与交流节拍](tools.md)。
+
+`webEnable` 开放受限网页读取工具，只允许 `webWhitelist` 中的域名及其子域名。
+`contextHardLimitEnable` 默认关闭，关闭时不按 `promptTotalChars` 截断动态资料；
+只有显式打开本地硬预算时才使用该上限。
 
 超长回复默认不再交给小模型风格层，而是由大模型回复复核处理。只有显式设置
 `styleLongReplyEnable: true` 时，超过 `styleMaxChars` 的回复才会先触发风格层。
