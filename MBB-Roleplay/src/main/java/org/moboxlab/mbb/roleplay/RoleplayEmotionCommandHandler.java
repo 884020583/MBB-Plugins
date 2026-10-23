@@ -126,7 +126,7 @@ public class RoleplayEmotionCommandHandler {
                 return;
             }
             if (args.length < 6) {
-                sender.sendMessage("用法：/role emotion reason set <QQ> <原因>");
+                sender.sendMessage("用法：/role emotion reason set <QQ|@群友> <原因>");
                 return;
             }
             long userID = command.parseUserID(args[4]);
@@ -145,7 +145,7 @@ public class RoleplayEmotionCommandHandler {
                 return;
             }
             if (args.length < 5) {
-                sender.sendMessage("用法：/role emotion reason clear <QQ>");
+                sender.sendMessage("用法：/role emotion reason clear <QQ|@群友>");
                 return;
             }
             long userID = command.parseUserID(args[4]);
@@ -157,12 +157,12 @@ public class RoleplayEmotionCommandHandler {
             sender.sendMessage("已清空用户 "+userID+" 的情绪原因。");
             return;
         }
-        sender.sendMessage("用法：/role emotion reason set <QQ> <原因> | clear <QQ>");
+        sender.sendMessage("用法：/role emotion reason set <QQ|@群友> <原因> | clear <QQ|@群友>");
     }
 
     void handleEmotionAffinity(CommandSender sender,String[] args,long groupID) {
         if (args.length < 6 || !"set".equalsIgnoreCase(args[3])) {
-            sender.sendMessage("用法：/role emotion affinity set <QQ> <0-100>");
+            sender.sendMessage("用法：/role emotion affinity set <QQ|@群友> <0-100>");
             return;
         }
         long userID = command.parseUserID(args[4]);

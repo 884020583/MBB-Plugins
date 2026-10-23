@@ -12,11 +12,16 @@ import java.util.Arrays;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Set;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 
 /**
  * /role 角色扮演管理命令
  */
 public class RoleplayCommand extends BotCommand {
+    private static final Pattern CQ_AT_QQ = Pattern.compile("(?i)\\[CQ:at,[^\\]]*?qq=([^,\\]]+)");
+    private static final Pattern TEXT_AT_QQ = Pattern.compile("(?<!\\S)@(\\d+)");
+
     private final RoleplayPlugin plugin;
     private final RoleplayService service;
     private final RoleplayMemoryCommandHandler roleplayMemoryCommandHandler;
@@ -26,6 +31,7 @@ public class RoleplayCommand extends BotCommand {
     private final RoleplayFeedbackCommandHandler roleplayFeedbackCommandHandler;
     private final RoleplayMemberCommandHandler roleplayMemberCommandHandler;
     private final RoleplayBotCommandHandler roleplayBotCommandHandler;
+    private final RoleplayTrainCommandHandler roleplayTrainCommandHandler;
 
     RoleplayService service() {
         return service;
@@ -45,6 +51,7 @@ public class RoleplayCommand extends BotCommand {
         this.roleplayFeedbackCommandHandler = new RoleplayFeedbackCommandHandler(this);
         this.roleplayMemberCommandHandler = new RoleplayMemberCommandHandler(this);
         this.roleplayBotCommandHandler = new RoleplayBotCommandHandler(this);
+        this.roleplayTrainCommandHandler = new RoleplayTrainCommandHandler(this);
     }
 
     @Override
@@ -196,6 +203,10 @@ public class RoleplayCommand extends BotCommand {
             handleSpeech(sender,args);
             return true;
         }
+        if ("train".equals(action)) {
+            handleTrain(sender,args);
+            return true;
+        }
         if ("kb".equals(action) || "knowledge".equals(action)) {
             handleKnowledge(sender,args);
             return true;
@@ -292,6 +303,10 @@ public class RoleplayCommand extends BotCommand {
 
     private void handleSpeech(CommandSender sender,String[] args) {
         roleplayContentCommandHandler.handleSpeech(sender,args);
+    }
+
+    private void handleTrain(CommandSender sender,String[] args) {
+        roleplayTrainCommandHandler.handleTrain(sender,args);
     }
 
     private void handleKnowledge(CommandSender sender,String[] args) {
@@ -392,12 +407,28 @@ public class RoleplayCommand extends BotCommand {
     }
 
     long parseUserID(String value) {
+        String text = value == null ? "" : value.trim();
+        if (text.isEmpty()) return 0L;
+        Matcher cq = CQ_AT_QQ.matcher(text);
+        if (cq.find()) text = cleanAtValue(cq.group(1));
+        else {
+            Matcher plain = TEXT_AT_QQ.matcher(text);
+            if (plain.find()) text = plain.group(1);
+        }
         try {
-            long userID = Long.parseLong(value == null ? "" : value.trim());
+            long userID = Long.parseLong(text);
             return userID > 0 ? userID : 0L;
         } catch (Exception e) {
             return 0L;
         }
+    }
+
+    private String cleanAtValue(String value) {
+        String text = value == null ? "" : value.trim();
+        if (text.length() >= 2 && text.startsWith("\"") && text.endsWith("\"")) {
+            text = text.substring(1,text.length() - 1).trim();
+        }
+        return text;
     }
 
     int parsePage(String[] args,int index) {

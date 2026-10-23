@@ -46,7 +46,7 @@ public class RoleplayAddressService {
                 JSONObject segment = message.getJSONObject(i);
                 if (segment == null || !"at".equals(segment.getString("type"))) continue;
                 JSONObject data = segment.getJSONObject("data");
-                long atID = data == null ? 0L : data.getLongValue("qq");
+                long atID = RoleplayTextUtils.jsonPositiveLong(data,"qq");
                 //只有艾特到另一个角色机器人才算"提到其他角色"，普通群友不算
                 if (atID > 0 && atID != selfID && service.containsCSVLong(service.config().otherRoleBotQQs,atID)) {
                     return true;
@@ -70,7 +70,7 @@ public class RoleplayAddressService {
             JSONObject segment = message.getJSONObject(i);
             if (segment == null || !"at".equals(segment.getString("type"))) continue;
             JSONObject data = segment.getJSONObject("data");
-            long atID = data == null ? 0L : data.getLongValue("qq");
+            long atID = RoleplayTextUtils.jsonPositiveLong(data,"qq");
             if (atID > 0 && atID != selfID && !service.containsCSVLong(service.config().otherRoleBotQQs,atID)) {
                 return true;
             }
@@ -89,12 +89,12 @@ public class RoleplayAddressService {
                 if (segment == null) continue;
                 JSONObject data = segment.getJSONObject("data");
                 if ("at".equals(segment.getString("type")) && data != null) {
-                    long atID = data.getLongValue("qq");
+                    long atID = RoleplayTextUtils.jsonPositiveLong(data,"qq");
                     if (atID == selfID) mentionedSelf = true;
                     else if (atID > 0) mentionedOther = true;
                 }
                 if ("reply".equals(segment.getString("type")) && data != null && lastBot > 0
-                        && data.getLongValue("id") == lastBot) return true;
+                        && RoleplayTextUtils.jsonPositiveLong(data,"id") == lastBot) return true;
             }
         }
         if (mentionedSelf) return true;
@@ -122,7 +122,7 @@ public class RoleplayAddressService {
             JSONObject segment = message.getJSONObject(i);
             if (segment == null || !"reply".equals(segment.getString("type"))) continue;
             JSONObject data = segment.getJSONObject("data");
-            if (data != null && data.getLongValue("id") == lastBot) return true;
+            if (data != null && RoleplayTextUtils.jsonPositiveLong(data,"id") == lastBot) return true;
         }
         return false;
     }
@@ -135,7 +135,7 @@ public class RoleplayAddressService {
             if (segment == null || !"reply".equals(segment.getString("type"))) continue;
             JSONObject data = segment.getJSONObject("data");
             if (data == null) continue;
-            long id = data.getLongValue("id");
+            long id = RoleplayTextUtils.jsonPositiveLong(data,"id");
             if (id > 0) return id;
         }
         return 0L;
@@ -204,7 +204,7 @@ public class RoleplayAddressService {
             JSONObject segment = message.getJSONObject(i);
             if (segment == null || !"at".equals(segment.getString("type"))) continue;
             JSONObject data = segment.getJSONObject("data");
-            if (data != null && data.getLongValue("qq") == selfID) return true;
+            if (RoleplayTextUtils.jsonPositiveLong(data,"qq") == selfID) return true;
         }
         return false;
     }
@@ -223,6 +223,7 @@ public class RoleplayAddressService {
         return service.containsCSVLong(service.config().otherRoleBotQQs,event.getUserID());
     }
 
-    boolean isRoleParticipantUser(long userID) {        return userID > 0 && service.containsCSVLong(service.config().otherRoleBotQQs,userID);
+    boolean isRoleParticipantUser(long userID) {
+        return userID > 0 && service.containsCSVLong(service.config().otherRoleBotQQs,userID);
     }
 }

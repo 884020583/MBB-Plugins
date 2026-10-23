@@ -52,7 +52,7 @@ public class RoleplayModerationCommandHandler {
             return;
         }
         if (args.length < 4) {
-            sender.sendMessage("用法：/role blacklist add <QQ> [原因] | remove <QQ> | clear | list");
+            sender.sendMessage("用法：/role blacklist add <QQ|@群友> [原因] | remove <QQ|@群友> | clear | list");
             return;
         }
         long userID = command.parseUserID(args[3]);
@@ -73,7 +73,7 @@ public class RoleplayModerationCommandHandler {
                     : "用户 "+userID+" 不在黑名单中。");
             return;
         }
-        sender.sendMessage("用法：/role blacklist add <QQ> [原因] | remove <QQ> | clear | list");
+        sender.sendMessage("用法：/role blacklist add <QQ|@群友> [原因] | remove <QQ|@群友> | clear | list");
     }
 
     void handleQuiet(CommandSender sender,String[] args) {
@@ -162,7 +162,7 @@ public class RoleplayModerationCommandHandler {
                     +"只有主动叫到角色时才会得到回复。");
             return;
         }
-        sender.sendMessage("用法：/role quiet [on|off|list|add <QQ>|remove <QQ>|clear]"
+        sender.sendMessage("用法：/role quiet [on|off|list|add <QQ|@群友>|remove <QQ|@群友>|clear]"
                 +"\n群员可自助使用 /role quiet add 与 /role quiet remove。");
     }
 }

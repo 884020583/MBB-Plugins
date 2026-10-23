@@ -103,7 +103,7 @@ public class RoleplayRoutingService {
             JSONObject segment = message.getJSONObject(i);
             if (segment == null || !"at".equals(segment.getString("type"))) continue;
             JSONObject data = segment.getJSONObject("data");
-            long atID = data == null ? 0L : data.getLongValue("qq");
+            long atID = RoleplayTextUtils.jsonPositiveLong(data,"qq");
             if (atID > 0) targets.add("QQ "+atID);
         }
         return targets.isEmpty() ? "无" : String.join("、",targets);

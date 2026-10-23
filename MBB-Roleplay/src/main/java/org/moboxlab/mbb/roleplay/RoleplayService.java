@@ -98,8 +98,12 @@ public class RoleplayService {
     private final RoleplayRoutingService routingService;
     private final RoleplayPromptMaterialService promptMaterialService;
     private final RoleplayMessageContentService contentService;
+    private final RoleplayLearnService learnService;
+    private final RoleplayModelClient modelClient;
+    private final RoleplayTrainService trainService;
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayToolLoopService toolLoopService;
+    private final RoleplayToolMemoryService toolMemoryService;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
     private volatile RoleplayConfig config;
@@ -317,7 +321,11 @@ public class RoleplayService {
         this.routingService = new RoleplayRoutingService(this);
         this.promptMaterialService = new RoleplayPromptMaterialService(this);
         this.contentService = new RoleplayMessageContentService(this);
+        this.learnService = new RoleplayLearnService(this);
+        this.modelClient = new RoleplayModelClient(this);
+        this.trainService = new RoleplayTrainService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
+        this.toolMemoryService = new RoleplayToolMemoryService(plugin,config);
         this.toolLoopService = new RoleplayToolLoopService(this,config);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -336,6 +344,7 @@ public class RoleplayService {
         replyFeedbackService.init();
         expressionService.init();
         traceService.init();
+        toolMemoryService.init();
         threadService.init();
         attentionService.reload(config);
         executorService.ensureTurnExecutor();
@@ -360,6 +369,7 @@ public class RoleplayService {
         attentionService.reload(config);
         dailyReviewService.reload(config);
         toolLoopService.reload(config);
+        toolMemoryService.reload(config);
         executorService.ensureTurnExecutor();
         executorService.ensureBackgroundExecutor();
         dailyReviewService.ensureTask();
@@ -389,6 +399,8 @@ public class RoleplayService {
      * 这样连续快速发言不会被逐条排队，旧消息也不会挤掉新消息。
      */
     public void handle(GroupMessageEvent event) {
+        // /role learn 需要拿到完整事件（含引用段），所以在进入合批和路由之前先拦截
+        if (learnService.handleCommand(event)) return;
         batchScheduler.handle(event);
     }
 
@@ -567,6 +579,18 @@ public class RoleplayService {
         return hubService;
     }
 
+    RoleplayLearnService learnService() {
+        return learnService;
+    }
+
+    RoleplayModelClient modelClient() {
+        return modelClient;
+    }
+
+    RoleplayTrainService trainService() {
+        return trainService;
+    }
+
     RoleplayRateLimitService rateLimitService() {
         return rateLimitService;
     }
@@ -593,6 +617,10 @@ public class RoleplayService {
 
     RoleplayToolLoopService toolLoopService() {
         return toolLoopService;
+    }
+
+    RoleplayToolMemoryService toolMemoryService() {
+        return toolMemoryService;
     }
 
     RoleplayRouter router() {

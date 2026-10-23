@@ -30,7 +30,7 @@ public class RoleplayMemberCommandHandler {
         String action = args.length > 2 ? args[2].toLowerCase() : "";
         if ("clear".equals(action)) {
             if (args.length < 4) {
-                sender.sendMessage("用法：/role member clear <QQ>");
+                sender.sendMessage("用法：/role member clear <QQ|@群友>");
                 return;
             }
             long targetID = command.parseUserID(args[3]);
@@ -77,19 +77,21 @@ public class RoleplayMemberCommandHandler {
         }
         if ("quiet".equals(category)) {
             sender.sendMessage("免打扰："
-                    +"\n/role quiet add [QQ]"
-                    +"\n/role quiet remove [QQ]"
+                    +"\n/role quiet add [QQ|@群友]"
+                    +"\n/role quiet remove [QQ|@群友]"
                     +"\n/role quiet list"
                     +"\n/role quiet on|off"
-                    +"\n/role quiet clear");
+                    +"\n/role quiet clear"
+                    +"\nQQ 参数可以直接用群聊艾特代替。");
             return;
         }
         if ("blacklist".equals(category)) {
             sender.sendMessage("黑名单："
                     +"\n/role blacklist list"
-                    +"\n/role blacklist add <QQ> [原因]"
-                    +"\n/role blacklist remove <QQ>"
-                    +"\n/role blacklist clear");
+                    +"\n/role blacklist add <QQ|@群友> [原因]"
+                    +"\n/role blacklist remove <QQ|@群友>"
+                    +"\n/role blacklist clear"
+                    +"\nQQ 参数可以直接用群聊艾特代替。");
             return;
         }
         if ("emotion".equals(category)) {
@@ -98,8 +100,9 @@ public class RoleplayMemberCommandHandler {
                     +"\n/role emotion [QQ] [页码]"
                     +"\n/role emotion reset [QQ]"
                     +"\n/role emotion log [页码]"
-                    +"\n/role emotion affinity set <QQ> <0-100>"
-                    +"\n/role emotion reason set|clear <QQ> [原因]");
+                    +"\n/role emotion affinity set <QQ|@群友> <0-100>"
+                    +"\n/role emotion reason set|clear <QQ|@群友> [原因]"
+                    +"\nQQ 参数可以直接用群聊艾特代替。");
             return;
         }
         if ("memory".equals(category)) {
@@ -116,7 +119,8 @@ public class RoleplayMemberCommandHandler {
             sender.sendMessage("角色与机器人："
                     +"\n/role persona [文件名]"
                     +"\n/role persona reset <文件名>"
-                    +"\n/role bot [status|chance|max|qq|name] ...");
+                    +"\n/role bot [status|chance|max|qq|name] ..."
+                    +"\n/role bot qq 的 QQ 参数可以用群聊艾特代替。");
             return;
         }
         if ("content".equals(category)) {
@@ -137,6 +141,24 @@ public class RoleplayMemberCommandHandler {
                     +"\n/role eval [list|run <id|all>]");
             return;
         }
+        if ("learn".equals(category) || "corpus".equals(category)) {
+            sender.sendMessage("训练语料采集："
+                    +"\n/role learn [备注]          回复某条消息再发，采集那条消息和前后文"
+                    +"\n/role learn                不带引用时采集最近一条群消息"
+                    +"\n/role learn stats          查看累计采集数量"
+                    +"\n/role learn recent [条数]  查看最近采集的记录");
+            return;
+        }
+        if ("train".equals(category)) {
+            sender.sendMessage("风格层模型训练："
+                    +"\n/role train                查看模型服务与训练状态"
+                    +"\n/role train corpus [条数]  用上次截止到现在的新消息继续训练当前 adapter"
+                    +"\n/role train fresh [条数]   从最早群消息开始，从底座新开 adapter"
+                    +"\n/role train learn          用 /role learn 采集的特挑语料训练"
+                    +"\n/role train cutoff [时间]  查看/设置/重置训练截止时间"
+                    +"\n/role train reload         让 MBB-Model 重新加载 adapter");
+            return;
+        }
         sender.sendMessage("MBB-Roleplay 命令分类："
                 +"\n/role help basic        基础与开关"
                 +"\n/role help quiet        免打扰"
@@ -146,6 +168,8 @@ public class RoleplayMemberCommandHandler {
                 +"\n/role help role         角色与机器人"
                 +"\n/role help content      语料与知识库"
                 +"\n/role help feedback     反馈与表达"
+                +"\n/role help learn        训练语料采集"
+                +"\n/role help train        风格层模型训练"
                 +"\n/role help all          查看全部命令");
         if ("all".equals(category)) {
             sender.sendMessage("完整命令表较长，请按上面的分类逐项查看。");

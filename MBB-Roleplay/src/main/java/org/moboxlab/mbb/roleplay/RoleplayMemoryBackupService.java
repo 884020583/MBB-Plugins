@@ -1,6 +1,7 @@
 package org.moboxlab.mbb.roleplay;
 
 import com.alibaba.fastjson.JSONArray;
+import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 
 import java.io.File;
@@ -44,7 +45,7 @@ public class RoleplayMemoryBackupService {
                     +".json";
             File file = new File(directory,name);
             Files.write(Paths.get(file.getAbsolutePath()),
-                    root.toJSONString().getBytes(StandardCharsets.UTF_8));
+                    JSON.toJSONString(root,true).getBytes(StandardCharsets.UTF_8));
             service.plugin().getLogger().sendInfo("[记忆] 已备份全部记忆到 "+file.getAbsolutePath());
             return name;
         } catch (Exception e) {

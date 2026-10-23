@@ -118,24 +118,22 @@ public class RoleplayBotCommandHandler {
         Set<String> values = new LinkedHashSet<>();
         if (!"set".equals(action)) values.addAll(command.splitCsv(current));
         for (int i = 4; i < args.length; i++) {
-            for (String item : command.splitCsv(args[i])) {
+            List<String> items = new ArrayList<>();
+            if (qq && args[i].toUpperCase().contains("[CQ:AT,")) items.add(args[i]);
+            else items.addAll(command.splitCsv(args[i]));
+            for (String item : items) {
                 if (qq) {
-                    try {
-                        long userID = Long.parseLong(item);
-                        if (userID <= 0) throw new NumberFormatException();
-                        values.add(String.valueOf(userID));
-                    } catch (Exception e) {
+                    long userID = command.parseUserID(item);
+                    if (userID <= 0) {
                         sender.sendMessage("QQ 格式不正确："+item);
                         return;
                     }
+                    if ("remove".equals(action)) values.remove(String.valueOf(userID));
+                    else values.add(String.valueOf(userID));
                 } else if (!item.isEmpty()) {
-                    values.add(item);
+                    if ("remove".equals(action)) values.remove(item);
+                    else values.add(item);
                 }
-            }
-        }
-        if ("remove".equals(action)) {
-            for (int i = 4; i < args.length; i++) {
-                for (String item : command.splitCsv(args[i])) values.remove(item);
             }
         }
         String value = command.joinCsv(values);
