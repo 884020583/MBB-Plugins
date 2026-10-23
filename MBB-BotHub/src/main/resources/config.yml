@@ -1,0 +1,38 @@
+#MBB-BotHub 配置模板
+#首次启动时插件会自己生成 config.yml：探测本机 18765 端口是否已有 hubserver，
+#端口空闲生成 server，端口被占用生成 client。下面这份模板留作字段参考。
+#模式：server / client / auto。auto 会在每次启动时重新探测本机端口。
+mode: "auto"
+#server 监听地址；client 连接地址
+host: "127.0.0.1"
+port: 18765
+#共享鉴权 token，同一个 hub 下所有 bot 必须一致
+token: "change-me"
+#当前机器人身份，同一个 hub 内必须唯一
+botID: ""
+botQQ: 0
+role: ""
+#只参与协作的群号，英文逗号分隔；留空表示全部群
+groups: ""
+#心跳间隔
+heartbeatSeconds: 10
+#单次请求超时毫秒
+requestTimeoutMs: 3000
+#client 断线重连间隔
+reconnectSeconds: 5
+#服务端判定 peer 掉线的空闲秒数
+leaseSeconds: 30
+#是否共享识图结果，避免同群多个 bot 重复识图
+visionShareEnable: true
+#识图进行中的认领租约秒数
+visionLeaseSeconds: 30
+#等待其他 bot 识图结果毫秒
+visionWaitMs: 15000
+#共享识图缓存保留小时
+visionCacheKeepHours: 72
+#共享识图缓存最大条目数
+visionCacheMaxEntries: 500
+#是否共享回合权，避免同群多个 bot 抢答同一条消息
+turnShareEnable: true
+#回合权租约秒数
+turnLeaseSeconds: 60

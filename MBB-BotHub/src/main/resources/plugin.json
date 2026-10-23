@@ -1,0 +1,13 @@
+{
+  "name": "MBB-BotHub",
+  "version": "V0.1.4.0.0132",
+  "apiVersion": "0.3",
+  "main": "org.moboxlab.mbb.bothub.BotHubPlugin",
+  "author": "MoBoxLab",
+  "description": "MoBoxBot 多机器人协作中枢：TCP NDJSON、peer 注册、回合权与共享识图缓存",
+  "website": "",
+  "depend": [],
+  "softDepend": [],
+  "loadBefore": [],
+  "provides": ["bothub"]
+}

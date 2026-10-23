@@ -12,6 +12,7 @@ MoBoxBot 独立插件仓库。
 | [MBB-AntiSpam](docs/MBB-AntiSpam.md) | `/antispam ...` | `BOT_ADMIN` | 群聊刷屏治理：连发、复读、超长文本与艾特刷屏 |
 | [MBB-AI](docs/MBB-AI.md) | `/ai status/usage/reload` | `OWNER` | 公用 AI 服务，OpenAI 兼容协议 |
 | [MBB-AIGuard](docs/MBB-AIGuard.md) | `/guard ...` | `BOT_ADMIN` | AI 群聊风险审查，支持规则、行为画像和白名单 |
+| [MBB-BotHub](docs/MBB-BotHub.md) | `/hub ...` | `BOT_ADMIN` | 多机器人协作中枢：peer 注册与选主、共享识图缓存、回合权、任务去重与互聊熔断 |
 | [MBB-Chat](docs/MBB-Chat.md) | `/chat <内容>`、`/chat new`、`/chat persona` | 管理员或白名单 | AI 对话，每人独立上下文与人设 |
 | [MBB-ChatStat](docs/MBB-ChatStat.md) | `/chatstat group/user` | `BOT_ADMIN` | 统计群聊内容或某人在所有可见群的发言，可接 AI 总结 |
 | [MBB-ComfyUI](docs/MBB-ComfyUI.md) | `/comfyui status/reload/test` | `BOT_ADMIN` | 按群独立冷却的 ComfyUI 生图服务，供 Roleplay 的 `draw` 技能调用 |
