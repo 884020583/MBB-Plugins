@@ -548,6 +548,10 @@ public final class SessionService implements SessionView {
                 }
                 // v1 桩（§9.10）：不写 aiEnabled、不写审计、不注册定时器，只回固定分支。
                 AiToggle toggle = aiHost.toggle(rawWord);
+                if (toggle == AiToggle.USAGE) {
+                    return reject(turn, SessionReject.BAD_ARGUMENT,
+                            "参数不对：AI 主持只支持 on 或 off");
+                }
                 if (!toggle.accepted()) {
                     return reject(turn, SessionReject.STATE_UNAVAILABLE,
                             TrpgAiHostService.DETAIL_UNAVAILABLE);

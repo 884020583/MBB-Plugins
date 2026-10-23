@@ -9,7 +9,7 @@ import org.moboxlab.mbb.trpg.config.TrpgConfig;
  *
  * <p>v1 交付范围：读取 {@code aiHost.*} 配置、判定全局开关、解析 {@code /trpg ai} 参数、
  * 给出固定分支；<b>不调用 AI、不写审计、不注册定时器、不落库 {@code aiEnabled}</b>。
- * 因为没有持有 {@link AiClient} / {@link TraceStore} / Scheduler 端口，零调用与零审计是结构性的，
+ * 因为没有持有 {@code AiClient} / {@code TraceStore} / {@code Scheduler} 端口，零调用与零审计是结构性的，
  * 不依赖运行期判断。真实实现（排队、降级、审计、合并窗口）随 v1.1 在本类内落地。</p>
  */
 public final class TrpgAiHostService {
