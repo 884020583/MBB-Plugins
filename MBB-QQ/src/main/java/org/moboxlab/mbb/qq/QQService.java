@@ -2,6 +2,7 @@ package org.moboxlab.mbb.qq;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import org.moboxlab.moboxbot.API.Event.NoticeEvent;
 import org.moboxlab.moboxbot.API.OneBot.MessageUtil;
 import org.moboxlab.moboxbot.API.OneBot.OneBotClient;
 import org.moboxlab.moboxbot.API.Plugin;
@@ -98,6 +99,7 @@ public class QQService implements PluginService {
             if ("send_image".equalsIgnoreCase(name)) return sendImage(input);
             if ("send_voice".equalsIgnoreCase(name)) return sendVoice(input);
             if ("set_own_group_card".equalsIgnoreCase(name)) return setOwnGroupCard(input);
+            if ("group_leave".equalsIgnoreCase(name)) return groupLeave(input);
             if ("qzone_post".equalsIgnoreCase(name)) return qzonePost(input);
             if ("qzone_delete".equalsIgnoreCase(name)) return qzoneDelete(input);
             if ("qzone_posts".equalsIgnoreCase(name)) return qzonePosts(input);
@@ -328,6 +330,63 @@ public class QQService implements PluginService {
                 groupID,selfID,"修改自己的群名片");
         if (result.getBooleanValue("status")) mark("card:"+groupID+":"+selfID);
         return result;
+    }
+
+    private JSONObject groupLeave(JSONObject input) {
+        if (!config.adminToolsEnable) return error("QQ 管理工具未启用");
+        if (!config.groupLeaveEnable) return error("退群功能未启用");
+        long groupID = positive(input,"groupID");
+        long operatorID = positive(input,"operatorID");
+        if (groupID <= 0) return error("缺少群号");
+        if (!isOwner(operatorID)) {
+            plugin.getLogger().sendWarn("[QQ] 拒绝非 owner 退群请求 group="+groupID
+                    +" operator="+operatorID);
+            return error("退群仅 owner 可以要求执行");
+        }
+        JSONObject params = new JSONObject(true);
+        params.put("group_id",String.valueOf(groupID));
+        return action("group_leave","set_group_leave",params,input,groupID,0,"退出群聊");
+    }
+
+    public void handleNotice(NoticeEvent event) {
+        if (!config.enable || !config.notifyOwnerOnGroupEvent || event == null) return;
+        String noticeType = safe(event.getNoticeType());
+        String subType = safe(event.getSubType());
+        long selfID = event.getRaw().getLongValue("self_id");
+        if (selfID <= 0 || event.getUserID() != selfID) return;
+        long groupID = event.getGroupID();
+        if (groupID <= 0) return;
+        String message = "";
+        if ("group_decrease".equalsIgnoreCase(noticeType)) {
+            long operatorID = event.getOperatorID();
+            if ("kick_me".equalsIgnoreCase(subType) || "kick".equalsIgnoreCase(subType)) {
+                message = "[MBB-QQ] 机器人 "+selfID+" 已被移出群 "+groupID
+                        +(operatorID > 0 ? "，操作者 QQ："+operatorID : "");
+            } else {
+                message = "[MBB-QQ] 机器人 "+selfID+" 已退出群 "+groupID;
+            }
+        } else if ("group_ban".equalsIgnoreCase(noticeType)
+                && "ban".equalsIgnoreCase(subType)) {
+            long duration = event.getRaw().getLongValue("duration");
+            long operatorID = event.getOperatorID();
+            message = "[MBB-QQ] 机器人 "+selfID+" 在群 "+groupID+" 被禁言"
+                    +(duration > 0 ? " "+duration+" 秒" : "")
+                    +(operatorID > 0 ? "，操作者 QQ："+operatorID : "");
+        }
+        if (!message.isEmpty()) notifyOwners(message);
+    }
+
+    private void notifyOwners(String message) {
+        List<Long> owners = plugin.getServer().getOwnerList();
+        if (owners == null || owners.isEmpty() || client() == null) return;
+        for (Long ownerID : owners) {
+            if (ownerID == null || ownerID <= 0) continue;
+            JSONObject response = client().sendPrivateMessage(ownerID,
+                    MessageUtil.message(MessageUtil.text(message)));
+            if (response == null || response.getIntValue("retcode") != 0) {
+                plugin.getLogger().sendWarn("[QQ] 群事件通知 owner 失败 owner="+ownerID);
+            }
+        }
     }
 
     private JSONObject qzonePost(JSONObject input) {

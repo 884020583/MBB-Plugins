@@ -21,6 +21,7 @@ QQ 扩展动作服务。它把 NapCat/OneBot 的常用 QQ 能力封装成稳定�
 | 名片 | `set_own_group_card` | 修改机器人在当前群的群名片，需要 owner 或群管理员 |
 | 申请 | `pending_requests` / `friend_request` / `group_request` | 查看和处理好友申请、群邀请；只记录，不自动响应 |
 | 群管理 | `group_ban` / `group_whole_ban` | 禁言、解禁、全员禁言；需要 owner 或当前群管理员 |
+| 群管理 | `group_leave` | 退出当前群；必须由 owner 明确要求，代码层拒绝非 owner 诱导 |
 | 好友 | `delete_friend` / `set_friend_remark` | 删除好友、设置好友备注；仅 owner |
 | 账号 | `set_avatar` / `set_profile` / `set_signature` | 设置头像、资料卡和个性签名；仅 owner |
 | Qzone | `qzone_post` / `qzone_delete` / `qzone_posts` | owner 管理机器人自己的 QQ 空间 |
@@ -36,6 +37,8 @@ QQ 扩展动作服务。它把 NapCat/OneBot 的常用 QQ 能力封装成稳定�
 - 修改机器人群名片需要 owner 或当前群管理员。
 - 好友申请、群邀请只记录在当前插件的待处理表；处理时必须由 owner 明确指定申请 ID。
 - 禁言、全员禁言、删除好友、好友备注、头像、资料卡和个性签名都会写入审计。
+- 退群只接受 owner 的 `operatorID`；普通群员即使通过聊天诱导角色，也会在服务层被拒绝。
+- 机器人被移出群、主动退群或自身被禁言时，会私聊通知服务器配置的 owner；通知受 `notifyOwnerOnGroupEvent` 控制。
 - Qzone 发布、删除和查看本地记录仅 owner 可用。
 - 每个动作写入 `plugin_mbb_qq_audit`，记录群号、操作者、目标、结果和摘要，不保存图片/语音 base64。
 - Qzone 发布记录写入 `plugin_mbb_qq_qzone_post`，保存 `tid`、正文、图片描述、权限和发布时间。
@@ -54,3 +57,4 @@ QQ 扩展动作服务。它把 NapCat/OneBot 的常用 QQ 能力封装成稳定�
 见 [配置文件](https://github.com/MossCG/MBB-Plugins/blob/master/MBB-QQ/src/main/resources/config.yml)。
 默认关闭 Qzone 的公开发布：`qzoneDefaultUgcRight=64`，需要公开发布时显式传 `ugcRight=1`。
 `adminToolsEnable=false` 会同时关闭申请记录和全部高权限账号/群管理动作。
+`groupLeaveEnable=false` 只关闭退群动作，不影响其他 QQ 管理能力。

@@ -8,6 +8,10 @@ interactionToolsEnable: true
 mediaToolsEnable: true
 #是否允许 owner 执行好友、群管理和账号资料操作
 adminToolsEnable: true
+#是否允许 owner 明确要求机器人退出当前群
+groupLeaveEnable: true
+#机器人退群、被移出群或被禁言时是否私聊通知 owner
+notifyOwnerOnGroupEvent: true
 #是否允许管理机器人自己的 QQ 空间
 qzoneEnable: true
 #戳同一用户的最小间隔秒数

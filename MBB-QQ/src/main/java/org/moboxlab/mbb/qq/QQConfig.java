@@ -11,6 +11,8 @@ public class QQConfig {
     public boolean interactionToolsEnable = true;
     public boolean mediaToolsEnable = true;
     public boolean adminToolsEnable = true;
+    public boolean groupLeaveEnable = true;
+    public boolean notifyOwnerOnGroupEvent = true;
     public boolean qzoneEnable = true;
     public int pokeCooldownSecond = 30;
     public int likeCooldownSecond = 86400;
@@ -37,6 +39,9 @@ public class QQConfig {
         config.interactionToolsEnable = plugin.getConfig().getBoolean("interactionToolsEnable",true);
         config.mediaToolsEnable = plugin.getConfig().getBoolean("mediaToolsEnable",true);
         config.adminToolsEnable = plugin.getConfig().getBoolean("adminToolsEnable",true);
+        config.groupLeaveEnable = plugin.getConfig().getBoolean("groupLeaveEnable",true);
+        config.notifyOwnerOnGroupEvent =
+                plugin.getConfig().getBoolean("notifyOwnerOnGroupEvent",true);
         config.qzoneEnable = plugin.getConfig().getBoolean("qzoneEnable",true);
         config.pokeCooldownSecond = plugin.getConfig().getInt("pokeCooldownSecond",30);
         config.likeCooldownSecond = plugin.getConfig().getInt("likeCooldownSecond",86400);

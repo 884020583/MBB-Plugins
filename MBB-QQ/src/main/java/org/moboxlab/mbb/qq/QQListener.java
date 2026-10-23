@@ -3,6 +3,7 @@ package org.moboxlab.mbb.qq;
 import org.moboxlab.moboxbot.API.Event.EventHandler;
 import org.moboxlab.moboxbot.API.Event.EventPriority;
 import org.moboxlab.moboxbot.API.Event.Listener;
+import org.moboxlab.moboxbot.API.Event.NoticeEvent;
 import org.moboxlab.moboxbot.API.Event.RequestEvent;
 
 /**
@@ -18,5 +19,10 @@ public class QQListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR,ignoreCancelled = false)
     public void onRequest(RequestEvent event) {
         if (service != null) service.recordRequest(event);
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR,ignoreCancelled = false)
+    public void onNotice(NoticeEvent event) {
+        if (service != null) service.handleNotice(event);
     }
 }

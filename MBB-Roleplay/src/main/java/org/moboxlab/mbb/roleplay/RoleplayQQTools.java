@@ -51,6 +51,8 @@ public class RoleplayQQTools {
                 "把角色私有工作区中的语音发送到当前群",true,1,mediaArgs()));
         registry.register(new QQTool(service,qq,"qq_set_own_group_card","set_own_group_card",
                 "修改机器人在当前群的群名片，需要当前用户是 owner 或群管理员",true,1,cardArgs()));
+        registry.register(new QQTool(service,qq,"qq_group_leave","group_leave",
+                "让机器人退出当前群，只有 owner 明确要求时才可执行",true,1,noArgs()));
         registry.register(new QQTool(service,qq,"qq_qzone_post","qzone_post",
                 "以机器人自己的账号发表 QQ 空间说说，仅 owner 可用",true,1,qzonePostArgs()));
         registry.register(new QQTool(service,qq,"qq_qzone_delete","qzone_delete",
@@ -393,15 +395,27 @@ public class RoleplayQQTools {
                 params.put("images",encoded);
             }
             JSONObject response = qq.call(action,params);
+            long targetID = args.getLongValue("userID");
+            if (targetID <= 0 && targetsMember(action)) targetID = context.userID;
             if (response == null || !response.getBooleanValue("status")) {
-                return RoleplayToolResult.failed(response == null
+                RoleplayToolResult failed = RoleplayToolResult.failed(response == null
                         ? "MBB-QQ 没有返回结果" : response.getString("message"));
+                failed.data.put("groupID",context.groupID);
+                failed.data.put("operatorQQ",context.userID);
+                if (targetID > 0) failed.data.put("targetQQ",targetID);
+                return failed;
             }
-            RoleplayToolResult result = RoleplayToolResult.ok(
-                    response.getString("message") == null
-                            ? "QQ 操作已完成" : response.getString("message"));
+            String summary = response.getString("message") == null
+                    ? "QQ 操作已完成" : response.getString("message");
+            if (targetID > 0 && !summary.contains(String.valueOf(targetID))) {
+                summary += "，目标QQ："+targetID;
+            }
+            RoleplayToolResult result = RoleplayToolResult.ok(summary);
             JSONObject data = response.getJSONObject("data");
             if (data != null) result.data = data;
+            result.data.put("groupID",context.groupID);
+            result.data.put("operatorQQ",context.userID);
+            if (targetID > 0) result.data.put("targetQQ",targetID);
             if (response.getJSONArray("posts") != null) {
                 result.data.put("posts",response.getJSONArray("posts"));
             }
@@ -412,6 +426,12 @@ public class RoleplayQQTools {
                 result.data.put("requests",response.getJSONArray("requests"));
             }
             return result;
+        }
+
+        private boolean targetsMember(String action) {
+            return "member_info".equals(action) || "poke".equals(action)
+                    || "like".equals(action) || "group_ban".equals(action)
+                    || "delete_friend".equals(action) || "set_friend_remark".equals(action);
         }
 
         private boolean validExtension(String path,boolean image) {

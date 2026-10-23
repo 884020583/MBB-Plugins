@@ -77,6 +77,9 @@ public class QQCommand extends BotCommand {
                 +"只读工具："+(config.readToolsEnable ? "开" : "关")+"\n"
                 +"互动工具："+(config.interactionToolsEnable ? "开" : "关")+"\n"
                 +"媒体工具："+(config.mediaToolsEnable ? "开" : "关")+"\n"
+                +"管理工具："+(config.adminToolsEnable ? "开" : "关")+"\n"
+                +"owner 退群："+(config.groupLeaveEnable ? "开" : "关")+"\n"
+                +"群事件通知 owner："+(config.notifyOwnerOnGroupEvent ? "开" : "关")+"\n"
                 +"Qzone："+(config.qzoneEnable ? "开" : "关")+"\n"
                 +"审计保留："+config.auditKeepDays+" 天");
         return true;
