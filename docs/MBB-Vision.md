@@ -61,3 +61,14 @@ params:
 | `/vision stats` | `BOT_ADMIN` | 查看缓存数量 |
 | `/vision clear` | `BOT_ADMIN` | 清空识图缓存 |
 | `/vision reload` | `BOT_ADMIN` | 重载配置 |
+
+## 缓存导出
+
+```text
+action: dump
+params:
+  limit: 200
+```
+
+按最近命中时间倒序导出缓存条目，供 `MBB-BotHub` 在启动时回填共享识图缓存。
+不调用 AI，只读本地 SQLite。

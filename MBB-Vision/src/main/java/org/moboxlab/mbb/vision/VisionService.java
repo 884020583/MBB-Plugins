@@ -1,10 +1,12 @@
 package org.moboxlab.mbb.vision;
 
 import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson.JSONArray;
 import org.moboxlab.moboxbot.API.Plugin;
 import org.moboxlab.moboxbot.API.PluginService;
 
 import java.util.Base64;
+import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 import java.security.MessageDigest;
@@ -35,6 +37,7 @@ public class VisionService implements PluginService {
         if ("describe".equalsIgnoreCase(action)) return describe(params);
         if ("dataUri".equalsIgnoreCase(action)) return dataUri(params);
         if ("stats".equalsIgnoreCase(action)) return cache.stats();
+        if ("dump".equalsIgnoreCase(action)) return dump(params);
         if ("clear".equalsIgnoreCase(action)) return clear();
         if ("reload".equalsIgnoreCase(action)) return reload();
         return error("不支持的动作："+action);
@@ -139,6 +142,21 @@ public class VisionService implements PluginService {
         result.put("status",true);
         result.put("count",count);
         result.put("message","识图缓存已清空");
+        return result;
+    }
+
+    /**
+     * 导出最近识图缓存，MBB-BotHub 用它在启动时回填共享缓存
+     */
+    private JSONObject dump(JSONObject params) {
+        int limit = params == null ? 200 : params.getIntValue("limit");
+        List<JSONObject> entries = cache.recent(limit);
+        JSONArray array = new JSONArray();
+        array.addAll(entries);
+        JSONObject result = new JSONObject(true);
+        result.put("status",true);
+        result.put("count",entries.size());
+        result.put("entries",array);
         return result;
     }
 
