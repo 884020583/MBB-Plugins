@@ -104,6 +104,7 @@ public class RoleplayService {
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayToolLoopService toolLoopService;
     private final RoleplayToolMemoryService toolMemoryService;
+    private final RoleplayToolTurnService toolTurnService;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
     private volatile RoleplayConfig config;
@@ -326,6 +327,7 @@ public class RoleplayService {
         this.trainService = new RoleplayTrainService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.toolMemoryService = new RoleplayToolMemoryService(plugin,config);
+        this.toolTurnService = new RoleplayToolTurnService(plugin,config);
         this.toolLoopService = new RoleplayToolLoopService(this,config);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -345,6 +347,7 @@ public class RoleplayService {
         expressionService.init();
         traceService.init();
         toolMemoryService.init();
+        toolTurnService.init();
         threadService.init();
         attentionService.reload(config);
         executorService.ensureTurnExecutor();
@@ -370,6 +373,7 @@ public class RoleplayService {
         dailyReviewService.reload(config);
         toolLoopService.reload(config);
         toolMemoryService.reload(config);
+        toolTurnService.reload(config);
         executorService.ensureTurnExecutor();
         executorService.ensureBackgroundExecutor();
         dailyReviewService.ensureTask();
@@ -623,6 +627,10 @@ public class RoleplayService {
         return toolMemoryService;
     }
 
+    RoleplayToolTurnService toolTurnService() {
+        return toolTurnService;
+    }
+
     RoleplayRouter router() {
         return router;
     }
@@ -686,6 +694,10 @@ public class RoleplayService {
 
     boolean isOwnerUser(long userID) {
         return contentService.isOwner(userID);
+    }
+
+    boolean ownerAuthorizedInternalWeb(long groupID,long userID,String rawUrl) {
+        return contentService.ownerAuthorizedInternalWeb(groupID,userID,rawUrl);
     }
 
     boolean isInducedMemory(String content) {
@@ -1379,20 +1391,58 @@ public class RoleplayService {
         executorService.shutdown();
     }
 
+    void recoverToolTurns() {
+        toolLoopService.recoverInterruptedTurns();
+    }
+
+    void completeRecoveredToolTurn(RoleplayToolTurnService.RecoveredTurn turn,JSONObject result) {
+        if (turn == null || turn.context == null || result == null) return;
+        try {
+            JSONObject raw = JSONObject.parseObject(turn.context.eventRaw);
+            if (raw == null) {
+                plugin.getLogger().sendWarn("[工具] 群"+turn.context.groupID
+                        +" 工具回合缺少原始事件，无法恢复发送");
+                return;
+            }
+            GroupMessageEvent event = new GroupMessageEvent();
+            event.setGroupID(turn.context.groupID);
+            event.setMessageID(turn.context.messageID);
+            event.setUserID(turn.context.userID);
+            event.setRawMessage(raw.getString("raw_message"));
+            event.setMessage(raw.getJSONArray("message"));
+            event.setSender(raw.getJSONObject("sender"));
+            event.setRaw(raw);
+            RoleplayRouteDecision decision = new RoleplayRouteDecision();
+            decision.reply = true;
+            decision.addressed = "thread";
+            decision.confidence = 1.0;
+            decision.chance = 1.0;
+            plugin.getLogger().sendWarn("[工具] 群"+turn.context.groupID
+                    +" 正在恢复进程中断前的工具回合；可能产生一次补偿回复");
+            replyExecutor.processReplyResult(event,turn.context.groupID,turn.context.selfID,
+                    turn.context.userName,turn.context.relationship,turn.context.message,
+                    result,decision,null);
+        } catch (Exception e) {
+            plugin.getLogger().sendException(e);
+        }
+    }
+
 
     JSONObject reply(long groupID,long userID,String userName,String content,
                      boolean otherRoleBot,String relationship,RecentImage imageContext,
-                     RoleplayRouteDecision decision,long messageID,long selfID) {
+                     RoleplayRouteDecision decision,long messageID,long selfID,
+                     String eventRaw,boolean ownerUser) {
         return replyGenerationService.reply(groupID,userID,userName,content,otherRoleBot,
-                relationship,imageContext,decision,messageID,selfID);
+                relationship,imageContext,decision,messageID,selfID,eventRaw,ownerUser);
     }
 
     JSONObject reply(long groupID,long userID,String userName,String content,
                      boolean otherRoleBot,String relationship,RecentImage imageContext,
                      RoleplayRouteDecision decision,String batchText,int batchCount,
-                     long messageID,long selfID) {
+                     long messageID,long selfID,String eventRaw,boolean ownerUser) {
         return replyGenerationService.reply(groupID,userID,userName,content,otherRoleBot,
-                relationship,imageContext,decision,batchText,batchCount,messageID,selfID);
+                relationship,imageContext,decision,batchText,batchCount,messageID,selfID,
+                eventRaw,ownerUser);
     }
 
 

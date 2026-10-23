@@ -292,7 +292,7 @@ public class RoleplaySkillRegistry {
 
         @Override
         public boolean sideEffect() {
-            return false;
+            return true;
         }
 
         @Override
@@ -340,7 +340,7 @@ public class RoleplaySkillRegistry {
 
         @Override
         public boolean sideEffect() {
-            return false;
+            return true;
         }
 
         @Override

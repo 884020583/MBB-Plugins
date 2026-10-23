@@ -23,6 +23,7 @@ public class RoleplayRoutingService {
                                                 GroupMessageEvent event,long groupID,long selfID,
                                                 String content) {
         RoleplayRouteDecision ruleDecision = RoleplayDecisionEngine.decide(service.config(),signals);
+        if (service.config().toolEnable) ruleDecision.actions = new ArrayList<>();
         ruleDecision.threadHint = signals.threadHint;
         if (!service.config().routerEnable) {
             traceDecision(ruleDecision,event,groupID,content,"rule");
@@ -50,7 +51,8 @@ public class RoleplayRoutingService {
             routed.chance = Math.min(routed.chance,service.config().otherRoleBotReplyChance);
             routed.confidence = Math.min(routed.confidence,service.config().otherRoleBotReplyChance);
         }
-        routed.actions = service.skillRegistry().actionIds(service.config());
+        routed.actions = service.config().toolEnable
+                ? new ArrayList<>() : service.skillRegistry().actionIds(service.config());
         routed.threadHint = signals.threadHint;
         traceDecision(routed,event,groupID,content,"ai");
         return routed;

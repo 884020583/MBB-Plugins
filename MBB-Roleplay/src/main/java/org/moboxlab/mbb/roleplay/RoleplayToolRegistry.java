@@ -17,25 +17,38 @@ public class RoleplayToolRegistry {
     private final RoleplayService service;
     private final RoleplayWorkspaceService workspace;
     private final RoleplayWebService web;
+    private final RoleplayHistorySearchService historySearch;
     private final Map<String,RoleplayTool> tools = new LinkedHashMap<>();
 
     public RoleplayToolRegistry(RoleplayService service,RoleplayConfig config) {
         this.service = service;
         this.workspace = new RoleplayWorkspaceService(service.plugin(),config);
         this.web = new RoleplayWebService(service);
+        this.historySearch = new RoleplayHistorySearchService(service);
+        register(new ToolSearchTool());
         register(new SelfStateTool());
         register(new HistorySearchTool());
         register(new MemorySearchTool());
         register(new KnowledgeSearchTool());
         register(new WebFetchTool());
+        register(new WebSearchTool());
         register(new ProfileGetTool());
         register(new WorkspaceListTool());
         register(new WorkspaceReadTool());
         register(new WorkspaceWriteTool());
         register(new WorkspaceDeleteTool());
         register(new WorkspaceSearchTool());
+        register(new WorkspaceRenameTool());
+        register(new WorkspaceCopyTool());
+        register(new WorkspaceRestoreTool());
         register(new MessageSendTool());
         register(new EndTurnTool());
+        registerSkill("reminder");
+        registerSkill("memory");
+        registerSkill("global-memory");
+        registerSkill("sticker");
+        registerSkill("poke-back");
+        registerSkill("draw");
     }
 
     public void reload(RoleplayConfig config) {
@@ -47,11 +60,72 @@ public class RoleplayToolRegistry {
     }
 
     public JSONArray schemas(RoleplayConfig config) {
+        return schemas(config,null);
+    }
+
+    public JSONArray schemas(RoleplayConfig config,List<String> names) {
         JSONArray result = new JSONArray();
         if (!config.toolEnable) return result;
         for (RoleplayTool tool : tools.values()) {
             if (!enabled(tool,config)) continue;
+            if (names != null && !names.contains(tool.name())) continue;
             result.add(tool.schema());
+        }
+        return result;
+    }
+
+    public List<String> coreToolNames(RoleplayConfig config) {
+        List<String> result = new java.util.ArrayList<>();
+        if (config == null) return result;
+        for (String item : service.safe(config.toolCoreTools).split(",")) {
+            String name = item == null ? "" : item.trim();
+            RoleplayTool tool = get(name);
+            if (!name.isEmpty() && tool != null && enabled(tool,config) && !result.contains(name)) {
+                result.add(name);
+            }
+        }
+        RoleplayTool search = get("tool_search");
+        if (search != null && enabled(search,config) && !result.contains("tool_search")) {
+            result.add(0,"tool_search");
+        }
+        return result;
+    }
+
+    public List<RoleplayTool> search(RoleplayConfig config,String query,int limit) {
+        String text = service.safe(query).toLowerCase(Locale.ROOT).trim();
+        String queryBigrams = text;
+        List<ScoredTool> candidates = new java.util.ArrayList<>();
+        for (RoleplayTool tool : tools.values()) {
+            if (!enabled(tool,config) || "tool_search".equals(tool.name())) continue;
+            String haystack = (tool.name()+" "+tool.category()+" "
+                    +tool.description()).toLowerCase(Locale.ROOT);
+            double score = 0;
+            if (!text.isEmpty() && (haystack.contains(text) || text.contains(tool.name()))) {
+                score += 8;
+            }
+            String normalized = SpeechCorpusEntry.normalize(haystack);
+            java.util.Set<String> querySet = SpeechCorpusEntry.bigrams(
+                    SpeechCorpusEntry.normalize(queryBigrams));
+            if (!querySet.isEmpty()) {
+                java.util.Set<String> toolSet = SpeechCorpusEntry.bigrams(normalized);
+                int overlap = 0;
+                for (String bigram : querySet) if (toolSet.contains(bigram)) overlap++;
+                score += overlap * 2.0 / Math.max(1,querySet.size());
+            }
+            if (score > 0) candidates.add(new ScoredTool(tool,score));
+        }
+        candidates.sort((left,right) -> Double.compare(right.score,left.score));
+        if (candidates.isEmpty()) {
+            for (RoleplayTool tool : tools.values()) {
+                if (enabled(tool,config) && !"tool_search".equals(tool.name())) {
+                    candidates.add(new ScoredTool(tool,0));
+                }
+            }
+        }
+        List<RoleplayTool> result = new java.util.ArrayList<>();
+        for (ScoredTool item : candidates) {
+            if (result.size() >= Math.max(1,limit)) break;
+            result.add(item.tool);
         }
         return result;
     }
@@ -62,6 +136,22 @@ public class RoleplayToolRegistry {
             if (!enabled(tool,config)) continue;
             builder.append("- ").append(tool.name()).append("：")
                     .append(tool.description()).append("\n");
+        }
+        return builder.toString();
+    }
+
+    public String categoryCatalogue(RoleplayConfig config) {
+        Map<String,Integer> counts = new LinkedHashMap<>();
+        for (RoleplayTool tool : tools.values()) {
+            if (!enabled(tool,config)) continue;
+            String category = tool.category() == null ? "general" : tool.category();
+            Integer count = counts.get(category);
+            counts.put(category,count == null ? 1 : count + 1);
+        }
+        StringBuilder builder = new StringBuilder();
+        for (Map.Entry<String,Integer> entry : counts.entrySet()) {
+            builder.append("- ").append(entry.getKey())
+                    .append("：").append(entry.getValue()).append(" 个\n");
         }
         return builder.toString();
     }
@@ -201,15 +291,42 @@ public class RoleplayToolRegistry {
         if (tool != null) tools.put(tool.name(),tool);
     }
 
+    private void registerSkill(String id) {
+        RoleplaySkillTool tool = RoleplaySkillTool.create(service,id);
+        if (tool != null) register(tool);
+    }
+
     private boolean enabled(RoleplayTool tool,RoleplayConfig config) {
         if (tool == null || config == null || !config.toolEnable) return false;
         if (tool.name().startsWith("workspace_") && !config.workspaceEnable) return false;
-        if ("web_fetch".equals(tool.name()) && !config.webEnable) return false;
+        if (("web_fetch".equals(tool.name()) || "web_search".equals(tool.name()))
+                && !config.webEnable) return false;
         if ("kb_search".equals(tool.name()) && !config.knowledgeEnable) return false;
+        if ("reminder".equals(tool.name()) && !config.reminderEnable) return false;
+        if ("memory".equals(tool.name()) && !config.activeMemory) return false;
+        if ("global-memory".equals(tool.name()) && !config.globalMemoryEnable) return false;
+        if ("poke-back".equals(tool.name()) && !config.pokeBackEnable) return false;
+        if ("draw".equals(tool.name()) && !hasService("MBB-ComfyUI")) {
+            return false;
+        }
+        if ("sticker".equals(tool.name()) && !hasService("MBB-Sticker")) {
+            return false;
+        }
         return true;
     }
 
+    private boolean hasService(String name) {
+        return service.plugin().getServer() != null
+                && service.plugin().getServer().getPluginManager() != null
+                && service.plugin().getServer().getPluginManager().getService(name) != null;
+    }
+
     private abstract class BaseTool implements RoleplayTool {
+        @Override
+        public String category() {
+            return "general";
+        }
+
         @Override
         public int maxCallsPerTurn() {
             return 4;
@@ -251,9 +368,76 @@ public class RoleplayToolRegistry {
         }
     }
 
+    private class ToolSearchTool extends BaseTool {
+        @Override
+        public String name() { return "tool_search"; }
+
+        @Override
+        public String category() { return "core"; }
+
+        @Override
+        public String description() {
+            return "按当前任务搜索并加载可用工具；返回工具名、分类和用途，下一轮即可调用";
+        }
+
+        @Override
+        public int maxCallsPerTurn() { return 3; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("query",property("string","要查找的能力、对象或动作"));
+            properties.put("limit",property("integer","最多返回几个工具，1 到 10"));
+            return functionSchema(name(),description(),properties,new String[]{"query"});
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            String query = service.safe(args.getString("query")).trim();
+            if (query.isEmpty()) return RoleplayToolResult.failed("query 不能为空");
+            int limit = args.getIntValue("limit");
+            if (limit <= 0) limit = service.config().toolSearchMaxResults;
+            limit = Math.max(1,Math.min(10,limit));
+            List<RoleplayTool> selected = search(service.config(),query,limit);
+            JSONArray tools = new JSONArray();
+            for (RoleplayTool tool : selected) {
+                JSONObject item = new JSONObject(true);
+                item.put("name",tool.name());
+                item.put("category",tool.category());
+                item.put("description",tool.description());
+                RoleplaySkill skill = service.skillRegistry().get(tool.name());
+                if (skill != null) {
+                    RoleplaySkillContext skillContext = new RoleplaySkillContext();
+                    skillContext.groupID = context.groupID;
+                    skillContext.userID = context.userID;
+                    skillContext.messageID = context.messageID;
+                    skillContext.selfID = context.selfID;
+                    skillContext.userName = context.userName;
+                    skillContext.relationship = context.relationship;
+                    skillContext.message = context.message;
+                    skillContext.state = service.state(context.groupID);
+                    String instruction = service.safe(skill.promptFragment(skillContext));
+                    if (!instruction.isEmpty()) {
+                        item.put("instruction",service.shortText(instruction,2400));
+                    }
+                }
+                tools.add(item);
+            }
+            RoleplayToolResult result = RoleplayToolResult.ok(
+                    "已加载 "+tools.size()+" 个工具，下一步可直接调用");
+            result.data.put("query",query);
+            result.data.put("tools",tools);
+            for (RoleplayTool tool : selected) result.activateTools.add(tool.name());
+            return result;
+        }
+    }
+
     private class SelfStateTool extends BaseTool {
         @Override
         public String name() { return "self_state"; }
+
+        @Override
+        public String category() { return "core"; }
 
         @Override
         public String description() { return "查看当前发送冷却、工作区、记忆和回复约束等真实运行状态"; }
@@ -288,10 +472,14 @@ public class RoleplayToolRegistry {
         public String description() { return "搜索当前群最近的聊天流水，返回匹配的消息、发言人和时间"; }
 
         @Override
+        public String category() { return "retrieval"; }
+
+        @Override
         public JSONObject schema() {
             JSONObject properties = new JSONObject(true);
             properties.put("query",property("string","要搜索的原文片段"));
             properties.put("limit",property("integer","最多返回条数，1 到 20"));
+            properties.put("days",property("integer","向前搜索多少天，默认 30，最大 3650"));
             return functionSchema(name(),description(),properties,new String[]{"query"});
         }
 
@@ -300,25 +488,12 @@ public class RoleplayToolRegistry {
             String query = service.safe(args.getString("query")).trim();
             if (query.isEmpty()) return RoleplayToolResult.failed("query 不能为空");
             int limit = args.getIntValue("limit");
-            if (limit < 1) limit = 8;
-            if (limit > 20) limit = 20;
-            List<JSONObject> rows = service.storage().query(
-                    "SELECT `userID`,`userName`,`content`,`messageTime` FROM `"+RoleplayService.MSG_TABLE+"` "
-                            +"WHERE `groupID`=? AND `content` LIKE ? ORDER BY `messageTime` DESC,`ID` DESC LIMIT ?",
-                    context.groupID,"%"+query+"%",limit);
-            JSONArray messages = new JSONArray();
-            if (rows != null) {
-                for (JSONObject row : rows) {
-                    JSONObject item = new JSONObject(true);
-                    item.put("userID",row.getLongValue("userID"));
-                    item.put("userName",service.safe(row.getString("userName")));
-                    item.put("content",service.shortText(service.safe(row.getString("content")),500));
-                    item.put("time",formatTime(row.getLongValue("messageTime")));
-                    messages.add(item);
-                }
-            }
-            RoleplayToolResult result = RoleplayToolResult.ok("找到 "+messages.size()+" 条历史消息");
-            result.data.put("messages",messages);
+            JSONObject found = historySearch.search(context.groupID,query,limit,
+                    args.getIntValue("days"));
+            JSONArray messages = found.getJSONArray("messages");
+            RoleplayToolResult result = RoleplayToolResult.ok("找到 "+(messages == null ? 0 : messages.size())
+                    +" 条历史消息");
+            result.data.putAll(found);
             return result;
         }
     }
@@ -329,6 +504,9 @@ public class RoleplayToolRegistry {
 
         @Override
         public String description() { return "按当前问题检索本群长期记忆和全局永久记忆"; }
+
+        @Override
+        public String category() { return "retrieval"; }
 
         @Override
         public JSONObject schema() {
@@ -361,10 +539,14 @@ public class RoleplayToolRegistry {
         public String description() { return "检索已安装的知识库，返回条目、小节和可引用的正文"; }
 
         @Override
+        public String category() { return "retrieval"; }
+
+        @Override
         public JSONObject schema() {
             JSONObject properties = new JSONObject(true);
             properties.put("query",property("string","要查询的角色、社团、学院、剧情或设定问题"));
             properties.put("library",property("string","可选，只查指定知识库 ID"));
+            properties.put("limit",property("integer","最多返回几个条目，1 到 20"));
             return functionSchema(name(),description(),properties,new String[]{"query"});
         }
 
@@ -378,26 +560,13 @@ public class RoleplayToolRegistry {
             if (!requested.isEmpty() && !hasLibrary(libraries,requested)) {
                 return RoleplayToolResult.failed("知识库不存在或未启用："+requested);
             }
-            int remaining = Math.max(1000,service.config().toolResultMaxChars);
-            JSONArray results = new JSONArray();
-            int hits = 0;
-            for (RoleplayKnowledgeLibrary library : libraries) {
-                if (!requested.isEmpty() && !requested.equals(library.id)) continue;
-                String text = service.knowledgeService().injectText(library.id,query);
-                if (text == null || text.trim().isEmpty()) continue;
-                String limited = service.shortText(text,Math.min(remaining,library.maxInjectChars));
-                if (limited.isEmpty()) break;
-                JSONObject item = new JSONObject(true);
-                item.put("library",library.id);
-                item.put("name",library.name);
-                item.put("text",limited);
-                results.add(item);
-                hits++;
-                remaining -= limited.length();
-                if (remaining <= 500) break;
-            }
-            RoleplayToolResult result = RoleplayToolResult.ok(hits == 0
-                    ? "知识库未命中相关条目" : "知识库命中 "+hits+" 个库");
+            int limit = args.getIntValue("limit");
+            if (limit <= 0) limit = 6;
+            JSONArray results = service.knowledgeService().toolResults(query,requested,limit,
+                    Math.max(2000,service.config().toolResultMaxChars));
+            RoleplayToolResult result = RoleplayToolResult.ok(results.isEmpty()
+                    ? "知识库未命中相关条目" : "知识库命中 "+results.size()+" 个条目");
+            result.trust = "external-untrusted";
             result.data.put("query",query);
             result.data.put("results",results);
             return result;
@@ -419,6 +588,9 @@ public class RoleplayToolRegistry {
         public String description() { return "读取白名单网站中的公开网页并返回净化后的正文"; }
 
         @Override
+        public String category() { return "web"; }
+
+        @Override
         public JSONObject schema() {
             JSONObject properties = new JSONObject(true);
             properties.put("url",property("string","要读取的 http/https 网页地址"));
@@ -430,14 +602,54 @@ public class RoleplayToolRegistry {
             String url = service.safe(args.getString("url")).trim();
             if (url.isEmpty()) return RoleplayToolResult.failed("url 不能为空");
             try {
-                JSONObject page = web.fetch(url);
+                boolean internal = web.isInternal(url);
+                boolean ownerAllowed = !internal || context.ownerAuthorizedInternalNetwork
+                        || service.ownerAuthorizedInternalWeb(
+                        context.groupID,context.userID,url);
+                JSONObject page = web.fetch(url,ownerAllowed);
                 String text = service.safe(page.getString("text")).trim();
                 if (text.isEmpty()) return RoleplayToolResult.failed("网页没有可读取的正文");
-                RoleplayToolResult result = RoleplayToolResult.ok("已读取网页："+url);
+                RoleplayToolResult result = RoleplayToolResult.untrusted("已读取网页："+url);
                 result.data = page;
+                result.data.put("internal",internal);
+                result.data.put("ownerAuthorized",ownerAllowed);
                 return result;
             } catch (Exception e) {
                 return RoleplayToolResult.failed("网页读取失败："+service.safe(e.getMessage()));
+            }
+        }
+    }
+
+    private class WebSearchTool extends BaseTool {
+        @Override
+        public String name() { return "web_search"; }
+
+        @Override
+        public String category() { return "web"; }
+
+        @Override
+        public String description() { return "联网搜索公开信息，返回标题和链接，需要正文时再调用 web_fetch"; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("query",property("string","要搜索的问题或关键词"));
+            return functionSchema(name(),description(),properties,new String[]{"query"});
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            String query = service.safe(args.getString("query")).trim();
+            if (query.isEmpty()) return RoleplayToolResult.failed("query 不能为空");
+            try {
+                JSONArray results = web.search(query,false);
+                RoleplayToolResult result = RoleplayToolResult.untrusted(
+                        "联网搜索返回 "+results.size()+" 条结果");
+                result.data.put("query",query);
+                result.data.put("results",results);
+                return result;
+            } catch (Exception e) {
+                return RoleplayToolResult.failed("联网搜索失败："+service.safe(e.getMessage()));
             }
         }
     }
@@ -448,6 +660,9 @@ public class RoleplayToolRegistry {
 
         @Override
         public String description() { return "查看角色对当前群员或指定 QQ 的个人印象"; }
+
+        @Override
+        public String category() { return "retrieval"; }
 
         @Override
         public JSONObject schema() {
@@ -473,6 +688,9 @@ public class RoleplayToolRegistry {
 
         @Override
         public String description() { return "列出角色私有工作区中的文件和文件夹"; }
+
+        @Override
+        public String category() { return "workspace"; }
 
         @Override
         public JSONObject schema() {
@@ -501,6 +719,9 @@ public class RoleplayToolRegistry {
         public String description() { return "读取角色私有工作区中的一个 UTF-8 文本文件"; }
 
         @Override
+        public String category() { return "workspace"; }
+
+        @Override
         public JSONObject schema() {
             JSONObject properties = new JSONObject(true);
             properties.put("path",property("string","相对 data/ 的文件路径"));
@@ -525,6 +746,9 @@ public class RoleplayToolRegistry {
 
         @Override
         public String description() { return "创建或修改角色私有工作区中的 UTF-8 文本文件"; }
+
+        @Override
+        public String category() { return "workspace"; }
 
         @Override
         public boolean sideEffect() { return true; }
@@ -559,7 +783,10 @@ public class RoleplayToolRegistry {
         public String name() { return "workspace_delete"; }
 
         @Override
-        public String description() { return "删除角色私有工作区中的文件；删除非空目录必须显式 recursive=true"; }
+        public String description() { return "把文件或目录移入工作区回收站；默认不永久删除"; }
+
+        @Override
+        public String category() { return "workspace"; }
 
         @Override
         public boolean sideEffect() { return true; }
@@ -572,14 +799,19 @@ public class RoleplayToolRegistry {
             JSONObject properties = new JSONObject(true);
             properties.put("path",property("string","相对 data/ 的文件或目录路径"));
             properties.put("recursive",property("boolean","是否递归删除非空目录"));
+            properties.put("permanent",property("boolean","是否永久删除，默认 false 进入回收站"));
             return functionSchema(name(),description(),properties,new String[]{"path"});
         }
 
         @Override
         public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
             try {
-                workspace.delete(args.getString("path"),args.getBooleanValue("recursive"));
-                return RoleplayToolResult.ok("已删除 "+args.getString("path"));
+                JSONObject deleted = workspace.delete(args.getString("path"),
+                        args.getBooleanValue("recursive"),args.getBooleanValue("permanent"));
+                RoleplayToolResult result = RoleplayToolResult.ok(
+                        deleted.getBooleanValue("permanent") ? "已永久删除" : "已移入回收站");
+                result.data = deleted;
+                return result;
             } catch (Exception e) {
                 return RoleplayToolResult.failed(e.getMessage());
             }
@@ -592,6 +824,9 @@ public class RoleplayToolRegistry {
 
         @Override
         public String description() { return "在角色私有工作区中按普通文本搜索，返回文件路径和行号"; }
+
+        @Override
+        public String category() { return "workspace"; }
 
         @Override
         public JSONObject schema() {
@@ -615,6 +850,120 @@ public class RoleplayToolRegistry {
         }
     }
 
+    private class WorkspaceRenameTool extends BaseTool {
+        @Override
+        public String name() { return "workspace_rename"; }
+
+        @Override
+        public String category() { return "workspace"; }
+
+        @Override
+        public String description() { return "重命名或移动角色私有工作区中的文件或目录"; }
+
+        @Override
+        public boolean sideEffect() { return true; }
+
+        @Override
+        public int maxCallsPerTurn() { return 3; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("source",property("string","源路径"));
+            properties.put("target",property("string","目标路径"));
+            properties.put("overwrite",property("boolean","目标存在时是否覆盖"));
+            return functionSchema(name(),description(),properties,new String[]{"source","target"});
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            try {
+                RoleplayToolResult result = RoleplayToolResult.ok("已重命名工作区路径");
+                result.data = workspace.rename(args.getString("source"),args.getString("target"),
+                        args.getBooleanValue("overwrite"));
+                return result;
+            } catch (Exception e) {
+                return RoleplayToolResult.failed(e.getMessage());
+            }
+        }
+    }
+
+    private class WorkspaceCopyTool extends BaseTool {
+        @Override
+        public String name() { return "workspace_copy"; }
+
+        @Override
+        public String category() { return "workspace"; }
+
+        @Override
+        public String description() { return "复制角色私有工作区中的文件或目录"; }
+
+        @Override
+        public boolean sideEffect() { return true; }
+
+        @Override
+        public int maxCallsPerTurn() { return 2; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("source",property("string","源路径"));
+            properties.put("target",property("string","目标路径"));
+            properties.put("overwrite",property("boolean","目标存在时是否覆盖"));
+            return functionSchema(name(),description(),properties,new String[]{"source","target"});
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            try {
+                RoleplayToolResult result = RoleplayToolResult.ok("已复制工作区路径");
+                result.data = workspace.copy(args.getString("source"),args.getString("target"),
+                        args.getBooleanValue("overwrite"));
+                return result;
+            } catch (Exception e) {
+                return RoleplayToolResult.failed(e.getMessage());
+            }
+        }
+    }
+
+    private class WorkspaceRestoreTool extends BaseTool {
+        @Override
+        public String name() { return "workspace_restore"; }
+
+        @Override
+        public String category() { return "workspace"; }
+
+        @Override
+        public String description() { return "从工作区回收站恢复文件或目录"; }
+
+        @Override
+        public boolean sideEffect() { return true; }
+
+        @Override
+        public int maxCallsPerTurn() { return 2; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("trashPath",property("string","workspace_delete 返回的 trashPath"));
+            properties.put("target",property("string","恢复后的相对路径，省略时使用原文件名"));
+            properties.put("overwrite",property("boolean","目标存在时是否覆盖"));
+            return functionSchema(name(),description(),properties,new String[]{"trashPath"});
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            try {
+                RoleplayToolResult result = RoleplayToolResult.ok("已从回收站恢复");
+                result.data = workspace.restore(args.getString("trashPath"),
+                        args.getString("target"),args.getBooleanValue("overwrite"));
+                return result;
+            } catch (Exception e) {
+                return RoleplayToolResult.failed(e.getMessage());
+            }
+        }
+    }
+
     private class MessageSendTool extends BaseTool {
         @Override
         public String name() { return "message_send"; }
@@ -623,6 +972,9 @@ public class RoleplayToolRegistry {
         public String description() {
             return "在当前群追加发送一条短消息；适合在查资料或执行工具前先回应一句，不要用它重复最终回复";
         }
+
+        @Override
+        public String category() { return "core"; }
 
         @Override
         public boolean sideEffect() { return true; }
@@ -665,6 +1017,9 @@ public class RoleplayToolRegistry {
         public String name() { return "end_turn"; }
 
         @Override
+        public String category() { return "core"; }
+
+        @Override
         public String description() { return "本轮不发送任何文字并立即结束；只适合确实无需回复或完成动作后保持沉默"; }
 
         @Override
@@ -689,5 +1044,15 @@ public class RoleplayToolRegistry {
     private String formatTime(long time) {
         if (time <= 0) return "";
         return new SimpleDateFormat("MM-dd HH:mm:ss",Locale.CHINA).format(new Date(time));
+    }
+
+    private static class ScoredTool {
+        private final RoleplayTool tool;
+        private final double score;
+
+        private ScoredTool(RoleplayTool tool,double score) {
+            this.tool = tool;
+            this.score = score;
+        }
     }
 }
