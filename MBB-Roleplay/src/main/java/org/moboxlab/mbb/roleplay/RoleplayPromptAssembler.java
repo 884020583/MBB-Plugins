@@ -153,7 +153,9 @@ public class RoleplayPromptAssembler {
                 +"只有对方明确叫你、提出新问题、或真人正在参与时才简短回应；不要追问、捧哏或主动延长话题。" : "")
                 +(messageText != null && messageText.contains("[戳一戳]")
                 ? "当前是戳一戳事件：可以只回一句话，也可以使用 poke-back 戳回去；不要长篇解释。" : "")
-                +(batchCount > 1 ? "" : "一条说不完可以在 text 里用换行分成两段，最多两段。")
+                +(batchCount > 1 ? "" : "如果自然交流确实需要停顿，可以在 text 里用换行分成最多 "
+                +config.replyBeatMaxSegments+" 个连续节拍，每行会作为独立消息发送；"
+                +"不要为了像人而机械拆句，一次能说完就保持一整段。")
                 +(actionIds.contains("poke-back")
                 ? "如果正文表达要戳回去、回戳或戳你，actions 必须同时包含 {\"type\":\"poke-back\"}；"
                 +"不能只在 text 里说，也不能把动作写成普通文本。" : "")

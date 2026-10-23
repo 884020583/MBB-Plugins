@@ -373,6 +373,14 @@ replySegmentMaxChars: 20
 replySplitPunctuation: "。！？!?；;，、：,:～~…"
 #最多拆分发送多少段
 replyMaxSegments: 2
+#普通聊天最多拆成多少个连续节拍
+replyBeatMaxSegments: 3
+#连续节拍基础间隔毫秒
+replyBeatBaseDelayMs: 450
+#节拍中每个字符增加的间隔毫秒
+replyBeatPerCharMs: 35
+#连续节拍单次最大间隔毫秒
+replyBeatMaxDelayMs: 2200
 #是否过滤模型回复中凭空输出的网址链接
 replyLinkFilterEnable: true
 #是否允许 draw 技能模拟角色手机自拍和拍照

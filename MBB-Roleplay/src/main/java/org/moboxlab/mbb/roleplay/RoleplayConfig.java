@@ -220,6 +220,10 @@ public class RoleplayConfig {
     public int replySegmentMaxChars = 30;
     public String replySplitPunctuation = "。！？!?；;，、：,:～~…";
     public int replyMaxSegments = 2;
+    public int replyBeatMaxSegments = 3;
+    public int replyBeatBaseDelayMs = 450;
+    public int replyBeatPerCharMs = 35;
+    public int replyBeatMaxDelayMs = 2200;
     public boolean replyLinkFilterEnable = true;
     public boolean cameraEnable = true;
     /** 生图是否启用独立 prompt 编译层 */
@@ -564,6 +568,10 @@ public class RoleplayConfig {
         config.replySplitPunctuation = plugin.getConfig().getString(
                 "replySplitPunctuation","。！？!?；;，、：,:～~…");
         config.replyMaxSegments = plugin.getConfig().getInt("replyMaxSegments",2);
+        config.replyBeatMaxSegments = plugin.getConfig().getInt("replyBeatMaxSegments",3);
+        config.replyBeatBaseDelayMs = plugin.getConfig().getInt("replyBeatBaseDelayMs",450);
+        config.replyBeatPerCharMs = plugin.getConfig().getInt("replyBeatPerCharMs",35);
+        config.replyBeatMaxDelayMs = plugin.getConfig().getInt("replyBeatMaxDelayMs",2200);
         config.replyLinkFilterEnable = plugin.getConfig().getBoolean("replyLinkFilterEnable",true);
         config.cameraEnable = plugin.getConfig().getBoolean("cameraEnable",true);
         config.drawPromptCompilerEnable =
@@ -923,6 +931,14 @@ public class RoleplayConfig {
         }
         if (config.replyMaxSegments < 1) config.replyMaxSegments = 1;
         if (config.replyMaxSegments > 2) config.replyMaxSegments = 2;
+        if (config.replyBeatMaxSegments < 1) config.replyBeatMaxSegments = 1;
+        if (config.replyBeatMaxSegments > 5) config.replyBeatMaxSegments = 5;
+        if (config.replyBeatBaseDelayMs < 100) config.replyBeatBaseDelayMs = 100;
+        if (config.replyBeatBaseDelayMs > 5000) config.replyBeatBaseDelayMs = 5000;
+        if (config.replyBeatPerCharMs < 0) config.replyBeatPerCharMs = 0;
+        if (config.replyBeatPerCharMs > 200) config.replyBeatPerCharMs = 200;
+        if (config.replyBeatMaxDelayMs < 300) config.replyBeatMaxDelayMs = 300;
+        if (config.replyBeatMaxDelayMs > 10000) config.replyBeatMaxDelayMs = 10000;
         if (config.pokeReplyMaxChars < 8) config.pokeReplyMaxChars = 8;
         if (config.pokeReplyMaxChars > 60) config.pokeReplyMaxChars = 60;
         if (config.recentReplyCheckCount < 1) config.recentReplyCheckCount = 1;

@@ -40,6 +40,20 @@ public class RoleplayPacingService {
         return service.sleepQuietly(delay);
     }
 
+    public long beatDelayMillis(long groupID,String nextBeat) {
+        if (!service.config().pacingEnable) return 250L;
+        int length = service.safe(nextBeat).replaceAll("\\s+","").length();
+        long delay = service.config().replyBeatBaseDelayMs
+                + (long)length * service.config().replyBeatPerCharMs;
+        if (isNight()) delay = (long)(delay * Math.max(1.0,service.config().pacingNightMultiplier * 0.8));
+        if (service.getAttentionService().score(groupID) >= service.config().pacingActiveThreshold) {
+            delay = (long)(delay * service.config().pacingActiveMultiplier);
+        }
+        double jitter = 0.82 + Math.random() * 0.36;
+        delay = (long)(delay * jitter);
+        return Math.max(150L,Math.min(service.config().replyBeatMaxDelayMs,delay));
+    }
+
     private int hour() {
         try {
             String zoneName = service.config().timeZone == null || service.config().timeZone.trim().isEmpty()
@@ -49,5 +63,11 @@ public class RoleplayPacingService {
         } catch (Exception e) {
             return Calendar.getInstance().get(Calendar.HOUR_OF_DAY);
         }
+    }
+
+    private boolean isNight() {
+        int hour = hour();
+        return hour >= service.config().pacingNightStartHour
+                && hour < service.config().pacingNightEndHour;
     }
 }
