@@ -34,6 +34,7 @@
 | `/role tool stats` | `BOT_ADMIN` | 查看当前群工具调用统计 |
 | `/role tool test` | `BOT_ADMIN` | 检查工具 schema、参数校验、工作区路径隔离和网页白名单限制 |
 | `/role tool trace [条数]` | `BOT_ADMIN` | 查看最近工具调用、用户和时间 |
+| `/role tool cancel` | `BOT_ADMIN` | 取消当前群正在执行的工具与 AI 等待 |
 | `/role tool clear` | `BOT_ADMIN` | 清空当前群持久化的工具结果上下文 |
 | `/role eval list` | `BOT_ADMIN` | 查看内置评测用例 |
 | `/role eval run <id\|all>` | `BOT_ADMIN` | 运行指定评测用例或全部评测 |

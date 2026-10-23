@@ -149,8 +149,9 @@ routerMaxTokens: 2400
 routerReasoningEffort: "none"
 ```
 
-**技能注册表**：技能按声明注册，执行层只能调用已注册且在开放清单内的技能。当前注册了
-`reminder`、`memory`、`global-memory`、`sticker`、`poke-back` 五个。旧的
+**技能注册表**：技能按声明注册。`toolEnable=true` 时，当前注册的
+`draw`、`reminder`、`memory`、`global-memory`、`sticker`、`poke-back` 会适配成原生工具，
+模型统一通过 `tool_search` 和 `tools/tool_calls` 调用。旧的
 `<reminder>` / `<remember>` / `<global_remember>` / `<sticker>` 标签仍然兼容，
 会被转换成同一批技能调用。
 
@@ -162,6 +163,12 @@ routerReasoningEffort: "none"
 contextHardLimitEnable: false
 promptTotalChars: 120000
 ```
+
+即使关闭总硬预算，各类资料仍保留单项预算；工具结果另有单轮总字符预算。
+
+**缓存前缀**：persona、通用规则、工具分类和输出格式放在系统消息最前面；当前时间、情绪、
+工具结果和记忆排在稳定前缀之后；最近群聊背景放在用户消息前半段，当前消息放在最后。
+这样短期记忆更新、工具结果插入和当前消息变化都不会把稳定前缀从中间截断。
 
 **风格层**：默认不调用，先用本地规则判断回复是否带 AI 味。命中超长、破折号、Markdown
 残留、AI 味词、模板排比、总结腔、客服腔、列点、成对引号或句长过于均匀时才改写一次；
