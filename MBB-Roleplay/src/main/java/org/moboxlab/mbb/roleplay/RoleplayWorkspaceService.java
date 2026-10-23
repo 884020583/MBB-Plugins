@@ -12,6 +12,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Base64;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Locale;
@@ -88,6 +89,17 @@ public class RoleplayWorkspaceService {
         result.put("size",size);
         result.put("truncated",truncated);
         return result;
+    }
+
+    public String readBase64(String path,int maxBytes) throws Exception {
+        File target = resolve(path,false);
+        rejectInternalNamespace(target);
+        if (!target.isFile()) throw new IllegalArgumentException("目标不存在或不是文件");
+        rejectSymlink(target);
+        if (target.length() > maxBytes) {
+            throw new IllegalArgumentException("文件过大，最多 "+maxBytes+" 字节");
+        }
+        return Base64.getEncoder().encodeToString(Files.readAllBytes(target.toPath()));
     }
 
     public JSONObject write(String path,String content,boolean append) throws Exception {

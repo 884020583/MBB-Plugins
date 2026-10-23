@@ -49,6 +49,7 @@ public class RoleplayToolRegistry {
         registerSkill("sticker");
         registerSkill("poke-back");
         registerSkill("draw");
+        RoleplayQQTools.register(this,service);
     }
 
     public void reload(RoleplayConfig config) {
@@ -287,7 +288,7 @@ public class RoleplayToolRegistry {
         return true;
     }
 
-    private void register(RoleplayTool tool) {
+    void register(RoleplayTool tool) {
         if (tool != null) tools.put(tool.name(),tool);
     }
 
