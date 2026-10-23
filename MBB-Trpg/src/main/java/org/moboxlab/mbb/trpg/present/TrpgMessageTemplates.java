@@ -2,6 +2,12 @@ package org.moboxlab.mbb.trpg.present;
 
 import org.moboxlab.mbb.trpg.script.Clue;
 import org.moboxlab.mbb.trpg.script.Script;
+import org.moboxlab.mbb.trpg.script.ScriptGenerationOutcome;
+import org.moboxlab.mbb.trpg.script.ScriptImportMode;
+import org.moboxlab.mbb.trpg.script.ScriptImportResult;
+import org.moboxlab.mbb.trpg.script.ScriptInfo;
+import org.moboxlab.mbb.trpg.script.ScriptIssue;
+import org.moboxlab.mbb.trpg.script.ScriptValidationResult;
 import org.moboxlab.mbb.trpg.session.SessionSnapshot;
 import org.moboxlab.mbb.trpg.session.SessionState;
 import org.moboxlab.mbb.trpg.store.CardData;
@@ -58,6 +64,9 @@ public final class TrpgMessageTemplates {
     private static final int LIMIT_CARD = 600;
     private static final int LIMIT_KP_HINT = 900;
     private static final int LIMIT_SCRIPT_LIBRARY = 500;
+    private static final int LIMIT_SCRIPT_IMPORT_GUIDE = 600;
+    private static final int LIMIT_SCRIPT_IMPORT_ISSUE = 260;
+    private static final int LIMIT_SCRIPT_GEN = 600;
     private static final int LIMIT_STATUS = 400;
     private static final int LIMIT_LOG = 900;
     private static final int LIMIT_HELP = 900;
@@ -604,11 +613,20 @@ public final class TrpgMessageTemplates {
 
     /** 剧本库列表（每页 10 条）。 */
     public static String scriptList(List<String> entries, int page, int totalPages) {
+        return scriptList(entries, page, totalPages, 0);
+    }
+
+    /** 剧本库列表（每页 10 条），skippedFiles 为启动时被跳过的文件数。 */
+    public static String scriptList(List<String> entries, int page, int totalPages, int skippedFiles) {
         StringBuilder body = new StringBuilder();
         body.append(TrpgTitles.of(TrpgTitles.SCRIPT_LIBRARY)).append("第 ").append(page).append('/')
                 .append(Math.max(1, totalPages)).append(" 页");
         for (String entry : entries) {
             body.append('\n').append(entry);
+        }
+        if (skippedFiles > 0) {
+            body.append("\n\n有 ").append(skippedFiles)
+                    .append(" 个剧本文件加载失败已被跳过，详见插件日志。");
         }
         body.append("\n\n发送 /trpg script show <id> 查看详情。");
         return limit(body.toString(), LIMIT_SCRIPT_LIBRARY);
@@ -633,14 +651,185 @@ public final class TrpgMessageTemplates {
         return limit(body.toString(), LIMIT_SCRIPT_LIBRARY);
     }
 
+    /** 分段导入指引（开始导入时回一条）。 */
+    public static String scriptImportGuide(ScriptImportMode mode, long limitBytes,
+                                           int idleMinutes, int maxMinutes) {
+        ScriptImportMode selected = mode == null ? ScriptImportMode.CREATE : mode;
+        StringBuilder body = new StringBuilder();
+        body.append(TrpgTitles.of(TrpgTitles.SCRIPT, "导入")).append('\n');
+        body.append("本次为").append(selected.label()).append("导入。\n");
+        body.append("把剧本 JSON 分条发给我：可以一条整段，也可以切成多条，切点不限，不必带指令前缀。\n");
+        body.append("导入结束前，你发的其他内容只会当片段接收，不会执行也不会回复。\n");
+        body.append("总量上限 ").append(kilobytes(limitBytes)).append("；")
+                .append(idleMinutes).append(" 分钟没有新内容或从开始算超过 ")
+                .append(maxMinutes).append(" 分钟会自动放弃。\n");
+        body.append("发 /trpg script import end 结束并保存；发 /trpg script import cancel 取消。");
+        return limit(body.toString(), LIMIT_SCRIPT_IMPORT_GUIDE);
+    }
+
+    /** 分段导入「还不能解析」：保留暂存，提示当前字节数与前 5 条错误里的第一条。 */
+    public static String scriptImportIssue(long receivedBytes, long limitBytes, ScriptIssue issue) {
+        StringBuilder body = new StringBuilder();
+        body.append(TrpgTitles.of(TrpgTitles.SCRIPT, "导入")).append('\n');
+        body.append("已收到 ").append(kilobytes(receivedBytes)).append(" / ")
+                .append(kilobytes(limitBytes)).append("，当前内容还不能解析：\n");
+        body.append(issueText(issue)).append('\n');
+        body.append("可继续发送剩余内容后再次 /trpg script import end，或 /trpg script import cancel 取消。");
+        return limit(body.toString(), LIMIT_SCRIPT_IMPORT_ISSUE);
+    }
+
+    /** 分段导入校验未通过：本次导入已结束，展示前 5 条错误。 */
+    public static String scriptImportRejected(ScriptValidationResult result) {
+        StringBuilder body = new StringBuilder();
+        body.append(TrpgTitles.of(TrpgTitles.SCRIPT, "导入")).append('\n');
+        body.append("校验未通过，本次导入已结束：\n");
+        appendIssues(body, result == null ? null : result.reportedErrors());
+        if (result != null && result.remainingErrorCount() > 0) {
+            body.append("另有 ").append(result.remainingErrorCount()).append(" 条错误未展示。\n");
+        }
+        body.append("原文已存入数据目录 imports/rejected/，修正后重新发送 /trpg script import 导入。");
+        return limit(body.toString(), LIMIT_SCRIPT_LIBRARY);
+    }
+
+    /** 分段导入成功。 */
+    public static String scriptImportSuccess(ScriptImportResult result) {
+        if (result == null || result.script() == null) {
+            return TrpgTitles.of(TrpgTitles.SCRIPT, "导入") + "\n导入成功，但没有返回剧本摘要。";
+        }
+        ScriptInfo info = result.script();
+        StringBuilder body = new StringBuilder();
+        body.append(TrpgTitles.of(TrpgTitles.SCRIPT, info.name())).append('\n');
+        body.append("id：").append(info.id()).append(ALIGN)
+                .append("场景 ").append(info.sceneCount()).append(" 个").append(ALIGN)
+                .append("线索 ").append(info.clueCount()).append(" 个").append(ALIGN)
+                .append("结局 ").append(info.endingCount()).append(" 个\n");
+        body.append(result.replaced() ? "已替换原剧本。" : "已存入剧本库。");
+        if (result.warningCount() > 0) {
+            body.append("告警 ").append(result.warningCount()).append(" 条（不阻断导入）。");
+        }
+        body.append('\n').append("发送 /trpg start ").append(info.id()).append(" 开团，")
+                .append("/trpg script show ").append(info.id()).append(" 查看详情。");
+        return limit(body.toString(), LIMIT_SCRIPT_LIBRARY);
+    }
+
+    /** 分段导入已取消。 */
+    public static String scriptImportCancelled() {
+        return limit(TrpgTitles.of(TrpgTitles.SCRIPT, "导入") + "\n已取消导入，未写入剧本库。",
+                LIMIT_NOTICE);
+    }
+
+    /** 剧本生成已受理（异步任务回执）。 */
+    public static String scriptGenStarted(String theme, int players, int minutes) {
+        StringBuilder body = new StringBuilder();
+        body.append(TrpgTitles.of(TrpgTitles.NOTICE)).append('\n');
+        body.append("已开始生成剧本《").append(theme == null ? "" : theme.trim()).append("》");
+        if (players > 0) {
+            body.append("（").append(players).append(" 人");
+            if (minutes > 0) {
+                body.append(SEPARATOR).append("约 ").append(minutes).append(" 分钟");
+            }
+            body.append("）");
+        }
+        body.append("，完成后会 @ 发起人；期间可以继续游戏。");
+        return limit(body.toString(), LIMIT_NOTICE);
+    }
+
+    /** 剧本生成结果（成功或失败，异步任务回执）。 */
+    public static String scriptGenResult(ScriptGenerationOutcome outcome) {
+        if (outcome == null) {
+            return error("生成没有返回结果。", "请稍后重试，或改用手工导入。");
+        }
+        if (outcome.success() && outcome.script() != null) {
+            ScriptInfo info = outcome.script();
+            StringBuilder body = new StringBuilder();
+            body.append(TrpgTitles.of(TrpgTitles.SCRIPT, info.name())).append('\n');
+            body.append("id：").append(info.id()).append(ALIGN)
+                    .append("场景 ").append(info.sceneCount()).append(" 个").append(ALIGN)
+                    .append("线索 ").append(info.clueCount()).append(" 个").append(ALIGN)
+                    .append("结局 ").append(info.endingCount()).append(" 个\n");
+            body.append("已存入剧本库，发送 /trpg start ").append(info.id()).append(" 开团。");
+            return limit(body.toString(), LIMIT_SCRIPT_GEN);
+        }
+        StringBuilder body = new StringBuilder();
+        body.append(TrpgTitles.of(TrpgTitles.ERROR)).append('\n');
+        body.append("剧本生成失败：").append(outcome.errorCode()).append("，")
+                .append(genReason(outcome.errorCode()));
+        if (!outcome.errors().isEmpty()) {
+            body.append("：\n");
+            appendIssues(body, outcome.errors());
+            if (outcome.errorCount() > outcome.errors().size()) {
+                body.append("另有 ").append(outcome.errorCount() - outcome.errors().size())
+                        .append(" 条错误未展示。\n");
+            }
+        } else {
+            body.append("。\n");
+        }
+        if (!outcome.savedFile().isEmpty()) {
+            body.append("原始返回已存入 imports/rejected/").append(outcome.savedFile()).append('\n');
+        }
+        body.append("可换题材重试，或把修正后的 JSON 按 /trpg script import 流程手工导入。");
+        return limit(body.toString(), LIMIT_SCRIPT_GEN);
+    }
+
+    /** 删除剧本成功。 */
+    public static String scriptDeleted(ScriptInfo info) {
+        String name = info == null ? "" : info.name();
+        String id = info == null ? "" : info.id();
+        return limit(TrpgTitles.of(TrpgTitles.SCRIPT, "删除") + "\n已删除《" + name + "》（" + id + "）。",
+                LIMIT_NOTICE);
+    }
+
+    private static void appendIssues(StringBuilder body, List<ScriptIssue> issues) {
+        if (issues == null) {
+            return;
+        }
+        for (ScriptIssue issue : issues) {
+            // 表现规格：行间不加序号符号，错误逐行平铺。
+            body.append(issueText(issue)).append('\n');
+        }
+    }
+
+    private static String issueText(ScriptIssue issue) {
+        if (issue == null) {
+            return "E_PARSE：内容还不是完整 JSON";
+        }
+        return issue.code() + " @" + issue.path() + "：" + issue.message();
+    }
+
+    private static String genReason(String code) {
+        if ("E_AI_DISABLED".equals(code)) {
+            return "AI 服务未开启或参数不合法";
+        }
+        if ("E_AI_BUSY".equals(code)) {
+            return "已有生成任务在跑，请稍后再试";
+        }
+        if ("E_AI_TIMEOUT".equals(code)) {
+            return "AI 调用超时";
+        }
+        if ("E_AI_OUTPUT".equals(code)) {
+            return "AI 返回的不是合法 JSON";
+        }
+        if ("E_AI_VALIDATION".equals(code)) {
+            return "生成内容未通过校验";
+        }
+        return "AI 调用失败";
+    }
+
+    private static String kilobytes(long bytes) {
+        if (bytes <= 0L) {
+            return "0 KB";
+        }
+        double value = bytes / 1024.0D;
+        return String.format(Locale.ROOT, "%.1f KB", value);
+    }
+
     /**
      * /r 与 /roll 回复：不套标题（规范 §3.4）。
      *
      * <p>单段只回一行 {@code /r 3d6+2 = 14}；多段每条骰段一行 {@code [r] 3d6 = 9}，
      * 末行合计 {@code [r] 3d6+2 = 14}（常数段不单独列行）。</p>
      */
-    public static String dice(TrpgDiceView view) {
-        if (view == null) {
+    public static String dice(TrpgDiceView view) {        if (view == null) {
             return "";
         }
         StringBuilder body = new StringBuilder();

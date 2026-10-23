@@ -37,6 +37,20 @@ public final class OneBotMessaging implements Messaging {
     }
 
     @Override
+    public boolean sendGroupAt(long groupId, long userId, String text) {
+        OneBotClient client = server.getOneBotClient();
+        if (client == null) {
+            return false;
+        }
+        try {
+            return accepted(client.sendGroupMessage(groupId, MessageUtil.message(
+                    MessageUtil.at(userId), MessageUtil.text(" " + text))));
+        } catch (RuntimeException error) {
+            return false;
+        }
+    }
+
+    @Override
     public boolean sendPrivateText(long userId, String text) {
         OneBotClient client = server.getOneBotClient();
         if (client == null) {

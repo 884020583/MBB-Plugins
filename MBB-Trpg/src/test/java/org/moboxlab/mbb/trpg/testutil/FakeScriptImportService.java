@@ -69,6 +69,24 @@ public final class FakeScriptImportService implements ScriptImportService {
         return fragments.containsKey(key(groupId, operatorId));
     }
 
+    @Override
+    public long pendingBytes(long groupId, long operatorId) {
+        List<String> stored = fragments.get(key(groupId, operatorId));
+        if (stored == null) {
+            return 0L;
+        }
+        long total = 0L;
+        for (String fragment : stored) {
+            total += fragment == null ? 0L : fragment.getBytes(java.nio.charset.StandardCharsets.UTF_8).length;
+        }
+        return total;
+    }
+
+    @Override
+    public long maxBytes() {
+        return 65536L;
+    }
+
     private static String key(long groupId, long operatorId) {
         return groupId + ":" + operatorId;
     }

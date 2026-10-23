@@ -102,16 +102,65 @@ public class TrpgListenerTest {
     }
 
     @Test
-    public void importFailureKeepsMessageAndLogs() throws ScriptException {
+    public void importFailureSwallowsMessageAndLogs() throws ScriptException {
         imports.begin(GROUP, PLAYER, org.moboxlab.mbb.trpg.script.ScriptImportMode.CREATE);
         imports.failNextAppend(new ScriptException("E_IMPORT_STATE", "$", "暂存已超限"));
 
         GroupMessageEvent event = message(PLAYER, "{}");
         listener.onGroupMessage(event);
 
-        assertFalse("暂存失败时消息应放行", event.isCancelled());
-        assertEquals(1, logger.warns().size());
-        assertTrue(logger.warns().get(0), logger.warns().get(0).contains("暂存已超限"));
+        assertTrue("暂存失败时消息应被吞掉，避免误触指令", event.isCancelled());
+        assertTrue("暂存失败不应留下片段", imports.fragments(GROUP, PLAYER).isEmpty());
+    }
+
+    @Test
+    public void endControlFinishesImport() throws ScriptException {
+        imports.begin(GROUP, PLAYER, org.moboxlab.mbb.trpg.script.ScriptImportMode.CREATE);
+
+        GroupMessageEvent event = message(PLAYER, " /trpg script import END ");
+        listener.onGroupMessage(event);
+
+        assertTrue("控制字应被消费", event.isCancelled());
+        assertFalse("结束后不应再有暂存", imports.hasPending(GROUP, PLAYER));
+        assertTrue("控制字不应作为片段追加", imports.fragments(GROUP, PLAYER).isEmpty());
+    }
+
+    @Test
+    public void cancelControlCancelsImport() throws ScriptException {
+        imports.begin(GROUP, PLAYER, org.moboxlab.mbb.trpg.script.ScriptImportMode.CREATE);
+
+        GroupMessageEvent event = message(PLAYER, "/trpg script import cancel");
+        listener.onGroupMessage(event);
+
+        assertTrue(event.isCancelled());
+        assertFalse(imports.hasPending(GROUP, PLAYER));
+    }
+
+    @Test
+    public void controlWordWithTrailingTextIsTreatedAsFragment() throws ScriptException {
+        imports.begin(GROUP, PLAYER, org.moboxlab.mbb.trpg.script.ScriptImportMode.CREATE);
+
+        GroupMessageEvent event = message(PLAYER, "/trpg script import end 现在");
+        listener.onGroupMessage(event);
+
+        assertTrue(event.isCancelled());
+        assertTrue("不是纯控制字，应按片段追加", imports.hasPending(GROUP, PLAYER));
+        assertEquals(1, imports.fragments(GROUP, PLAYER).size());
+    }
+
+    @Test
+    public void privateMessageUsesPrivatePending() throws ScriptException {
+        long privateGroup = org.moboxlab.mbb.trpg.session.SessionActor.PRIVATE_GROUP_ID;
+        imports.begin(privateGroup, PLAYER, org.moboxlab.mbb.trpg.script.ScriptImportMode.CREATE);
+        org.moboxlab.moboxbot.API.Event.PrivateMessageEvent event =
+                new org.moboxlab.moboxbot.API.Event.PrivateMessageEvent();
+        event.setUserID(PLAYER);
+        event.setRawMessage("{\"id\":\"demo\"}");
+
+        listener.onPrivateMessage(event);
+
+        assertTrue(event.isCancelled());
+        assertEquals(1, imports.fragments(privateGroup, PLAYER).size());
     }
 
     @Test

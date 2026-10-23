@@ -64,4 +64,20 @@ public interface ScriptImportService {
      * @return 有暂存返回 true
      */
     boolean hasPending(long groupId, long operatorId);
+
+    /**
+     * 暂存已累计的字节数，用于回执进度。
+     *
+     * @param groupId    群号，0 表示私聊
+     * @param operatorId 发起人 QQ 号
+     * @return 已累计字节数；没有暂存时返回 0
+     */
+    long pendingBytes(long groupId, long operatorId);
+
+    /**
+     * 单份剧本内容的字节上限，用于回执提示。
+     *
+     * @return 上限字节数
+     */
+    long maxBytes();
 }

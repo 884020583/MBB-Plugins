@@ -18,6 +18,7 @@ import org.moboxlab.mbb.trpg.script.Script;
 import org.moboxlab.mbb.trpg.script.ScriptCatalog;
 import org.moboxlab.mbb.trpg.script.ScriptInfo;
 import org.moboxlab.mbb.trpg.script.ScriptSource;
+import org.moboxlab.mbb.trpg.script.ScriptUsageIndex;
 import org.moboxlab.mbb.trpg.script.Scene;
 import org.moboxlab.mbb.trpg.store.CardData;
 import org.moboxlab.mbb.trpg.store.LogRow;
@@ -39,7 +40,7 @@ import org.moboxlab.moboxbot.API.PluginLogger;
  *
  * <p>本类同时实现 {@link SessionView}（{@link #readSnapshot(long)}），供 AI 主持桩在 v1.1 取只读快照。</p>
  */
-public final class SessionService implements SessionView {
+public final class SessionService implements SessionView, ScriptUsageIndex {
 
     private static final int MILLIS_PER_SECOND = 1000;
     private static final String ACTION_START = "start";
@@ -198,13 +199,8 @@ public final class SessionService implements SessionView {
                 if (targetScript.isEmpty()) {
                     targetScript = defaultScriptId();
                 }
-                if (loadScript(targetScript) == null) {
-                    return reject(turn, SessionReject.BAD_ARGUMENT, "剧本不存在：" + targetScript);
-                }
-                SessionResult cooling = cooling(ACTION_START, turn, config.startCooldownSeconds());
-                if (cooling != null) {
-                    return cooling;
-                }
+                // 规格 §8.6：解析剧本与插入局面行期间必须持剧本库读锁，
+                // 防止「解析通过 → 删除/替换落盘 → 插入指向已消失剧本的局」。
                 long now = turn.now;
                 SessionRow row = SessionRow.builder()
                         .groupId(turn.groupId)
@@ -216,13 +212,27 @@ public final class SessionService implements SessionView {
                         .createTime(now)
                         .updateTime(now)
                         .build();
-                long sessionId = store.insertSession(row);
-                if (sessionId == 0L) {
-                    if (store.findActiveByGroup(turn.groupId) != null) {
-                        return reject(turn, SessionReject.STATE_UNAVAILABLE, "本群已有未归档的局");
+                long sessionId;
+                Lock readLock = catalog.acquireReadLock();
+                readLock.lock();
+                try {
+                    if (loadScript(targetScript) == null) {
+                        return reject(turn, SessionReject.BAD_ARGUMENT, "剧本不存在：" + targetScript);
                     }
-                    error("建局写入未生效：group=" + turn.groupId);
-                    return SessionResult.storageFailure("建局写入未生效，请稍后重试");
+                    SessionResult cooling = cooling(ACTION_START, turn, config.startCooldownSeconds());
+                    if (cooling != null) {
+                        return cooling;
+                    }
+                    sessionId = store.insertSession(row);
+                    if (sessionId == 0L) {
+                        if (store.findActiveByGroup(turn.groupId) != null) {
+                            return reject(turn, SessionReject.STATE_UNAVAILABLE, "本群已有未归档的局");
+                        }
+                        error("建局写入未生效：group=" + turn.groupId);
+                        return SessionResult.storageFailure("建局写入未生效，请稍后重试");
+                    }
+                } finally {
+                    readLock.unlock();
                 }
                 MemberRow kp = MemberRow.builder()
                         .sessionId(sessionId)
@@ -687,6 +697,39 @@ public final class SessionService implements SessionView {
     /** 换本局剧本（§6.1 script）：仅 KP、仅招募期。 */
     public SessionResult changeScript(SessionActor actor, String scriptId) {
         return playService.changeScript(actor, scriptId);
+    }
+
+    /**
+     * 该剧本是否被未归档局引用（§8.6 删除/替换前的保护）。
+     *
+     * <p>以库为准查询未归档局，不依赖内存缓存，因此重启恢复的局也能挡住删除；
+     * 查询失败时按「被引用」处理——宁可拒绝删除，也不让进行中的局丢剧本。</p>
+     */
+    @Override
+    public boolean isInUse(String scriptId) {
+        if (scriptId == null || scriptId.trim().isEmpty()) {
+            return false;
+        }
+        List<SessionRow> rows;
+        try {
+            rows = store.loadActiveSessions();
+        } catch (RuntimeException error) {
+            warn("引用检查查询失败，按被引用处理：剧本=" + scriptId + "，原因=" + error.getMessage());
+            return true;
+        }
+        if (rows == null) {
+            return false;
+        }
+        for (int i = 0; i < rows.size(); i++) {
+            SessionRow row = rows.get(i);
+            if (row == null || !scriptId.equals(row.scriptId())) {
+                continue;
+            }
+            if (row.state() == SessionState.RECRUITING || row.state() == SessionState.RUNNING) {
+                return true;
+            }
+        }
+        return false;
     }
 
     /** 读取本群当前局面；无活跃局返回空快照（读状态会先惰性归档过期局）。 */

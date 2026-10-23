@@ -44,6 +44,19 @@ public final class ScriptErrorCodes {
     /** 没有待导入会话、已有待导入会话、已超时或已超限。 */
     public static final String E_IMPORT_STATE = "E_IMPORT_STATE";
 
+    /** AI 生成：MBB-AI 未安装或被禁用。 */
+    public static final String E_AI_DISABLED = "E_AI_DISABLED";
+    /** AI 生成：已有任务在跑，或 MBB-AI 并发已满。 */
+    public static final String E_AI_BUSY = "E_AI_BUSY";
+    /** AI 生成：超时或被中断。 */
+    public static final String E_AI_TIMEOUT = "E_AI_TIMEOUT";
+    /** AI 生成：返回内容不是可解析的 JSON 对象。 */
+    public static final String E_AI_OUTPUT = "E_AI_OUTPUT";
+    /** AI 生成：JSON 可解析但没通过剧本校验。 */
+    public static final String E_AI_VALIDATION = "E_AI_VALIDATION";
+    /** AI 生成：其他失败。 */
+    public static final String E_AI_FAILED = "E_AI_FAILED";
+
     /** 未知字段告警：字段被忽略，不影响校验通过。 */
     public static final String W_UNKNOWN_FIELD = "W_UNKNOWN_FIELD";
 

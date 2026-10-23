@@ -6,7 +6,27 @@ MoBoxBot 的跑团主持插件：在群里开一局 TRPG，提供 CoC 风格 d10
 
 ## 当前阶段
 
-S9 AI 契约桩切片：按 §9.10 交付 v1 的「空 AI」——零调用、零审计、不注册定时器。
+S10 剧本导入与生成切片：把剧本库管理从「占位」接到真实链路，版本 `V0.1.9.0.1858`。
+
+- `ScriptLibrary`：真正的 `ScriptCatalog` 实现，内置剧本只读、导入剧本落在
+  `<dataFolder>/scripts/<id>.json`；建库时全量加载导入目录，单个文件校验失败只告警跳过。
+- `ScriptImportSessions`：按（会话, 用户）内存暂存的三段式导入（`import` / `import replace`
+  → 分段粘贴 → `import end` / `import cancel`）；5 分钟空闲或 30 分钟绝对超时，上限
+  65536 字节 / 200 段；解析失败保留暂存，语义失败清暂存并把原文存入 `imports/rejected/`，
+  同类最多保留 20 份；暂存期间该用户同会话消息一律按原文片段拼接，控制字大小写不敏感。
+- `ScriptGenerationService`：`/trpg script gen <题材> [人数] [时长]`，BOT_ADMIN / OWNER，
+  默认 3 人 / 60 分钟、60 秒冷却、全局单槽位，跑在插件自有单线程 daemon executor 上；
+  走 MBB-AI `PluginService.call("chat")`（`timeoutSeconds=90`、`maxTokens=6000`），
+  剥 Markdown 围栏后覆盖 `id=gen-<yyyyMMddHHmmss>-<4位36进制>`、`author` 缺省 `MBB-AI`，
+  失败按 `E_AI_DISABLED / E_AI_BUSY / E_AI_TIMEOUT / E_AI_OUTPUT / E_AI_VALIDATION /
+  E_AI_FAILED` 分类、一律不落盘并给出手工导入退路；不写 `ai_trace`、不进 AI 主持队列。
+- 删除与替换的引用保护：`SessionService` 实现 `ScriptUsageIndex`，被任何未归档局
+  （含重启恢复）引用的剧本禁止删除 / 替换（`E_IN_USE`），归档局不阻止；库级读写锁把
+  「检查引用 + 改文件」放在同一写锁内，读锁不覆盖网络发送。
+- 共享端口微调：`AiRequest` 增加 `maxTokens` / `temperature`（旧 5 参构造保留），
+  `Messaging` 增加 `sendGroupAt` 供生成结果只 @ 发起人。
+
+S9 AI 契约桩切片继续保留：按 §9.10 交付 v1 的「空 AI」——零调用、零审计、不注册定时器。
 
 - `TrpgAiHostService`：只读 `aiHost.*` 配置并判定全局开关，不持有 `AiClient`、`TraceStore`、
   `Scheduler`，因此「零 AI 调用、零审计写入、无 AI 定时器」是结构性的（验收 I5）。
@@ -35,11 +55,12 @@ S8 已落地的指令层 B 继续保留：
   触发 INT 检定失败按 `1D10` 小时临时疯狂，回执写明持续时间。
 - `adjust` 招募期与进行中都能改技能值并封顶 0～99；`invite` 进行中补人并恢复离场成员的局籍；
   `take` 记录代管、`skip` 记录跳过原因。
-- `script list` / `script show` 仅机器人管理员可用，`script <剧本ID>` 只在招募期更换本局剧本；
-  `import` / `delete` / `gen` 仍回「将在后续版本启用」（S10）。
+- `script list` / `script show` / `script import` / `script delete` / `script gen` 仅机器人管理员可用，
+  `script <剧本ID>` 只在招募期更换本局剧本；导入走三段式暂存并支持 `replace`，删除与替换受
+  引用保护。
 - `blacklist add|remove|list`：群管理员管理本群名单，私聊机器人管理员可按「群号 QQ」移除；
   黑名单成员在群内发言被静默取消，指令也不回任何话。
-- 监听器：`TrpgListener` 在群消息入口做黑名单拦截、导入暂存吞消息（S10 前不吞）与局内活动刷新；
+- 监听器：`TrpgListener` 在群消息入口做黑名单拦截、导入暂存吞消息与局内活动刷新；
   `TrpgNoticeListener` 在 KP 离群时按 `kp_left` 收尾，非 KP 离群只记日志不归档。
 - `DiceExpressions` 统一 `NdM+K` 解析（SAN 损失与剧本检定共用口径）。
 
@@ -54,8 +75,8 @@ S7 已落地的指令层 A 继续保留：
   不写库、不持状态，一条指令只回一条回执，拒绝话术统一走 `TrpgPresenter` 的【错误】模板。
 - 指令分派用 `TrpgSubcommandHandler` 注册表 + `TrpgCommandContext`（共享冷却、错误去重、
   昵称与回执出口），S8 只往里注册新 handler，不改分派主干。
-- 私聊门禁：局内指令一律回「请在群内使用」，只放行 `help` 与 `/r`
-  （`script` 库管理在剧本导入切片落地后再放行）。
+- 私聊门禁：局内指令一律回「请在群内使用」，只放行 `help`、`/r` 与 `script` 库管理
+  （导入暂存在私聊同样可用，生成结果回私聊）。
 - `DiceParser` 与 `/r`：支持 `NdM` 与加法最多 3 段（`1d100+5`），常数段不掷骰；
   乘除、技能名等一律回「表达式不支持」；2 秒冷却、不落库、群聊私聊都可用。
   回执单段一行 `/r 3d6 = 9`，多段每段一行 `[r] 3d6 = 9` 并在末行给合计。

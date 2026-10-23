@@ -16,6 +16,7 @@ import org.moboxlab.mbb.trpg.present.TrpgStatusView;
 import org.moboxlab.mbb.trpg.script.Clue;
 import org.moboxlab.mbb.trpg.script.Scene;
 import org.moboxlab.mbb.trpg.script.Script;
+import org.moboxlab.mbb.trpg.script.ScriptAdmin;
 import org.moboxlab.mbb.trpg.script.ScriptCatalog;
 import org.moboxlab.mbb.trpg.session.Clock;
 import org.moboxlab.mbb.trpg.session.CooldownRegistry;
@@ -58,6 +59,7 @@ public final class TrpgCommandContext {
     private final CooldownRegistry cooldowns;
     private final ErrorDedupe dedupe;
     private final BlacklistService blacklist;
+    private final ScriptAdmin scriptAdmin;
 
     public TrpgCommandContext(SessionService sessions, SessionLogService logs, ScriptCatalog catalog,
                               CardGenerator cards, TrpgPresenter presenter, TrpgNameResolver names,
@@ -73,6 +75,16 @@ public final class TrpgCommandContext {
                               TrpgConfig config, Clock clock, PluginLogger logger,
                               CooldownRegistry cooldowns, ErrorDedupe dedupe,
                               BlacklistService blacklist) {
+        this(sessions, logs, catalog, cards, presenter, names, config, clock, logger, cooldowns,
+                dedupe, blacklist, null);
+    }
+
+    /** 生产装配：额外注入剧本管理三件套（S10 导入 / 生成 / 执行器）。 */
+    public TrpgCommandContext(SessionService sessions, SessionLogService logs, ScriptCatalog catalog,
+                              CardGenerator cards, TrpgPresenter presenter, TrpgNameResolver names,
+                              TrpgConfig config, Clock clock, PluginLogger logger,
+                              CooldownRegistry cooldowns, ErrorDedupe dedupe,
+                              BlacklistService blacklist, ScriptAdmin scriptAdmin) {
         if (sessions == null) {
             throw new IllegalArgumentException("局面服务不能为空");
         }
@@ -112,6 +124,12 @@ public final class TrpgCommandContext {
         this.cooldowns = cooldowns;
         this.dedupe = dedupe;
         this.blacklist = blacklist;
+        this.scriptAdmin = scriptAdmin;
+    }
+
+    /** 剧本管理三件套；未装配时为 null（script 库管理动作不可用）。 */
+    public ScriptAdmin scriptAdmin() {
+        return scriptAdmin;
     }
 
     /** 拉黑名单服务；未装配时为 null（黑名单指令不可用）。 */
@@ -149,6 +167,11 @@ public final class TrpgCommandContext {
 
     public Clock clock() {
         return clock;
+    }
+
+    /** 插件内冷却登记，剧本生成等动作在命令层按（动作, 用户, 群）判冷却。 */
+    public CooldownRegistry cooldowns() {
+        return cooldowns;
     }
 
     /** 回执统一经 Presenter：群内发群、私聊发私聊。 */
