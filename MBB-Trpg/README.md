@@ -6,7 +6,7 @@ MoBoxBot 的跑团主持插件：在群里开一局 TRPG，提供 CoC 风格 d10
 
 ## 当前阶段
 
-v1.1 AI 主持切片已交付，版本 `V0.1.10.0.2155`（接 issue #15；v1 的 S1–S11 已合并）。
+v1.1 AI 主持切片已交付，版本 `V0.1.10.2.0001`（接 issue #15；v1 的 S1–S11 已合并）。
 
 - `/trpg ai on|off` 升级为真实开关：`on` 写 `aiEnabled=1` 并清除 `aiSuspendedUntil`，
   `off` 写 `aiEnabled=0`；AI 子状态三列（`aiEnabled` / `aiSuspendedUntil` / `aiFailStreak`）
