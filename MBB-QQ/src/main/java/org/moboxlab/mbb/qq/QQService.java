@@ -133,9 +133,16 @@ public class QQService implements PluginService {
         if (!config.readToolsEnable) return error("QQ 只读工具未启用");
         String messageID = safe(input.getString("messageID"));
         if (messageID.isEmpty()) return error("缺少 messageID");
+        long groupID = positive(input,"groupID");
+        if (groupID > 0) {
+            JSONObject detail = getMessage(messageID);
+            if (detail == null || !sameGroup(detail,groupID)) {
+                return error("消息不属于当前群");
+            }
+        }
         JSONObject params = new JSONObject(true);
         params.put("message_id",messageID);
-        return action("message_detail","get_msg",params,input,0,0,"读取消息详情");
+        return action("message_detail","get_msg",params,input,groupID,0,"读取消息详情");
     }
 
     private JSONObject groupNotices(JSONObject input) {
@@ -248,6 +255,9 @@ public class QQService implements PluginService {
         long groupID = positive(input,"groupID");
         String file = safe(input.getString("file"));
         if (groupID <= 0 || file.isEmpty()) return error("缺少群号或图片");
+        if (!file.startsWith("base64://") && !validFileExtension(file,config.imageExtensions)) {
+            return error("图片扩展名不在允许范围内");
+        }
         if (!withinBase64Limit(file,config.imageMaxBytes)) return error("图片超过大小限制");
         JSONObject sent = client().sendGroupMessage(groupID,
                 MessageUtil.message(MessageUtil.image(file)));
@@ -259,6 +269,9 @@ public class QQService implements PluginService {
         long groupID = positive(input,"groupID");
         String file = safe(input.getString("file"));
         if (groupID <= 0 || file.isEmpty()) return error("缺少群号或语音");
+        if (!file.startsWith("base64://") && !validFileExtension(file,config.voiceExtensions)) {
+            return error("语音扩展名不在允许范围内");
+        }
         if (!withinBase64Limit(file,config.voiceMaxBytes)) return error("语音超过大小限制");
         JSONObject sent = client().sendGroupMessage(groupID,
                 MessageUtil.message(MessageUtil.record(file)));
@@ -266,7 +279,7 @@ public class QQService implements PluginService {
     }
 
     private JSONObject setOwnGroupCard(JSONObject input) {
-        if (!config.mediaToolsEnable) return error("QQ 互动工具未启用");
+        if (!config.interactionToolsEnable) return error("QQ 互动工具未启用");
         long groupID = positive(input,"groupID");
         long selfID = positive(input,"selfID");
         long operatorID = positive(input,"operatorID");
@@ -422,8 +435,16 @@ public class QQService implements PluginService {
         JSONObject result = new JSONObject(true);
         result.put("status",success);
         result.put("action",action);
-        JSONObject data = raw.getJSONObject("data");
-        result.put("data",data == null ? new JSONObject(true) : data);
+        Object data = raw.get("data");
+        if (data instanceof JSONObject) {
+            result.put("data",data);
+        } else if (data instanceof JSONArray) {
+            JSONObject wrapped = new JSONObject(true);
+            wrapped.put("items",data);
+            result.put("data",wrapped);
+        } else {
+            result.put("data",new JSONObject(true));
+        }
         if (!success) result.put("message",failureMessage(raw));
         return result;
     }
@@ -539,6 +560,20 @@ public class QQService implements PluginService {
         if (file == null || !file.startsWith("base64://")) return true;
         long encoded = Math.max(0,file.length() - "base64://".length());
         return encoded * 3L / 4L <= maxBytes;
+    }
+
+    private boolean validFileExtension(String file,String allowed) {
+        String name = safe(file);
+        int slash = Math.max(name.lastIndexOf('/'),name.lastIndexOf('\\'));
+        if (slash >= 0) name = name.substring(slash + 1);
+        int dot = name.lastIndexOf('.');
+        if (dot < 0 || dot + 1 >= name.length()) return false;
+        String extension = name.substring(dot + 1).toLowerCase(Locale.ROOT);
+        String[] extensions = safe(allowed).split(",");
+        for (String item : extensions) {
+            if (extension.equals(item.trim().toLowerCase(Locale.ROOT))) return true;
+        }
+        return false;
     }
 
     private long positive(JSONObject input,String key) {

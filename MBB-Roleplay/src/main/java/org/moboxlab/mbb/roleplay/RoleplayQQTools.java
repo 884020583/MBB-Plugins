@@ -55,6 +55,8 @@ public class RoleplayQQTools {
                 "以机器人自己的账号发表 QQ 空间说说，仅 owner 可用",true,1,qzonePostArgs()));
         registry.register(new QQTool(service,qq,"qq_qzone_delete","qzone_delete",
                 "删除机器人自己的 QQ 空间说说，仅 owner 可用",true,1,qzoneDeleteArgs()));
+        registry.register(new QQTool(service,qq,"qq_qzone_posts","qzone_posts",
+                "查看机器人本机记录的 Qzone 说说的 tid、正文和可见范围，仅 owner 可用",false,1,qzonePostsArgs()));
     }
 
     private static PluginService qqService(RoleplayService service) {
@@ -130,6 +132,12 @@ public class RoleplayQQTools {
     private static JSONObject qzoneDeleteArgs() {
         JSONObject properties = new JSONObject(true);
         properties.put("tid",property("string","send_qzone_msg 返回的说说 tid"));
+        return properties;
+    }
+
+    private static JSONObject qzonePostsArgs() {
+        JSONObject properties = new JSONObject(true);
+        properties.put("limit",property("integer","最多读取多少条本机发布记录，1 到 50"));
         return properties;
     }
 
@@ -214,6 +222,7 @@ public class RoleplayQQTools {
             params.put("ugcRight",args.getIntValue("ugcRight"));
             params.put("targetUins",args.getJSONArray("targetUins"));
             params.put("tid",service.safe(args.getString("tid")));
+            params.put("limit",args.getIntValue("limit"));
             if ("send_image".equals(action) || "send_voice".equals(action)) {
                 String path = service.safe(args.getString("path")).trim();
                 if (!validExtension(path,"send_image".equals(action))) {

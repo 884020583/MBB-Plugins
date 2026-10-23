@@ -12,9 +12,9 @@ $buildDir = Join-Path $outDir "build"
 $classesDir = Join-Path $buildDir "classes"
 $jarPath = Join-Path $outDir "MBB-QQ.jar"
 
-Write-Host "==== MBB-QQ 构建 ===="
+Write-Host "==== MBB-QQ build ===="
 if (-not (Test-Path -LiteralPath $Bot)) {
-    Write-Host "找不到 MoBoxBot.jar：$Bot"
+    Write-Host "MoBoxBot.jar not found: $Bot"
     exit 1
 }
 if (Test-Path -LiteralPath $buildDir) { Remove-Item -LiteralPath $buildDir -Recurse -Force }
@@ -31,4 +31,4 @@ Push-Location $classesDir
 Pop-Location
 if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 $size = [math]::Round((Get-Item -LiteralPath $jarPath).Length / 1KB,1)
-Write-Host ("构建完成：" + $jarPath + "（" + $size + " KB）")
+Write-Host ("Build complete: " + $jarPath + " (" + $size + " KB)")
