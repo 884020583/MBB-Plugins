@@ -99,7 +99,8 @@ public class RoleplayTurnProcessor {
         boolean handled = false;
         try {
             JSONObject result = service.reply(groupID,prepared.userID,prepared.userName,content,
-                    prepared.otherRoleBot,prepared.relationship,prepared.imageContext,decision);
+                    prepared.otherRoleBot,prepared.relationship,prepared.imageContext,decision,
+                    event.getMessageID(),prepared.selfID);
             if (result == null || !result.getBooleanValue("status")) {
                 service.plugin().getLogger().sendWarn("[角色] 群"+groupID+" 回复生成失败，本轮不发送");
                 return false;
@@ -167,7 +168,7 @@ public class RoleplayTurnProcessor {
         try {
             JSONObject result = service.reply(groupID,primary.userID,primary.userName,batchText,
                     primary.otherRoleBot,primary.relationship,primary.imageContext,decision,
-                    batchText,messages.size());
+                    batchText,messages.size(),primary.event.getMessageID(),primary.selfID);
             if (result == null || !result.getBooleanValue("status")) {
                 service.plugin().getLogger().sendWarn("[角色] 群"+groupID+" 合批回复生成失败，本轮不发送");
                 return;
@@ -334,7 +335,8 @@ public class RoleplayTurnProcessor {
             boolean handled = false;
             try {
                 JSONObject result = service.reply(groupID,pending.event.getUserID(),pending.userName,content,
-                        pending.otherRoleBot,pending.relationship,pending.imageContext,pending.decision);
+                        pending.otherRoleBot,pending.relationship,pending.imageContext,pending.decision,
+                        pending.event.getMessageID(),pending.selfID);
                 if (result == null || !result.getBooleanValue("status")) {
                     service.plugin().getLogger().sendWarn("[角色] 群"+groupID+" 待处理回合回复生成失败，本次不发送");
                     return;

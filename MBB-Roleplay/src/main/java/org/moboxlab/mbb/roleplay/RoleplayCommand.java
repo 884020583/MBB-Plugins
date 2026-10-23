@@ -179,6 +179,10 @@ public class RoleplayCommand extends BotCommand {
             handleTrace(sender,args);
             return true;
         }
+        if ("tool".equals(action)) {
+            handleTool(sender,args);
+            return true;
+        }
         if ("eval".equals(action)) {
             handleEval(sender,args);
             return true;
@@ -331,6 +335,10 @@ public class RoleplayCommand extends BotCommand {
 
     private void handleTrace(CommandSender sender,String[] args) {
         roleplayFeedbackCommandHandler.handleTrace(sender,args);
+    }
+
+    private void handleTool(CommandSender sender,String[] args) {
+        roleplayFeedbackCommandHandler.handleTool(sender,args);
     }
 
     private void handleEval(CommandSender sender,String[] args) {

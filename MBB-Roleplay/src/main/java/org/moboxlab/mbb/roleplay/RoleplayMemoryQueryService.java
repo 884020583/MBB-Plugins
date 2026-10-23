@@ -40,13 +40,15 @@ public class RoleplayMemoryQueryService {
         }
         List<JSONObject> ranked = rankMemories(memories,userID,query);
         StringBuilder builder = new StringBuilder();
+        int maxChars = service.config().contextHardLimitEnable
+                ? service.config().memoryRelevanceMaxChars : Integer.MAX_VALUE;
         int used = 0;
         int count = 0;
         for (JSONObject item : ranked) {
             String line = "- ["+service.formatMemoryTime(item.getLongValue("eventTime"))+"] ["
                     +service.safe(item.getString("type"))+"] "
                     +service.safe(item.getString("content"))+"\n";
-            if (count > 0 && used + line.length() > service.config().memoryRelevanceMaxChars) break;
+            if (count > 0 && used + line.length() > maxChars) break;
             builder.append(line);
             used += line.length();
             count++;

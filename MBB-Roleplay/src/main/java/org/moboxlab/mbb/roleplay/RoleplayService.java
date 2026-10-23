@@ -1375,22 +1375,24 @@ public class RoleplayService {
     }
 
     public void shutdown() {
+        toolLoopService.shutdown();
         executorService.shutdown();
     }
 
 
     JSONObject reply(long groupID,long userID,String userName,String content,
                      boolean otherRoleBot,String relationship,RecentImage imageContext,
-                     RoleplayRouteDecision decision) {
+                     RoleplayRouteDecision decision,long messageID,long selfID) {
         return replyGenerationService.reply(groupID,userID,userName,content,otherRoleBot,
-                relationship,imageContext,decision);
+                relationship,imageContext,decision,messageID,selfID);
     }
 
     JSONObject reply(long groupID,long userID,String userName,String content,
                      boolean otherRoleBot,String relationship,RecentImage imageContext,
-                     RoleplayRouteDecision decision,String batchText,int batchCount) {
+                     RoleplayRouteDecision decision,String batchText,int batchCount,
+                     long messageID,long selfID) {
         return replyGenerationService.reply(groupID,userID,userName,content,otherRoleBot,
-                relationship,imageContext,decision,batchText,batchCount);
+                relationship,imageContext,decision,batchText,batchCount,messageID,selfID);
     }
 
 

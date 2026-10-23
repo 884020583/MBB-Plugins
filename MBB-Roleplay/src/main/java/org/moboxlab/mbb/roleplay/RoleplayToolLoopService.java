@@ -9,8 +9,16 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
+import java.util.concurrent.RejectedExecutionException;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicLong;
 
 /**
@@ -21,6 +29,11 @@ public class RoleplayToolLoopService {
     private final RoleplayToolRegistry registry;
     private final Map<Long,ActiveTurn> activeTurns = new ConcurrentHashMap<>();
     private final AtomicLong sequence = new AtomicLong();
+    private final ExecutorService toolExecutor = Executors.newFixedThreadPool(4,runnable -> {
+        Thread thread = new Thread(runnable,"MoBoxBot-Roleplay-Tool");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     public RoleplayToolLoopService(RoleplayService service,RoleplayConfig config) {
         this.service = service;
@@ -35,15 +48,27 @@ public class RoleplayToolLoopService {
         return registry;
     }
 
+    public void shutdown() {
+        toolExecutor.shutdownNow();
+    }
+
     public JSONObject run(long groupID,RoleplayToolContext context,JSONArray messages,JSONObject params) {
         String token = begin(groupID);
         JSONArray toolTrace = new JSONArray();
         JSONObject usage = emptyUsage();
+        Map<String,Integer> perToolCalls = new LinkedHashMap<>();
         int totalCalls = 0;
         int steps = Math.max(1,service.config().toolMaxSteps);
+        long deadline = System.currentTimeMillis()
+                +Math.max(10000,service.config().toolLoopMaxMillis);
         try {
             for (int step = 0; step < steps; step++) {
                 appendLiveMessages(groupID,token,messages,toolTrace);
+                if (System.currentTimeMillis() >= deadline) {
+                    JSONObject result = error("工具循环超过总时限，未得到最终回复");
+                    result.put("toolTrace",toolTrace);
+                    return result;
+                }
                 JSONObject callParams = copy(params);
                 callParams.put("messages",messages);
                 if (service.config().toolEnable) {
@@ -78,6 +103,12 @@ public class RoleplayToolLoopService {
                     response.put("toolTrace",toolTrace);
                     return response;
                 }
+                if (System.currentTimeMillis() >= deadline) {
+                    JSONObject result = error("工具循环超过总时限，未得到最终回复");
+                    result.put("usage",usage);
+                    result.put("toolTrace",toolTrace);
+                    return result;
+                }
                 JSONObject assistant = new JSONObject(true);
                 assistant.put("role","assistant");
                 assistant.put("content",service.safe(response.getString("content")));
@@ -94,9 +125,25 @@ public class RoleplayToolLoopService {
                     JSONObject function = call.getJSONObject("function");
                     String name = function == null ? "" : service.safe(function.getString("name"));
                     JSONObject args = parseArgs(function == null ? "" : function.getString("arguments"));
+                    String invalid = registry.validateArguments(name,args);
+                    RoleplayTool tool = registry.get(name);
+                    int used = perToolCalls.containsKey(name) ? perToolCalls.get(name) : 0;
+                    if (invalid.isEmpty() && tool != null && used >= Math.max(1,tool.maxCallsPerTurn())) {
+                        invalid = "工具 "+name+" 本轮调用次数超过上限 "
+                                +Math.max(1,tool.maxCallsPerTurn());
+                    }
                     long startTool = System.currentTimeMillis();
-                    RoleplayToolResult toolResult = registry.execute(context,name,args);
+                    RoleplayToolResult toolResult = invalid.isEmpty()
+                            ? executeTimed(context,name,args)
+                            : RoleplayToolResult.failed(invalid);
                     totalCalls++;
+                    perToolCalls.put(name,used + 1);
+                    try {
+                        service.toolMemoryService().record(context,name,args,toolResult);
+                    } catch (Exception e) {
+                        service.plugin().getLogger().sendWarn("[工具] 群"+context.groupID
+                                +" 持久化结果失败："+service.safe(e.getMessage()));
+                    }
                     JSONObject trace = new JSONObject(true);
                     trace.put("id",id);
                     trace.put("name",name);
@@ -134,12 +181,70 @@ public class RoleplayToolLoopService {
                     return result;
                 }
             }
+            JSONObject recovered = recoverWithoutTools(groupID,token,messages,params,usage,toolTrace);
+            if (recovered != null) return recovered;
             JSONObject result = error("工具循环达到最大轮数，未得到最终回复");
+            result.put("toolTrace",toolTrace);
+            return result;
+        } catch (Exception e) {
+            service.plugin().getLogger().sendException(e);
+            JSONObject result = error("工具循环异常："+service.safe(e.getMessage()));
             result.put("toolTrace",toolTrace);
             return result;
         } finally {
             end(groupID,token);
         }
+    }
+
+    private RoleplayToolResult executeTimed(RoleplayToolContext context,String name,JSONObject args) {
+        Future<RoleplayToolResult> future;
+        try {
+            future = toolExecutor.submit(new Callable<RoleplayToolResult>() {
+                @Override
+                public RoleplayToolResult call() {
+                    return registry.execute(context,name,args);
+                }
+            });
+        } catch (RejectedExecutionException e) {
+            return RoleplayToolResult.failed(name+" 执行器已关闭");
+        }
+        try {
+            return future.get(Math.max(1000,service.config().toolCallMaxMillis),TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            future.cancel(true);
+            return RoleplayToolResult.failed(name+" 执行超时，已取消");
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            future.cancel(true);
+            return RoleplayToolResult.failed(name+" 执行被中断");
+        } catch (ExecutionException e) {
+            Throwable cause = e.getCause() == null ? e : e.getCause();
+            return RoleplayToolResult.failed(name+" 执行失败："+service.safe(cause.getMessage()));
+        }
+    }
+
+    private JSONObject recoverWithoutTools(long groupID,String token,JSONArray messages,
+                                           JSONObject params,JSONObject usage,JSONArray toolTrace) {
+        appendLiveMessages(groupID,token,messages,toolTrace);
+        PluginService ai = service.plugin().getServer().getPluginManager().getService("MBB-AI");
+        if (ai == null) return null;
+        JSONObject callParams = copy(params);
+        callParams.put("messages",messages);
+        callParams.remove("tools");
+        callParams.remove("tool_choice");
+        callParams.remove("parallel_tool_calls");
+        long start = System.currentTimeMillis();
+        JSONObject response = ai.call("chat",callParams);
+        RoleplayAiLog.log(service.plugin().getLogger(),"工具收尾",groupID,response,
+                System.currentTimeMillis() - start);
+        if (response == null || !response.getBooleanValue("status")) return null;
+        JSONArray calls = response.getJSONArray("toolCalls");
+        if (calls != null && !calls.isEmpty()) return null;
+        addUsage(usage,response.getJSONObject("usage"));
+        response.put("usage",usage);
+        response.put("toolTrace",toolTrace);
+        service.plugin().getLogger().sendInfo("[工具] 群"+groupID+" 达到最大轮数后完成一次无工具收尾");
+        return response;
     }
 
     /**

@@ -163,6 +163,33 @@ public class RoleplayWorkspaceService {
         return root().getAbsolutePath();
     }
 
+    public JSONObject selfTest() {
+        JSONObject result = new JSONObject(true);
+        boolean relativeRejected = false;
+        try {
+            resolve("../outside-workspace",false);
+        } catch (Exception e) {
+            relativeRejected = true;
+        }
+        boolean absoluteRejected = false;
+        try {
+            resolve(new File(plugin.getDataFolder(),"outside-workspace").getAbsolutePath(),false);
+        } catch (Exception e) {
+            absoluteRejected = true;
+        }
+        boolean rootProtected = false;
+        try {
+            resolve("",false);
+        } catch (Exception e) {
+            rootProtected = true;
+        }
+        result.put("relativeEscapeRejected",relativeRejected);
+        result.put("absolutePathRejected",absoluteRejected);
+        result.put("rootDeleteProtected",rootProtected);
+        result.put("status",relativeRejected && absoluteRejected && rootProtected);
+        return result;
+    }
+
     private File root() {
         File root = new File(plugin.getDataFolder(),"data");
         if (!root.exists() && !root.mkdirs()) {

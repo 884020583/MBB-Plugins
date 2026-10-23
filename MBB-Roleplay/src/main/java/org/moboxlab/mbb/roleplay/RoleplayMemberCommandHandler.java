@@ -141,6 +141,14 @@ public class RoleplayMemberCommandHandler {
                     +"\n/role eval [list|run <id|all>]");
             return;
         }
+        if ("tool".equals(category)) {
+            sender.sendMessage("工具与检索："
+                    +"\n/role tool stats          查看当前群工具调用统计"
+                    +"\n/role tool test           检查工具 schema、参数校验、工作区和网页白名单"
+                    +"\n/role tool trace [条数]   查看最近工具调用"
+                    +"\n/role tool clear          清空当前群工具结果上下文");
+            return;
+        }
         if ("learn".equals(category) || "corpus".equals(category)) {
             sender.sendMessage("训练语料采集："
                     +"\n/role learn [备注]          回复某条消息再发，采集那条消息和前后文"
@@ -168,6 +176,7 @@ public class RoleplayMemberCommandHandler {
                 +"\n/role help role         角色与机器人"
                 +"\n/role help content      语料与知识库"
                 +"\n/role help feedback     反馈与表达"
+                +"\n/role help tool         工具与检索"
                 +"\n/role help learn        训练语料采集"
                 +"\n/role help train        风格层模型训练"
                 +"\n/role help all          查看全部命令");
