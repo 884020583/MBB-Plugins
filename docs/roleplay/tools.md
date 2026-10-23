@@ -124,8 +124,10 @@ toolMemoryMaxRows: 500
 
 `web_fetch` 只接受 `http/https`，默认拒绝自动跨域重定向；手动跟随重定向时每次都会重新校验域名。
 读取结果按 `webTimeoutSecond`、`webMaxBytes`、`webMaxChars` 限制，并移除脚本、样式和 HTML 标签。
-`web_search` 使用 `webSearchUrl` 模板联网搜索，主搜索源无结果或连接失败时自动尝试
-`webSearchFallbackUrl`。结果会附带每个搜索源的 HTTP、页面大小、命中数和空结果原因，
+`web_search` 使用 `webSearchUrl` 模板联网搜索，默认只使用 Bing，单次最多返回 10 条结果。
+查询词必须由模型先根据聊天内容改写成实体、官方名、时间、版本或 CVE 等关键词，工具不会自动改写或按规则筛选。
+只有显式配置 `webSearchFallbackUrl` 时，连接失败或零结果才会尝试备用源，且不做多源结果合并。
+结果会附带每个搜索源的 HTTP、页面大小、命中数和空结果原因，
 搜索结果本身标记为不可信外部资料。每次调用的控制台日志和工具摘要都会带实际搜索关键词；
 日志同时显示实际来源、命中数和是否命中本地缓存，方便判断是搜索词不合适还是搜索源没有结果。
 
@@ -137,12 +139,13 @@ toolMemoryMaxRows: 500
 webEnable: true
 webWhitelist: "wikipedia.org,baike.baidu.com,bilibili.com,biligame.com,wiki.biligame.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,bangumi.tv,bgm.tv,huijiwiki.com,prts.wiki,wiki.gg,game8.jp,appmedia.jp,kamigame.jp,ani.gamer.com.tw,fandom.com,namu.wiki,arca.live,github.com,raw.githubusercontent.com,deepwiki.com,duckduckgo.com,bing.com"
 webSearchUrl: "https://www.bing.com/search?q={query}"
-webSearchFallbackUrl: "https://html.duckduckgo.com/html/?q={query}"
+webSearchFallbackUrl: ""
+webSearchMaxResults: 10
 webOwnerAuthWindowSecond: 300
 ```
 
-搜索作品、人物或站点时优先使用官方英文名和常用英文别名。例如直接搜索
-`Blue Archive wiki` 比把中文别名硬拼成 `蔚蓝档案wiki` 更稳定。
+模型应先把聊天原句改写成检索式，搜索作品、人物或站点时优先使用官方英文名和常用英文别名。
+例如把“这两天的 PHP 漏洞事件”改写成 `PHP vulnerability CVE October 2026`，比直接搜索整句聊天更稳定。
 
 内网、回环和保留地址不会被普通群员绕过。只有当前发言者是 owner，或者最近上下文里 owner
 明确要求访问该内网地址时，`web_fetch` 才允许建立连接。授权判断会记录到工具结果和访问日志。

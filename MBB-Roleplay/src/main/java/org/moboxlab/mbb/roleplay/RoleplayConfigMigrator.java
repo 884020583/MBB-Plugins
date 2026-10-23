@@ -15,7 +15,7 @@ import java.util.List;
  * Roleplay 配置迁移与缺失项补全
  */
 public class RoleplayConfigMigrator {
-    private static final String CURRENT_VERSION = "44";
+    private static final String CURRENT_VERSION = "45";
     private static final String LEGACY_WEB_WHITELIST =
             "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,"
                     +"kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,"
@@ -242,8 +242,8 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("webWhitelist",RoleplayConfig.DEFAULT_WEB_WHITELIST,
                     "网页允许域名，多个用英文逗号分隔"),
             new ConfigEntry("webSearchUrl","https://www.bing.com/search?q={query}","联网搜索地址模板"),
-            new ConfigEntry("webSearchFallbackUrl","https://html.duckduckgo.com/html/?q={query}","联网搜索备用地址模板"),
-            new ConfigEntry("webSearchMaxResults","5","单次联网搜索最多返回多少条摘要"),
+            new ConfigEntry("webSearchFallbackUrl","","可选联网搜索备用地址模板；默认留空，不启用第二搜索源"),
+            new ConfigEntry("webSearchMaxResults","10","单次联网搜索最多返回多少条结果"),
             new ConfigEntry("webOwnerAuthWindowSecond","300","owner 内网访问授权窗口秒数"),
             new ConfigEntry("webTimeoutSecond","15","网页连接超时秒数"),
             new ConfigEntry("webMaxBytes","262144","网页最多读取字节数"),
@@ -442,6 +442,11 @@ public class RoleplayConfigMigrator {
                 .equals(config.getString("toolCoreTools",""));
         boolean legacySocialWebWhitelist = version < 44
                 && LEGACY_WEB_WHITELIST.equals(config.getString("webWhitelist",""));
+        boolean legacySearchFallback = version < 45
+                && "https://html.duckduckgo.com/html/?q={query}"
+                .equals(config.getString("webSearchFallbackUrl",""));
+        boolean legacySearchMaxResults = version < 45
+                && "5".equals(config.getString("webSearchMaxResults",""));
         int changed = 0;
         List<ConfigEntry> missing = new ArrayList<>();
         for (ConfigEntry entry : DEFAULTS) {
@@ -455,7 +460,7 @@ public class RoleplayConfigMigrator {
                 plugin.getLogger().sendWarn("自动补全 Roleplay 配置失败，请检查 config.yml 权限！");
             }
         }
-        if (version < 44) {
+        if (version < 45) {
             config.set("configVersion",CURRENT_VERSION);
             if (!versionMissing) changed++;
         }
@@ -509,7 +514,7 @@ public class RoleplayConfigMigrator {
         }
         if (legacyWebSearchPrimary) {
             config.set("webSearchUrl","https://www.bing.com/search?q={query}");
-            config.set("webSearchFallbackUrl","https://html.duckduckgo.com/html/?q={query}");
+            config.set("webSearchFallbackUrl","");
             changed += 2;
         }
         if (legacyToolStepBalance) {
@@ -538,6 +543,14 @@ public class RoleplayConfigMigrator {
         }
         if (legacySocialWebWhitelist) {
             config.set("webWhitelist",RoleplayConfig.DEFAULT_WEB_WHITELIST);
+            changed++;
+        }
+        if (legacySearchFallback) {
+            config.set("webSearchFallbackUrl","");
+            changed++;
+        }
+        if (legacySearchMaxResults) {
+            config.set("webSearchMaxResults","10");
             changed++;
         }
         if (legacyRoleBotChance) {
@@ -637,7 +650,7 @@ public class RoleplayConfigMigrator {
             config.set("replySegmentMaxChars","30");
             changed++;
         }
-        if (version < 44 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
+        if (version < 45 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
                 || legacyRouterMaxTokens || legacyRouterMaxTokens1200
                 || legacyPromptTotalChars || legacyMemoryRelevanceMaxChars
                 || legacyGlobalMemoryRelevanceMaxChars || legacyRouterReasoningEffort
@@ -648,7 +661,8 @@ public class RoleplayConfigMigrator {
                 || legacyInitialTrust || legacyIntimacyClose || legacyIntimacyVeryClose
                 || legacyRelationDailyMax || legacyEmotionEventCooldown
                 || legacyEmotionAnalyzeCooldown || legacyEmotionAnalyzeMaxDelta
-                || legacyToolCoreSticker || legacySocialWebWhitelist) {
+                || legacyToolCoreSticker || legacySocialWebWhitelist
+                || legacySearchFallback || legacySearchMaxResults) {
             if (config.save()) {
                 config.load();
             } else {

@@ -750,14 +750,14 @@ public class RoleplayToolRegistry {
 
         @Override
         public String description() {
-            return "联网搜索公开信息，返回标题和链接；优先使用官方英文名搜索，需要正文时再调用 web_fetch";
+            return "联网搜索公开信息，返回最多 10 条标题和链接；调用前先自行把聊天原句改写为检索关键词";
         }
 
         @Override
         public JSONObject schema() {
             JSONObject properties = new JSONObject(true);
             properties.put("query",property("string",
-                    "搜索词；作品、人物或站点优先使用官方英文名和常用英文别名"));
+                    "由你改写后的搜索关键词；不要直接传整句聊天，必要时自行加入时间、版本或 CVE"));
             return functionSchema(name(),description(),properties,new String[]{"query"});
         }
 

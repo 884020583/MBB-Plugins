@@ -205,7 +205,7 @@ public class RoleplayWebService {
         wrapper.put("provider",usedProvider);
         wrapper.put("attempts",attempts);
         wrapper.put("query",text);
-        wrapper.put("queryHint","优先使用作品或站点的官方英文名，并保留 wiki 关键词");
+        wrapper.put("queryHint","查询词应由模型先改写；使用实体、官方名、时间或版本关键词，不要直接搜索整句聊天");
         wrapper.put("emptyReason",results.isEmpty()
                 ? "搜索源返回的页面没有可解析结果，可能无结果、被风控页替代或页面结构变化" : "");
         wrapper.put("cached",false);

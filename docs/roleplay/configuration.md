@@ -221,8 +221,8 @@ workspaceTrashKeepDays: 30
 webEnable: true
 webWhitelist: "wikipedia.org,baike.baidu.com,bilibili.com,biligame.com,wiki.biligame.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,bangumi.tv,bgm.tv,huijiwiki.com,prts.wiki,wiki.gg,game8.jp,appmedia.jp,kamigame.jp,ani.gamer.com.tw,fandom.com,namu.wiki,arca.live,github.com,raw.githubusercontent.com,deepwiki.com,duckduckgo.com,bing.com"
 webSearchUrl: "https://www.bing.com/search?q={query}"
-webSearchFallbackUrl: "https://html.duckduckgo.com/html/?q={query}"
-webSearchMaxResults: 5
+webSearchFallbackUrl: ""
+webSearchMaxResults: 10
 webOwnerAuthWindowSecond: 300
 webTimeoutSecond: 15
 webMaxBytes: 262144
@@ -336,8 +336,9 @@ quietReplyEnable: true
 默认白名单以二次元百科、游戏资料站和公开技术资料为主，不包含 X、Pixiv、YouTube、微博、
 知乎、Reddit 等社交或图片站；需要时可自行加入 `webWhitelist`。旧默认列表会自动迁移，
 自定义列表不会被覆盖。
-`webSearchUrl` 使用 `{query}` 占位符，主搜索源无结果或连接失败时会尝试
-`webSearchFallbackUrl`。`webCacheSecond` 缓存网页和搜索结果。
+`webSearchUrl` 使用 `{query}` 占位符。默认备用源留空，只使用 Bing；填写 `webSearchFallbackUrl`
+后才作为连接兜底，不参与结果合并。搜索词由模型在调用前自行改写，工具不会自动改词。
+单次最多返回 `webSearchMaxResults` 条结果，默认 10。`webCacheSecond` 缓存网页和搜索结果。
 `contextHardLimitEnable` 默认关闭，关闭时不按 `promptTotalChars` 截断动态资料；
 只有显式打开本地硬预算时才使用该上限。即使关闭总硬预算，各类资料仍有单项预算。
 
@@ -393,7 +394,8 @@ quietReplyEnable: true
 
 插件启动和重载时会检查 `config.yml`。缺失的配置项会自动追加到文件末尾，并附带中文注释。
 已知旧默认值会按配置结构版本迁移，包括 `otherRoleBotReplyChance: 0.10 -> 0.50`、
-旧 `toolCoreTools` 补入 `sticker`、旧社交网页白名单替换为二次元资料站默认值。
+旧 `toolCoreTools` 补入 `sticker`、旧社交网页白名单替换为二次元资料站默认值、
+旧 DuckDuckGo 备用源默认清空、`webSearchMaxResults: 5 -> 10`。
 迁移只在值仍等于旧默认值时执行，不会覆盖用户自定义内容。
 
 如需手动触发：

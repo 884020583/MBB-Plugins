@@ -225,8 +225,8 @@ public class RoleplayConfig {
     public boolean webEnable = true;
     public String webWhitelist = DEFAULT_WEB_WHITELIST;
     public String webSearchUrl = "https://www.bing.com/search?q={query}";
-    public String webSearchFallbackUrl = "https://html.duckduckgo.com/html/?q={query}";
-    public int webSearchMaxResults = 5;
+    public String webSearchFallbackUrl = "";
+    public int webSearchMaxResults = 10;
     public int webOwnerAuthWindowSecond = 300;
     public int webTimeoutSecond = 15;
     public int webMaxBytes = 262144;
@@ -646,8 +646,8 @@ public class RoleplayConfig {
         config.webSearchUrl = plugin.getConfig().getString("webSearchUrl",
                 "https://www.bing.com/search?q={query}");
         config.webSearchFallbackUrl = plugin.getConfig().getString("webSearchFallbackUrl",
-                "https://html.duckduckgo.com/html/?q={query}");
-        config.webSearchMaxResults = plugin.getConfig().getInt("webSearchMaxResults",5);
+                "");
+        config.webSearchMaxResults = plugin.getConfig().getInt("webSearchMaxResults",10);
         config.webOwnerAuthWindowSecond =
                 plugin.getConfig().getInt("webOwnerAuthWindowSecond",300);
         config.webTimeoutSecond = plugin.getConfig().getInt("webTimeoutSecond",15);
