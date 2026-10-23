@@ -350,7 +350,7 @@ public final class RuleRegistry {
 | T5 | 招募 | 已结束 | 惰性过期 | 超过 24 小时未开局（可配置） |
 | T6 | 进行中 | 已结束 | 惰性过期 | 超过 7 天无局内活动（可配置） |
 | T7 | 招募 / 进行中 | 已结束 | KP 离群通知 | `group_decrease` 命中 KP |
-| T8 | 招募 / 进行中 | 不变 | 进程重启 | 招募局加载后视为已确认（不置 `recovered`，无需 resume）；进行中局 `recovered=false`，群内一条【恢复】提示，KP 用 `/trpg resume` 确认 |
+| T8 | 招募 / 进行中 | 不变 | 进程重启 | 招募局加载后 `recovered=true`（视为已确认，无需 resume）；进行中局 `recovered=false`，群内一条【恢复】提示，KP 用 `/trpg resume` 确认 |
 
 T1–T7 是状态迁移，T8 是恢复事件（不写库）。
 
@@ -362,7 +362,7 @@ T1–T7 是状态迁移，T8 是恢复事件（不写库）。
 | T2 | `state=RUNNING`、`startedAt`、当前场景=剧本开场；开场叙述：AI 未启用用 §10 模板，AI 启用由 AI 生成（不重复发两条） |
 | T3 / T6 / 进行中 T7 / 强制 | 走 RUNNING→ENDED 统一收尾（见下），`endReason` 依次 `finished` / `expired` / `kp_left` / `forced` |
 | T4 / T5 / 招募期 T7 | 写结束摘要、直接归档、**不结算成长**，`endReason` = `cancelled` / `expired` / `kp_left` |
-| T8 | 只置内存 `recovered=false`（仅进行中局；招募局不置），不改库 |
+| T8 | 只置内存 `recovered`（招募局 `true`、进行中局 `false`），不改库 |
 
 **统一收尾顺序（冻结）**：CAS 置 ENDED（写 `endedAt`、`endReason`、`growthSettled=0`、空 summary）→ 逐成员成长结算 → 写摘要并把 `growthSettled` 置 1 → 异步战报（失败回退文本）。否掉「先成长后归档」：崩溃后会二次成长。
 

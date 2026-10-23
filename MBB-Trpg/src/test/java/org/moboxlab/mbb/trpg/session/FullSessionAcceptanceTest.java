@@ -16,9 +16,9 @@ import org.moboxlab.mbb.trpg.testutil.FakeRandom;
 /**
  * I2 整局回归：AI 全局关闭时，按剧本从开团跑到收尾，行为与纯工具模式一致。
  *
- * <p>验收要点（docs/MBB-Trpg.md 第 12 节 I2）：B–H 指令序列走完整一局；AI 提示数 0；
- * {@code TraceStore} 行数 0；不注册 AI 定时器（定时器属插件装配层，本测试以「没有任何
- * AI 事件 / 审计行」作为等价证据）。</p>
+ * <p>验收要点（docs/MBB-Trpg.md 第 12 节 I2）：`SessionService` 层的 B/C/G/H 代表动作走完整一局；
+ * AI 提示数 0；{@code TraceStore} 行数 0。定时器注册属插件装配层，本测试不覆盖（验收记录里
+ * I2/I5 因此标「部分」），这里只断言整局没有任何 AI 审计行或 AI 事件。</p>
  */
 public class FullSessionAcceptanceTest extends SessionTestFixture {
 
