@@ -31,6 +31,7 @@ public class FullSessionAcceptanceTest extends SessionTestFixture {
         assertTrue(service.begin(actor(KP)).ok());
 
         // G：一次成功检定，记下成长待结算（固定骰面：检定 D100=30、理智 D100=30、收尾成长 D10=5）。
+        // 这里换一份带固定骰面的 service：仅本测试用，冷却/去重状态随之重置，不影响下面的一次性断言。
         service = buildService(new FakeRandom(30, 30, 5), collectingPublisher());
         PlayResult<SessionOutcomes.Check> check = service.check(actor(PLAYER), 0L, SKILL, "", "");
         assertTrue("检定应成功：" + check.result().detail(), check.ok());
@@ -69,13 +70,12 @@ public class FullSessionAcceptanceTest extends SessionTestFixture {
         assertTrue("AI 关闭时不得写入 ai_trace",
                 traceStore.recent(GROUP, sessionId, 10).isEmpty());
 
-        // I2：事件里没有 AI 叙述类事件，只有收尾事件。
+        // I2：事件里应有收尾事件；恢复事件不在本测试范围（没有重启加载流程，归 E1/E2 覆盖）。
         List<SessionEvent.Type> types = new ArrayList<SessionEvent.Type>();
         for (SessionEvent event : events) {
             types.add(event.type());
         }
         assertTrue("整局应发布收尾事件：" + types, types.contains(SessionEvent.Type.ENDED));
-        assertFalse("AI 关闭时不应出现恢复/AI 事件", types.contains(SessionEvent.Type.RECOVERED));
 
         // 审计与日志按保留策略收敛：收尾后活跃局为空，日志可读。
         assertNotNull("收尾后仍应能读到已归档局的日志", store.listLogs(sessionId, 200, 0));

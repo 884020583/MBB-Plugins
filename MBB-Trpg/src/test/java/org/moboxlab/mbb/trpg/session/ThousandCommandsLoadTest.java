@@ -111,13 +111,14 @@ public class ThousandCommandsLoadTest extends SessionTestFixture {
                 locks.size() <= GroupLockRegistry.DEFAULT_MAX_GROUPS);
 
         // 空闲超过默认淘汰时间后再次触达：旧锁全部被淘汰，只留刚用到的那把。
+        // 注意容量上限（DEFAULT_MAX_GROUPS=256）分支本轮不覆盖：只验证空闲淘汰，见验收记录 J10。
         clock.advance(GroupLockRegistry.DEFAULT_IDLE_MILLIS + 1L);
         long wakeGroup = OTHER_GROUP + 999L;
         assertTrue("空闲后触达应正常返回空局面",
                 service.status(new SessionActor(KP, wakeGroup, false)).ok());
         assertEquals("空闲锁应在下一次触达时被淘汰，只剩一把", 1, locks.size());
-        assertFalse("旧群锁应被淘汰", locks.isLocked(GROUP));
-        assertFalse("陌生群旧锁应被淘汰", locks.isLocked(OTHER_GROUP));
+        assertFalse("旧群锁不应再处于持锁状态", locks.isLocked(GROUP));
+        assertFalse("陌生群旧锁不应再处于持锁状态", locks.isLocked(OTHER_GROUP));
 
         // 淘汰后再跑一千次，缓存仍是一把：说明收敛不是一次性假象。
         runThousandCommands(sessionId, "淘汰后第二轮");

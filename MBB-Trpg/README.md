@@ -40,7 +40,7 @@ S10 剧本导入与生成切片已交付：`ScriptLibrary`、`ScriptImportSessio
 S9 AI 契约桩切片继续保留：按 §9.10 交付 v1 的「空 AI」——零调用、零审计、不注册定时器。
 
 - `TrpgAiHostService`：只读 `aiHost.*` 配置并判定全局开关，不持有 `AiClient`、`TraceStore`、
-  `Scheduler`，因此「零 AI 调用、零审计写入、无 AI 定时器」是结构性的（验收 I5）。
+  `Scheduler`，因此「零 AI 调用、零审计写入、无 AI 定时器」是结构性的（设计上满足 I5；装配层显式断言仍记在验收记录 §4 P2）。
 - `/trpg ai on|off`：开关词解析（`on`/`开`、`off`/`关`）与权限、状态、冷却判定仍留在
   `SessionService`；全局关时 `ai on` 按「当前状态不可用」拒绝，全局开时回
   「AI 主持将在 v1.1 提供」，两种情况都不写 `aiEnabled`、不写审计（验收 I1 / I7）。

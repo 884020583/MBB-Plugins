@@ -12,8 +12,8 @@
 | 测试 | `MBB-Trpg\build.ps1 -Test` → **OK (497 tests)，45 个测试类** |
 | 全仓构建 | `build-all.ps1 -Bot <MoBoxBot.jar>` → **exit 0，24 个 JAR 汇总到根 `out/`** |
 | 插件产物 | `out/MBB-Trpg.jar`（389.5 KB）根目录含 `plugin.json`；主类继承 `API.Plugin` |
-| 自动化覆盖 | 87 行结果：59 通过（含 E1 的文档裁决）、17 部分、3 间接、6 手测（A1/A3/A4/J11/K3/K5）、1 缺口（B4）、1 N/A（J12） |
-| 规格冲突裁决 | E1 改为「招募期不发恢复提示，`recovered=true`」；J13 词表计数改为 29；两处已同步进 §10/§12 与本记录 |
+| 自动化覆盖 | 87 行结果：58 通过（含 E1 的文档裁决）、18 部分、3 间接、6 手测（A1/A3/A4/J11/K3/K5）、1 缺口（B4）、1 N/A（J12） |
+| 规格冲突裁决 | E1 改为「招募期不发恢复提示，`recovered=true`」，同步 §5.2 T8、§5.7 与 §12；J13 词表计数改为 29，同步 §10 与 §12；本记录为裁决依据 |
 | 已知缺口 | B4 命中顺序、C1 状态机矩阵、B2 权限矩阵等留作后续切片；I2/I5 的插件装配层断言与 J10 的过期清理直证也记入 §4 |
 
 ## 2. 逐条执行记录
@@ -46,7 +46,7 @@
 | C1 | 部分 | T1–T7 合法路径均有断言（`SessionServiceTest`、`SessionRecoveryTest`），非法分支未做全矩阵表驱动 |
 | C2 | 通过 | `SessionServiceTest#endNeedsSecondConfirmationWithinWindow` |
 | C3 | 通过 | `SessionServiceTest#cancellingRecruitingDoesNotSettleGrowth`、`#confirmationExpiresAfterWindow` |
-| C4 | 通过 | `SessionServiceTest#secondEndConfirmationFinishesAndSettlesSummary`（结果断言；CAS→成长→摘要顺序未单独断言） |
+| C4 | 部分 | `SessionServiceTest#secondEndConfirmationFinishesAndSettlesSummary`：只断言最终状态、成长标记与摘要非空；「CAS→成长→摘要」顺序未单独断言 |
 | C5 | 通过 | `SessionRecoveryTest#settlePendingSkipsAlreadySettledSessions`、`SessionServiceTest#growthWriteFailureDefersSettlementUntilNextStartup` |
 | C6 | 通过 | `SessionServiceTest#adminEndIsForcedAndSettlesGrowth`、`TrpgCommandServiceTest#groupAdminForcesEndReason` |
 | C7 | 通过 | `SessionPlayServiceTest#skipRecordsReason`、`TrpgKpCommandTest#inviteTakeAndSkipReply` |
@@ -144,7 +144,7 @@
 | J7 | 通过 | `TrpgListenerTest#blacklistedMessageIsCancelledSilently`、`TrpgKpCommandTest#blacklistedMemberGetsNoReply` |
 | J8 | 通过 | `TrpgCommandServiceTest#statusRepeatsAreSuppressedByCooldown`、`DiceCommandTest#cooldownIsTwoSecondsPerUserAndChannel` |
 | J9 | 部分 | `JdbcStorageFakeTest#queryReturnsPartialRowsInsteadOfThrowing`、`SessionServiceTest#endCasFailureKeepsSessionRunning`；「内存局面不半更新」仅 CAS 一例 |
-| J10 | 部分 | `ThousandCommandsLoadTest#thousandCommandsKeepOneGroupLockAndFlatTables`、`#groupLockCacheStaysBoundedAndEvictsIdleGroups`、`#twoThousandCommandsKeepHeapUsageStable`（本轮新增，3 用例全绿）：缓存条数有界并随空闲淘汰（以 `size()==1` 为证，`isLocked` 只反映当前持锁）、四表行数零增长、活跃局唯一、两轮堆增量 ≤32MB；「日志与审计按保留策略清理过期行」无直接证据（只断言活跃局不是清理候选），由 `TrpgRetentionServiceTest` 另覆盖 |
+| J10 | 部分 | `ThousandCommandsLoadTest#thousandCommandsKeepOneGroupLockAndFlatTables`、`#groupLockCacheStaysBoundedAndEvictsIdleGroups`、`#twoThousandCommandsKeepHeapUsageStable`（本轮新增，3 用例全绿）：缓存条数有界并随空闲淘汰（以 `size()==1` 为证，`isLocked` 只反映当前持锁）、四表行数零增长、活跃局唯一、两轮堆增量 ≤32MB（`System.gc` 采样，作 smoke）；`GroupLockRegistry` 容量上限 256 的分支未触达，且「日志与审计按保留策略清理过期行」无直接证据（只断言活跃局不是清理候选），由 `TrpgRetentionServiceTest` 另覆盖 |
 | J11 | 手测通过 | 对照呈现分册 §4 抽 7 条冻结样例（开团/检定/理智/AI 叙述/结束/战报/恢复），`TrpgMessageTemplatesTest` 内联冻结串逐字相等 |
 | J12 | N/A | 20 秒合并窗口属 v1.1 能力，`TrpgAiHostService` 注释已声明；v1 不纳入验收 |
 | J13 | 通过 | `TrpgTitlesTest#allTitlesAreUniqueAndCount29`、`#allTitlesAppearInSpecOrder`、`TrpgMessageFormatterTest#cleansMarkdownAndEmoji`；词表实为 29 个标题（§2.3 分册），§10/§12 的「24 词表」已改 |
