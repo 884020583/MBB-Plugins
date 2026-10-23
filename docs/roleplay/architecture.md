@@ -154,6 +154,8 @@ routerReasoningEffort: "none"
 模型统一通过 `tool_search` 和 `tools/tool_calls` 调用。旧的
 `<reminder>` / `<remember>` / `<global_remember>` / `<sticker>` 标签仍然兼容，
 会被转换成同一批技能调用。
+`sticker` 默认属于首轮核心工具；当前或最近图片可复用时，`sticker_save` 会自动进入本轮工具集，
+保存动作由 `MBB-Sticker` 公共 `add` 服务完成。
 
 **资料预算**：角色核心、外貌、学生名录、学生详细设定、长期/全局/短期记忆、最近发言、
 工具结果和台词示例各自独立成项，常驻项必带，其余按路由点名的 id 注入。默认关闭本地硬预算，

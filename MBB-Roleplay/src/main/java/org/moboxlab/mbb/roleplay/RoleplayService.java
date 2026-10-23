@@ -478,6 +478,17 @@ public class RoleplayService {
         privateChatService.handle(event);
     }
 
+    String enrichPrivateImageContent(org.moboxlab.moboxbot.API.Event.PrivateMessageEvent event,
+                                     String content) {
+        return imageContextService.enrichPrivateImageContent(event,content);
+    }
+
+    JSONObject recentImageForSave(long groupID,long userID,String content) {
+        RoleplayService.RecentImage recent = imageContextService.findRecentImageContext(
+                groupID,userID,content);
+        return recent == null ? null : recent.data;
+    }
+
 
     void executeSkillCalls(RoleplayRouteDecision decision,RoleplayReplyDraft draft,
                            long groupID,long userID,long messageID,long selfID,
@@ -1325,6 +1336,10 @@ public class RoleplayService {
 
     String longMemoryText(long groupID,long userID,String query) {
         return memoryQueryService.longMemoryText(groupID,userID,query);
+    }
+
+    String privateMemoryText(long userID,String query,int maxChars) {
+        return memoryQueryService.privateMemoryText(userID,query,maxChars);
     }
 
     JSONArray longMemories(long groupID) {

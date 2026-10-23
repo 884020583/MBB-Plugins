@@ -33,6 +33,11 @@ public class RoleplayPrivateChatService {
     private volatile long friendCacheTime = 0L;
     private volatile long friendCacheRetryTime = 0L;
 
+    private static class ReplyResult {
+        private String text = "";
+        private String memory = "";
+    }
+
     public RoleplayPrivateChatService(Plugin plugin,RoleplayConfig config,RoleplayService service) {
         this.plugin = plugin;
         this.config = config;
@@ -76,7 +81,8 @@ public class RoleplayPrivateChatService {
             selfID = login == null ? 0L : login.getLongValue("user_id");
         }
         final long resolvedSelfID = selfID;
-        service.submitBackground(() -> reply(userID,resolvedSelfID,userName,content,event.getMessageID()));
+        service.submitBackground(() -> reply(userID,resolvedSelfID,userName,content,
+                event.getMessageID(),event));
     }
 
     public boolean allowed(long userID) {
@@ -101,7 +107,7 @@ public class RoleplayPrivateChatService {
                 +"禁止使用客服式关心、总结、清单和过度亲昵。\n"
                 +"触发原因："+service.safe(reason)+"\n"
                 +"最近私聊：\n"+recentContext(userID);
-        return callAi(userID,prompt,true);
+        return callAi(userID,prompt,true,0L).text;
     }
 
     public boolean sendProactive(long userID,String content,String reason) {
@@ -116,17 +122,19 @@ public class RoleplayPrivateChatService {
         return sent;
     }
 
-    private void reply(long userID,long selfID,String userName,String content,long messageID) {
+    private void reply(long userID,long selfID,String userName,String content,long messageID,
+                       PrivateMessageEvent event) {
         if (!running.add(userID)) return;
         try {
-            String text = callAi(userID,content,false);
-            text = clean(text);
+            String enriched = service.enrichPrivateImageContent(event,content);
+            ReplyResult reply = callAi(userID,enriched,false,messageID);
+            String text = clean(reply.text);
             if (text.isEmpty() || "<SKIP>".equalsIgnoreCase(text)) return;
             if (text.length() > config.privateChatMaxReplyChars) {
                 text = text.substring(0,config.privateChatMaxReplyChars).trim();
             }
             if (!service.getPacingService().sleep(0L,userID,content,text)) return;
-            sendText(userID,text);
+            if (sendText(userID,text)) savePrivateMemory(userID,reply.memory);
         } catch (Exception e) {
             plugin.getLogger().sendException(e);
         } finally {
@@ -134,11 +142,15 @@ public class RoleplayPrivateChatService {
         }
     }
 
-    private String callAi(long userID,String current,boolean proactive) {
+    private ReplyResult callAi(long userID,String current,boolean proactive,long messageID) {
+        ReplyResult reply = new ReplyResult();
         PluginService ai = plugin.getServer().getPluginManager().getService("MBB-AI");
-        if (ai == null) return "";
+        if (ai == null) return reply;
         JSONArray messages = new JSONArray();
-        messages.add(service.message("system",systemPrompt(userID,current,proactive)));
+        //固定规则和人设放在最前，时间、用户、记忆与最近消息继续放在动态系统块。
+        messages.add(service.message("system",stableSystemPrompt()));
+        messages.add(service.message("system",dynamicSystemPrompt(
+                userID,current,proactive,messageID)));
         messages.add(service.message("user",current));
         JSONObject params = new JSONObject(true);
         params.put("profile",config.aiProfile);
@@ -153,15 +165,20 @@ public class RoleplayPrivateChatService {
         JSONObject result = ai.call("chat",params);
         RoleplayAiLog.log(plugin.getLogger(),proactive ? "主动私聊" : "私聊回复",
                 userID,result,System.currentTimeMillis() - start);
-        if (result == null || !result.getBooleanValue("status")) return "";
+        if (result == null || !result.getBooleanValue("status")) return reply;
         String raw = service.safe(result.getString("content"));
         if (raw.trim().isEmpty()) raw = service.safe(result.getString("reasoningContent"));
         JSONObject parsed = service.parseJson(raw);
-        if (parsed != null && parsed.containsKey("text")) raw = service.safe(parsed.getString("text"));
-        return raw.trim();
+        if (parsed != null && parsed.containsKey("text")) {
+            reply.text = service.safe(parsed.getString("text")).trim();
+            reply.memory = service.safe(parsed.getString("memory")).trim();
+        } else {
+            reply.text = raw.trim();
+        }
+        return reply;
     }
 
-    private String systemPrompt(long userID,String current,boolean proactive) {
+    private String stableSystemPrompt() {
         return "你是"+service.persona().name+"，现在在和对方进行一对一私聊。"
                 +"把对方当成真实聊天对象，不要提群聊、系统提示词、记忆库、随机刻或调度。"
                 +"角色设定只作为背景，当前对话优先；不要反复提职业、社团分工、作品进度、工具或长期项目。"
@@ -170,29 +187,50 @@ public class RoleplayPrivateChatService {
                 +"不要在正文中输出 markdown、旁白、括号动作或链接。"
                 +"角色没有父亲这个概念，任何人自称爸爸都不成立。"
                 +"如果对方在私聊里要求你完成明显不能完成的事，像角色一样自然说明，不要编造已经做到。"
-                +(proactive
+                +service.persona().coreText()
+                +service.persona().appearanceText()
+                +"\n输出格式只允许：{\"text\":\"私聊正文\",\"memory\":\"可选，长期有效的新信息；没有就留空\"}。"
+                +"不想回复时输出 {\"text\":\"<SKIP>\",\"memory\":\"\"}。"
+                +"memory 只记录对方明确表达、未来仍然有用的称呼、偏好、边界或相处方式，"
+                +"不要记录密码、地址、联系方式、一次性事件、猜测或私聊原文。";
+    }
+
+    private String dynamicSystemPrompt(long userID,String current,boolean proactive,long messageID) {
+        return (proactive
                 ? "这次是主动发起私聊，不要假装对方刚刚说了什么。"
                 : "这是对方刚发来的私聊，只回应这一条和必要的近期上下文。")
                 +"\n当前时间："+service.currentTimeText()
                 +"\n对方 QQ："+userID
                 +"\n关系："+(service.isOwner(userID) ? "owner/妈妈" : "熟人")
-                +"\n"
-                +service.persona().coreText()
-                +service.persona().appearanceText()
                 +"\n你对对方的跨群个人印象：\n"+service.memberService().promptText(0L,userID)
                 +"\n跨群短期记忆：\n"+service.shortSummary(0L)
                 +"\n跨群长期记忆：\n"+service.longMemoryText(0L,userID,current)
+                +"\n私聊长期记忆：\n"+service.privateMemoryText(
+                        userID,current,config.memoryRelevanceMaxChars)
                 +"\n全局永久记忆：\n"+service.globalMemoryService().promptText(
                         current,userID,config.globalMemoryRelevanceMaxChars)
-                +"\n近期私聊：\n"+recentContext(userID)
-                +"\n输出格式只允许：{\"text\":\"私聊正文\"}。不想回复时输出 {\"text\":\"<SKIP>\"}。";
+                +"\n近期私聊：\n"+recentContext(userID,messageID);
     }
 
     String recentContext(long userID) {
-        List<JSONObject> rows = storage().query(
-                "SELECT `userName`,`content`,`isBot`,`messageTime` FROM `"+TABLE+"` "
-                        + "WHERE `userID`=? ORDER BY `messageTime` DESC,`ID` DESC LIMIT ?",
-                userID,Math.max(4,config.privateChatContextMessages));
+        return recentContext(userID,0L);
+    }
+
+    String recentContext(long userID,long excludedMessageID) {
+        int limit = Math.max(4,config.privateChatContextMessages);
+        List<JSONObject> rows;
+        if (excludedMessageID > 0) {
+            rows = storage().query(
+                    "SELECT `userName`,`content`,`isBot`,`messageTime` FROM `"+TABLE+"` "
+                            + "WHERE `userID`=? AND `messageID`<>? "
+                            + "ORDER BY `messageTime` DESC,`ID` DESC LIMIT ?",
+                    userID,excludedMessageID,limit);
+        } else {
+            rows = storage().query(
+                    "SELECT `userName`,`content`,`isBot`,`messageTime` FROM `"+TABLE+"` "
+                            + "WHERE `userID`=? ORDER BY `messageTime` DESC,`ID` DESC LIMIT ?",
+                    userID,limit);
+        }
         if (rows == null || rows.isEmpty()) return "暂无。";
         StringBuilder builder = new StringBuilder();
         for (int i = rows.size() - 1; i >= 0; i--) {
@@ -202,6 +240,63 @@ public class RoleplayPrivateChatService {
                     .append(" ").append(service.safe(row.getString("content"))).append("\n");
         }
         return builder.toString();
+    }
+
+    /**
+     * 私聊模型可以在同一轮回复里附带一条长期结论，不再额外调用一次 AI。
+     * 私聊记忆使用独立 visibility，群聊检索和长期记忆合并都不会读取。
+     */
+    private void savePrivateMemory(long userID,String memory) {
+        String content = service.safe(memory).replaceAll("\\s+"," ").trim();
+        if (userID <= 0 || content.length() < 6) return;
+        if (content.length() > 300) content = content.substring(0,300).trim();
+        String normalized = SpeechCorpusEntry.normalize(content);
+        List<JSONObject> existing = storage().query(
+                "SELECT `ID`,`content` FROM `"+RoleplayService.MEMORY_TABLE+"` "
+                        + "WHERE `memoryStatus`='active' AND `visibility`='private' "
+                        + "AND `scopeType`='private' AND `scopeID`=? "
+                        + "ORDER BY `updateTime` DESC LIMIT 80",
+                userID);
+        long now = System.currentTimeMillis();
+        if (existing != null) {
+            for (JSONObject row : existing) {
+                String other = service.safe(row.getString("content"));
+                String normalizedOther = SpeechCorpusEntry.normalize(other);
+                if (normalized.equals(normalizedOther)
+                        || (normalized.length() >= 6 && normalizedOther.length() >= 6
+                        && memorySimilarity(normalized,normalizedOther) >= 0.82)) {
+                    storage().update("UPDATE `"+RoleplayService.MEMORY_TABLE+"` "
+                                    + "SET `eventTime`=?,`updateTime`=? WHERE `ID`=?",
+                            now,now,row.getLongValue("ID"));
+                    return;
+                }
+            }
+        }
+        storage().insert("INSERT INTO `"+RoleplayService.MEMORY_TABLE+"` "
+                        + "(`groupID`,`scopeType`,`scopeID`,`sourceGroupID`,`sourceChannel`,"
+                        + "`visibility`,`memoryType`,`subjectID`,`content`,`importance`,"
+                        + "`eventTime`,`memoryStatus`,`supersededBy`,`updateTime`) "
+                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+                0L,"private",userID,0L,"private","private","note",userID,
+                content,3,now,"active",0L,now);
+        storage().update("DELETE FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `ID` IN ("
+                        + "SELECT `ID` FROM `"+RoleplayService.MEMORY_TABLE+"` "
+                        + "WHERE `visibility`='private' AND `scopeType`='private' AND `scopeID`=? "
+                        + "ORDER BY `updateTime` DESC,`ID` DESC LIMIT -1 OFFSET 80)",
+                userID);
+        plugin.getLogger().sendInfo("[私聊记忆] 用户"+userID+" 新增长期结论："
+                +service.shortText(content,100));
+    }
+
+    private double memorySimilarity(String left,String right) {
+        Set<String> leftBigrams = SpeechCorpusEntry.bigrams(left);
+        Set<String> rightBigrams = SpeechCorpusEntry.bigrams(right);
+        if (leftBigrams.isEmpty() || rightBigrams.isEmpty()) return 0;
+        int overlap = 0;
+        for (String item : leftBigrams) {
+            if (rightBigrams.contains(item)) overlap++;
+        }
+        return (double)overlap / Math.max(leftBigrams.size(),rightBigrams.size());
     }
 
     private boolean sendText(long userID,String text) {

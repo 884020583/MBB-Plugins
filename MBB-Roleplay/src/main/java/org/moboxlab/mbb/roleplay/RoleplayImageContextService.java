@@ -3,6 +3,7 @@ package org.moboxlab.mbb.roleplay;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import org.moboxlab.moboxbot.API.Event.GroupMessageEvent;
+import org.moboxlab.moboxbot.API.Event.PrivateMessageEvent;
 import org.moboxlab.moboxbot.API.PluginService;
 
 import java.util.Map;
@@ -85,6 +86,10 @@ public class RoleplayImageContextService {
      */
     String hubKey(long groupID,long messageID,int segmentIndex) {
         return "g"+groupID+"-m"+messageID+"-i"+segmentIndex;
+    }
+
+    String privateHubKey(long userID,long messageID,int segmentIndex) {
+        return "p"+userID+"-m"+messageID+"-i"+segmentIndex;
     }
 
     RoleplayService.RecentImage findRecentImageContext(long groupID,long userID,String content) {
@@ -232,6 +237,40 @@ public class RoleplayImageContextService {
             }
         }
         return builder.toString().trim();
+    }
+
+    String enrichPrivateImageContent(PrivateMessageEvent event,String context) {
+        if (event == null || !service.config().imageUnderstandingEnable
+                || "off".equals(service.config().imageUnderstandingMode)
+                || !hasImageContent(event.getMessage())) {
+            return context;
+        }
+        PluginService vision = service.plugin().getServer().getPluginManager().getService("MBB-Vision");
+        if (vision == null) return context;
+        long userID = event.getUserID();
+        if (!reserveImageVision(userID <= 0 ? Long.MIN_VALUE : -userID)) {
+            service.plugin().getLogger().sendWarn("[识图] 私聊用户"+userID
+                    +" 已达到每小时识图上限，跳过图片理解。");
+            return context;
+        }
+        StringBuilder builder = new StringBuilder();
+        JSONArray message = event.getMessage();
+        for (int i = 0; i < message.size(); i++) {
+            JSONObject segment = message.getJSONObject(i);
+            if (segment == null) continue;
+            String type = segment.getString("type");
+            JSONObject data = segment.getJSONObject("data");
+            if ("text".equals(type)) {
+                builder.append(data == null ? "" : service.safe(data.getString("text")));
+            } else if ("image".equals(type) || "mface".equals(type)) {
+                builder.append(describeImageSegment(vision,type,data,context,null,
+                        privateHubKey(userID,event.getMessageID(),i)));
+            } else if ("face".equals(type)) {
+                builder.append("[表情]");
+            }
+        }
+        String enriched = builder.toString().trim();
+        return enriched.isEmpty() ? context : enriched;
     }
 
     String describeImageSegment(PluginService vision,String type,JSONObject data,String context,

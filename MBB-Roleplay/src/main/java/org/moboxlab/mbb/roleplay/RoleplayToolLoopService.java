@@ -108,6 +108,9 @@ public class RoleplayToolLoopService {
                 && registry.get("poke-back") != null) {
             exposedTools.add("poke-back");
         }
+        if (canSaveSticker(context) && registry.isEnabled("sticker_save",service.config())) {
+            exposedTools.add("sticker_save");
+        }
         int totalCalls = 0;
         int resultCharsUsed = 0;
         boolean finished = false;
@@ -735,6 +738,29 @@ public class RoleplayToolLoopService {
 
     private int countCalls(JSONArray calls) {
         return calls == null ? 0 : calls.size();
+    }
+
+    private boolean hasCurrentImage(RoleplayToolContext context) {
+        if (context == null || service.safe(context.eventRaw).trim().isEmpty()) return false;
+        try {
+            JSONObject raw = JSONObject.parseObject(context.eventRaw);
+            JSONArray message = raw == null ? null : raw.getJSONArray("message");
+            if (message == null) return false;
+            for (int i = 0; i < message.size(); i++) {
+                JSONObject segment = message.getJSONObject(i);
+                if (segment == null) continue;
+                String type = segment.getString("type");
+                if ("image".equals(type) || "mface".equals(type)) return true;
+            }
+        } catch (Exception ignored) {
+        }
+        return false;
+    }
+
+    private boolean canSaveSticker(RoleplayToolContext context) {
+        if (hasCurrentImage(context)) return true;
+        return context != null && service.recentImageForSave(context.groupID,context.userID,
+                context.message) != null;
     }
 
     private int readOnlyCount(List<PreparedCall> calls) {

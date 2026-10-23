@@ -15,6 +15,8 @@ MoBoxBot 表情包收录、标签检索与发送插件。
 - 安装 `MBB-Vision` 后，表情包按 SHA-256 和 `file_unique` 去重，重复图片不会再次识别或入库
 - 收录时会输出命中缓存或新增表情包的识别结果日志
 - 提供 `MBB-Sticker` 公共服务供 Roleplay 调用
+- `add` 服务动作接受 OneBot 图片段字段，可带标签和描述；缺少标签或描述时再调用识图补全
+- `MBB-Roleplay` 发现当前或最近图片适合复用时，可以调用 `sticker_save` 主动收藏
 
 ## 随机化
 
@@ -49,6 +51,15 @@ MoBoxBot 表情包收录、标签检索与发送插件。
 `file://` 地址，调用方不需要关心存储格式。
 
 `stickers.json` 使用带换行缩进的 JSON 保存，方便人工查看和改动。
+
+## 服务动作
+
+| 动作 | 说明 |
+|---|---|
+| `tags` | 返回当前可用标签 |
+| `random` | 按标签随机选择；`tags` 为空时从全部表情随机选择 |
+| `add` | 从 OneBot 图片段导入并去重，字段为 `file`、`fileUnique`、`url`、`tags`、`description`、`source` |
+| `stats` / `reload` | 查看统计或重载表情库 |
 
 ## 标签规则
 

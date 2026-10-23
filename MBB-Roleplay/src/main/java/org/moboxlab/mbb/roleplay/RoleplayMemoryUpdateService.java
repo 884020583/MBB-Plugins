@@ -602,7 +602,7 @@ public class RoleplayMemoryUpdateService {
     private long maxLongMemoryId(long groupID) {
         JSONObject row = service.storage().queryOne(
                 "SELECT MAX(`ID`) AS `maxID` FROM `"+RoleplayService.MEMORY_TABLE+"` "
-                        + "WHERE `memoryStatus`='active'");
+                        + "WHERE `memoryStatus`='active' AND `visibility`='shared'");
         return row == null ? 0L : row.getLongValue("maxID");
     }
 
@@ -612,7 +612,8 @@ public class RoleplayMemoryUpdateService {
                 "SELECT `ID`,`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,"
                         + "`sourceGroupID`,`updateTime` "
                         + "FROM `"+RoleplayService.MEMORY_TABLE+"` "
-                        + "WHERE `ID`<=? AND `memoryStatus`='active' ORDER BY `ID` ASC",
+                        + "WHERE `ID`<=? AND `memoryStatus`='active' AND `visibility`='shared' "
+                        + "ORDER BY `ID` ASC",
                 maxId);
         if (rows == null) return result;
         for (JSONObject row : rows) {
@@ -631,7 +632,8 @@ public class RoleplayMemoryUpdateService {
     }
 
     private void deleteLongMemoriesUpTo(long groupID,long maxId) {
-        service.storage().update("DELETE FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `ID`<=?",maxId);
+        service.storage().update("DELETE FROM `"+RoleplayService.MEMORY_TABLE+"` "
+                + "WHERE `ID`<=? AND `visibility`='shared'",maxId);
     }
 
     private int insertLongMemories(long groupID,List<JSONObject> memories) {

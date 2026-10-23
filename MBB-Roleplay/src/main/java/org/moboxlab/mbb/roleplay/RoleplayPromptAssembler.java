@@ -165,7 +165,9 @@ public class RoleplayPromptAssembler {
             int chance = (int)Math.round(service.config().stickerSendChance * 100);
             stickerRule = "表情包是自然表达，情绪、语气或场景明显合适时可以直接调用 sticker；"
                     +"参考使用率约 "+chance+"%，连续两条回复不要连发，"
-                    +"tags 可留空随机选择。";
+                    +"tags 可留空随机选择。如果当前消息里的图片或表情确实很适合以后复用，"
+                    +"可以调用 sticker_save 主动收藏，并尽量给 1 到 2 个标签和一句画面描述；"
+                    +"普通聊天截图、隐私内容和一次性图片不要收藏。";
         }
         return "工具协议说明：这是能力说明，不是当前聊天内容。可用能力分类：\n"+catalogue
                 +"分类含义：core 是基础回合工具，retrieval 查历史/记忆/知识库，"

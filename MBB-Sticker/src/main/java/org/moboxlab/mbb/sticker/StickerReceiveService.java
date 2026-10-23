@@ -104,69 +104,119 @@ public class StickerReceiveService {
     }
 
     private void process(PrivateMessageEvent event,JSONObject data) {
+        JSONObject result = importImage(data,"receive",null,"");
+        if (!result.getBooleanValue("status")) {
+            sendQuote(event.getUserID(),event.getMessageID(),result.getString("message"));
+            return;
+        }
+        if (result.getBooleanValue("duplicate")) {
+            sendQuote(event.getUserID(),event.getMessageID(),"表情包已存在：\n"
+                    +"ID："+result.getString("id")+"\n"
+                    +"标签："+joinTags(result.getJSONArray("tags"))+"\n"
+                    +"描述："+(safe(result.getString("description")).isEmpty()
+                    ? "无" : result.getString("description"))+"\n"
+                    +"文件："+result.getString("file"));
+        } else {
+            sendQuote(event.getUserID(),event.getMessageID(),"已收录表情包：\n"
+                    +"ID："+result.getString("id")+"\n"
+                    +"标签："+joinTags(result.getJSONArray("tags"))+"\n"
+                    +"描述："+(safe(result.getString("description")).isEmpty()
+                    ? "无" : result.getString("description"))+"\n"
+                    +"文件："+result.getString("file"));
+        }
+    }
+
+    /**
+     * 公共导入入口。只接受 OneBot 图片段字段，不能直接传本地路径。
+     * 角色决定保存时由 MBB-Sticker 统一完成下载、查重、识图和落库。
+     */
+    public JSONObject importImage(JSONObject data,String source,List<String> tags,String description) {
+        JSONObject result = new JSONObject(true);
+        SourceFile sourceFile = null;
+        File target = null;
+        boolean stored = false;
         try {
-            SourceFile source = resolveSource(data);
-            if (source == null || source.file == null || !source.file.exists()) {
-                sendQuote(event.getUserID(),event.getMessageID(),"图片获取失败，请重新发送。");
-                return;
+            sourceFile = resolveSource(data);
+            if (sourceFile == null || sourceFile.file == null || !sourceFile.file.exists()) {
+                return error(result,"图片获取失败");
             }
-            File image = source.file;
+            File image = sourceFile.file;
             long maxBytes = Math.max(1,plugin.getConfig().getInt("maxFileSizeKB",8192)) * 1024L;
             if (image.length() > maxBytes) {
-                if (source.temporary) deleteTemporary(image);
-                sendQuote(event.getUserID(),event.getMessageID(),"图片超过大小限制："+maxBytes / 1024L+" KB。");
-                return;
+                return error(result,"图片超过大小限制："+maxBytes / 1024L+" KB");
             }
             String fileUnique = fileUnique(data);
             String hash = sha256(image);
             StickerEntry existing = library.findByHash(hash);
-            if (existing == null && !fileUnique.isEmpty()) existing = library.findByFileUnique(fileUnique);
+            if (existing == null && !fileUnique.isEmpty()) {
+                existing = library.findByFileUnique(fileUnique);
+            }
             if (existing != null) {
-                if (source.temporary) deleteTemporary(image);
                 library.touch(existing,fileUnique);
-                plugin.getLogger().sendInfo("[表情包] 命中本地缓存 ID="+existing.id
-                        +" hash="+shortHash(hash)+" fileUnique="+fileUnique
-                        +" 标签="+String.join(", ",existing.tags)
-                        +" 描述="+shortText(existing.description,100));
-                sendQuote(event.getUserID(),event.getMessageID(),"表情包已存在：\n"
-                        +"ID："+existing.id+"\n"
-                        +"标签："+String.join(", ",existing.tags)+"\n"
-                        +"描述："+(existing.description.isEmpty() ? "无" : existing.description)+"\n"
-                        +"文件："+existing.file);
-                return;
+                return success(result,existing,true);
             }
             File stickerDir = new File(plugin.getDataFolder(),"stickers");
             if (!stickerDir.exists()) stickerDir.mkdirs();
             String extension = extension(image.getName());
             if (extension.isEmpty()) extension = "png";
-            File target = new File(stickerDir,"sticker-"+System.currentTimeMillis()+"-"
+            target = new File(stickerDir,"sticker-"+System.currentTimeMillis()+"-"
                     +ThreadLocalRandom.current().nextInt(10000)+"."+extension);
-            boolean copied = false;
-            try {
-                Files.copy(image.toPath(),target.toPath());
-                copied = true;
-            } finally {
-                if (source.temporary) deleteTemporary(image);
-                if (!copied && target.exists()) deleteTemporary(target);
+            Files.copy(image.toPath(),target.toPath());
+            List<String> finalTags = library.normalizeTags(tags);
+            String finalDescription = safe(description).trim();
+            int visionVersion = 0;
+            if (finalTags.isEmpty() || finalDescription.isEmpty()) {
+                JSONObject tagged = tagger.tag(target,mime(extension),fileUnique);
+                if (finalTags.isEmpty()) finalTags = toStringList(tagged.getJSONArray("tags"));
+                if (finalDescription.isEmpty()) {
+                    finalDescription = safe(tagged.getString("description"));
+                }
+                visionVersion = tagged.getIntValue("visionVersion");
             }
-            String mime = mime(extension);
-            JSONObject tagged = tagger.tag(target,mime,fileUnique);
-            List<String> tags = toStringList(tagged.getJSONArray("tags"));
-            String description = safe(tagged.getString("description"));
-            StickerEntry entry = library.add(target,tags,"receive",description,hash,fileUnique,
-                    tagged.getIntValue("visionVersion"));
+            StickerEntry entry = library.add(target,finalTags,safe(source).isEmpty() ? "import" : source,
+                    finalDescription,hash,fileUnique,visionVersion);
+            stored = true;
             plugin.getLogger().sendInfo("[表情包] 新增 ID="+entry.id+" hash="+shortHash(hash)
-                    +" fileUnique="+fileUnique+" 标签="+String.join(", ",entry.tags)
+                    +" fileUnique="+fileUnique+" 来源="+safe(source)
+                    +" 标签="+String.join(", ",entry.tags)
                     +" 描述="+shortText(entry.description,100));
-            sendQuote(event.getUserID(),event.getMessageID(),"已收录表情包：\n"
-                    +"ID："+entry.id+"\n"
-                    +"标签："+String.join(", ",entry.tags)+"\n"
-                    +"描述："+(description.isEmpty() ? "无" : description)+"\n"
-                    +"文件："+entry.file);
+            return success(result,entry,false);
         } catch (Exception e) {
             plugin.getLogger().sendWarn("收录表情包失败："+e.getMessage());
-            sendQuote(event.getUserID(),event.getMessageID(),"收录失败，请稍后再试。");
+            return error(result,"收录失败："+safe(e.getMessage()));
+        } finally {
+            if (sourceFile != null && sourceFile.temporary) deleteTemporary(sourceFile.file);
+            if (!stored && target != null && target.exists()) deleteTemporary(target);
         }
+    }
+
+    private JSONObject success(JSONObject result,StickerEntry entry,boolean duplicate) {
+        result.put("status",true);
+        result.put("message",duplicate ? "表情包已存在" : "已收录表情包");
+        result.put("id",entry.id);
+        result.put("duplicate",duplicate);
+        result.put("file",library.toUri(entry.file));
+        result.put("description",entry.description);
+        JSONArray tags = new JSONArray();
+        tags.addAll(entry.tags);
+        result.put("tags",tags);
+        return result;
+    }
+
+    private JSONObject error(JSONObject result,String message) {
+        result.put("status",false);
+        result.put("message",safe(message));
+        return result;
+    }
+
+    private String joinTags(JSONArray tags) {
+        if (tags == null || tags.isEmpty()) return "无";
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < tags.size(); i++) {
+            if (i > 0) builder.append(", ");
+            builder.append(tags.getString(i));
+        }
+        return builder.toString();
     }
 
     private SourceFile resolveSource(JSONObject data) throws Exception {

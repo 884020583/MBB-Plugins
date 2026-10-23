@@ -50,6 +50,7 @@ public class RoleplayToolRegistry {
         registerSkill("memory");
         registerSkill("global-memory");
         registerSkill("sticker");
+        register(new StickerSaveTool());
         registerSkill("poke-back");
         registerSkill("draw");
         RoleplayQQTools.register(this,service);
@@ -323,6 +324,9 @@ public class RoleplayToolRegistry {
             return false;
         }
         if ("sticker".equals(tool.name()) && !hasService("MBB-Sticker")) {
+            return false;
+        }
+        if ("sticker_save".equals(tool.name()) && !hasService("MBB-Sticker")) {
             return false;
         }
         return true;
@@ -614,6 +618,86 @@ public class RoleplayToolRegistry {
                 if (library != null && id.equals(library.id)) return true;
             }
             return false;
+        }
+    }
+
+    private class StickerSaveTool extends BaseTool {
+        @Override
+        public String name() { return "sticker_save"; }
+
+        @Override
+        public String description() {
+            return "把当前消息里确实值得复用的图片或表情保存到 MBB-Sticker 表情库";
+        }
+
+        @Override
+        public String category() { return "action"; }
+
+        @Override
+        public boolean sideEffect() { return true; }
+
+        @Override
+        public int maxCallsPerTurn() { return 1; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("tags",property("string","可选，英文逗号分隔的情绪或场景标签；留空会自动识图"));
+            properties.put("description",property("string","可选，这个表情包的简短画面描述"));
+            return functionSchema(name(),description(),properties,new String[0]);
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            JSONObject image = currentImage(context);
+            if (image == null) return RoleplayToolResult.failed("当前消息没有可保存的图片或表情");
+            PluginService sticker = service.plugin().getServer().getPluginManager()
+                    .getService("MBB-Sticker");
+            if (sticker == null) return RoleplayToolResult.failed("MBB-Sticker 未启用");
+            JSONObject params = new JSONObject(true);
+            params.put("file",service.safe(image.getString("file")));
+            String unique = service.safe(image.getString("file_unique"));
+            if (unique.isEmpty()) unique = service.safe(image.getString("file_id"));
+            params.put("fileUnique",unique);
+            params.put("url",service.safe(image.getString("url")));
+            params.put("source","roleplay");
+            params.put("description",service.shortText(service.safe(args.getString("description")),200));
+            JSONArray tags = new JSONArray();
+            for (String item : service.safe(args.getString("tags")).split("[,，]")) {
+                if (!item.trim().isEmpty()) tags.add(item.trim());
+            }
+            params.put("tags",tags);
+            JSONObject response = sticker.call("add",params);
+            if (response == null || !response.getBooleanValue("status")) {
+                return RoleplayToolResult.failed(response == null
+                        ? "MBB-Sticker 没有返回结果" : response.getString("message"));
+            }
+            RoleplayToolResult result = RoleplayToolResult.ok(response.getBooleanValue("duplicate")
+                    ? "这个表情包里已经有，已刷新使用记录"
+                    : "已把这个表情保存到表情包库");
+            result.data.put("id",service.safe(response.getString("id")));
+            result.data.put("duplicate",response.getBooleanValue("duplicate"));
+            result.data.put("tags",response.getJSONArray("tags"));
+            result.data.put("description",service.safe(response.getString("description")));
+            return result;
+        }
+
+        private JSONObject currentImage(RoleplayToolContext context) {
+            try {
+                JSONObject raw = JSONObject.parseObject(context.eventRaw);
+                JSONArray message = raw == null ? null : raw.getJSONArray("message");
+                if (message == null) return null;
+                for (int i = 0; i < message.size(); i++) {
+                    JSONObject segment = message.getJSONObject(i);
+                    if (segment == null) continue;
+                    String type = segment.getString("type");
+                    if ("image".equals(type) || "mface".equals(type)) {
+                        return segment.getJSONObject("data");
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+            return service.recentImageForSave(context.groupID,context.userID,context.message);
         }
     }
 

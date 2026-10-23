@@ -57,6 +57,64 @@ public class RoleplayMemoryQueryService {
         return builder.length() == 0 ? "暂无长期记忆。" : builder.toString();
     }
 
+    String privateMemoryText(long userID,String query,int maxChars) {
+        if (userID <= 0) return "暂无私聊长期记忆。";
+        List<JSONObject> rows = service.storage().query(
+                "SELECT `memoryType`,`content`,`importance`,`eventTime`,`updateTime` FROM `"
+                        + RoleplayService.MEMORY_TABLE + "` "
+                        + "WHERE `memoryStatus`='active' AND `visibility`='private' "
+                        + "AND `scopeType`='private' AND `scopeID`=? "
+                        + "ORDER BY `importance` DESC,`updateTime` DESC LIMIT 200",
+                userID);
+        if (rows == null || rows.isEmpty()) return "暂无私聊长期记忆。";
+        Set<String> queryBigrams = SpeechCorpusEntry.bigrams(
+                SpeechCorpusEntry.normalize(query == null ? "" : query));
+        String normalizedQuery = SpeechCorpusEntry.normalize(query == null ? "" : query);
+        long now = System.currentTimeMillis();
+        List<MemoryScore> scored = new ArrayList<>();
+        for (JSONObject row : rows) {
+            String content = service.safe(row.getString("content"));
+            Set<String> contentBigrams = SpeechCorpusEntry.bigrams(
+                    SpeechCorpusEntry.normalize(content));
+            double score = row.getIntValue("importance") * 0.8;
+            if (!queryBigrams.isEmpty()) {
+                int overlap = 0;
+                for (String bigram : queryBigrams) {
+                    if (contentBigrams.contains(bigram)) overlap++;
+                }
+                score += (double)overlap / queryBigrams.size() * 8.0;
+            }
+            if (normalizedQuery.length() >= 2
+                    && SpeechCorpusEntry.normalize(content).contains(normalizedQuery)) {
+                score += 4.0;
+            }
+            long eventTime = row.getLongValue("eventTime");
+            score += recencyBonus(eventTime > 0 ? eventTime : row.getLongValue("updateTime"),now);
+            scored.add(new MemoryScore(row,score));
+        }
+        Collections.sort(scored,new Comparator<MemoryScore>() {
+            @Override
+            public int compare(MemoryScore left,MemoryScore right) {
+                return Double.compare(right.score,left.score);
+            }
+        });
+        int budget = maxChars > 0 ? maxChars : service.config().memoryRelevanceMaxChars;
+        StringBuilder builder = new StringBuilder();
+        int used = 0;
+        int count = 0;
+        for (MemoryScore item : scored) {
+            JSONObject row = item.memory;
+            String line = "- "+service.safe(row.getString("content"))+"\n";
+            if (count > 0 && used + line.length() > budget) break;
+            builder.append(line);
+            used += line.length();
+            count++;
+        }
+        service.plugin().getLogger().sendInfo("[私聊记忆] 用户"+userID+" 按相关性注入 "
+                +count+"/"+scored.size()+" 条，占用 "+used+" 字符");
+        return builder.length() == 0 ? "暂无私聊长期记忆。" : builder.toString();
+    }
+
     List<JSONObject> rankMemories(JSONArray memories,long userID,String query) {
         Set<String> queryBigrams = SpeechCorpusEntry.bigrams(
                 SpeechCorpusEntry.normalize(query == null ? "" : query));
@@ -119,7 +177,8 @@ public class RoleplayMemoryQueryService {
         //长期记忆已经升级为跨群共享；groupID 只保留为来源，不再作为读取隔离条件。
         List<JSONObject> rows = service.storage().query(
                 "SELECT `memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime` FROM `"+RoleplayService.MEMORY_TABLE+"` "
-                        + "WHERE `memoryStatus`='active' ORDER BY `importance` DESC,`updateTime` DESC LIMIT ?",
+                        + "WHERE `memoryStatus`='active' AND `visibility`='shared' "
+                        + "ORDER BY `importance` DESC,`updateTime` DESC LIMIT ?",
                 capped);
         if (rows == null) return result;
         Set<Long> blacklisted = excludeBlacklisted
@@ -212,7 +271,7 @@ public class RoleplayMemoryQueryService {
     int memoryCount(long groupID) {
         List<JSONObject> rows = service.storage().query(
                 "SELECT COUNT(*) AS `count` FROM `"+RoleplayService.MEMORY_TABLE+"` "
-                        + "WHERE `memoryStatus`='active'");
+                        + "WHERE `memoryStatus`='active' AND `visibility`='shared'");
         return rows == null || rows.isEmpty() ? 0 : rows.get(0).getIntValue("count");
     }
 

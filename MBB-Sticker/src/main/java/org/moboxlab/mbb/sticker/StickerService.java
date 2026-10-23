@@ -19,11 +19,14 @@ import java.util.concurrent.ConcurrentHashMap;
 public class StickerService implements PluginService {
     private final StickerPlugin plugin;
     private final StickerLibrary library;
+    private final StickerReceiveService receiveService;
     private final Map<String,Deque<String>> recentMap = new ConcurrentHashMap<>();
 
-    public StickerService(StickerPlugin plugin,StickerLibrary library) {
+    public StickerService(StickerPlugin plugin,StickerLibrary library,
+                          StickerReceiveService receiveService) {
         this.plugin = plugin;
         this.library = library;
+        this.receiveService = receiveService;
     }
 
     @Override
@@ -36,6 +39,7 @@ public class StickerService implements PluginService {
         if (action == null) return error("缺少动作名");
         if ("tags".equalsIgnoreCase(action)) return tags();
         if ("random".equalsIgnoreCase(action)) return random(params);
+        if ("add".equalsIgnoreCase(action)) return add(params);
         if ("stats".equalsIgnoreCase(action)) return stats();
         if ("reload".equalsIgnoreCase(action)) {
             library.load();
@@ -52,6 +56,18 @@ public class StickerService implements PluginService {
         result.put("tags",array);
         result.put("count",library.size());
         return result;
+    }
+
+    private JSONObject add(JSONObject params) {
+        if (params == null) return error("缺少图片参数");
+        JSONObject data = new JSONObject(true);
+        data.put("file",safe(params.getString("file")));
+        data.put("file_unique",safe(params.getString("fileUnique")));
+        data.put("file_id",safe(params.getString("fileId")));
+        data.put("url",safe(params.getString("url")));
+        List<String> tags = readTags(params.get("tags"));
+        return receiveService.importImage(data,safe(params.getString("source")),
+                tags,safe(params.getString("description")));
     }
 
     private JSONObject random(JSONObject params) {

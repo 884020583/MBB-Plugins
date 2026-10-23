@@ -44,6 +44,7 @@ tool_search
 | `web_fetch` | 读取白名单网站中的公开网页并净化正文 |
 | `web_search` | 联网搜索公开信息，返回标题和链接 |
 | `web_image_send` | 从白名单网页或 Pixiv 作品页读取一张公开图片并发送到当前群 |
+| `sticker_save` | 当前或最近图片适合复用时，主动保存到 MBB-Sticker 表情库 |
 | `profile_get` | 查询群员个人印象 |
 | `workspace_list` / `workspace_read` / `workspace_search` | 查询角色私有工作区 |
 | `workspace_write` | 创建、覆盖或追加 UTF-8 文本文件 |
@@ -67,6 +68,7 @@ tool_search
 | `qq_pending_requests` | 查看待处理好友申请和群邀请，仅 owner；不会自动响应 |
 | `qq_friend_request` / `qq_group_request` | 处理好友申请或群邀请，仅 owner |
 | `qq_group_ban` / `qq_group_whole_ban` | 禁言、解禁、全员禁言，需要 owner 或群管理员 |
+| `qq_group_leave` | 退出当前群，只能由 owner 明确要求；非 owner 请求在 MBB-QQ 服务层拒绝 |
 | `qq_delete_friend` / `qq_set_friend_remark` | 删除好友、设置好友备注，仅 owner |
 | `qq_set_avatar` / `qq_set_profile` / `qq_set_signature` | 设置机器人头像、资料卡和个性签名，仅 owner |
 
@@ -85,6 +87,12 @@ tool_search
 `sticker` 默认加入首轮核心工具，情绪和语境合适时可以直接调用，不必先搜索工具。`tags` 可以留空，
 由 `MBB-Sticker` 从全部可用表情中随机选择；`stickerSendChance` 只作为提示词中的参考使用率，
 不是代码强制抽样。连续两条回复仍应避免连发表情包。
+
+当前消息含图片或表情时，`sticker_save` 会自动加入本轮工具；如果用户用“这张图”指代刚刚发过的图片，
+也会从最近图片缓存中取候选。角色只在图片确实适合以后复用、且不涉及隐私时保存，可同时给 1 到 2 个标签和画面描述。
+
+所有面向群员的 QQ 工具结果都会附带 `groupID`、`operatorQQ` 和目标 `targetQQ`，摘要里也会补目标 QQ，
+方便下一轮明确“刚禁言/解禁的是谁”。
 
 ## 工具结果上下文
 
