@@ -202,7 +202,8 @@ workspaceHistoryMaxVersions: 10
 workspaceTrashKeepDays: 30
 webEnable: true
 webWhitelist: "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,fandom.com,namu.wiki,arca.live,pixiv.net,x.com,youtube.com,b23.tv"
-webSearchUrl: "https://html.duckduckgo.com/html/?q={query}"
+webSearchUrl: "https://www.bing.com/search?q={query}"
+webSearchFallbackUrl: "https://html.duckduckgo.com/html/?q={query}"
 webSearchMaxResults: 5
 webOwnerAuthWindowSecond: 300
 webTimeoutSecond: 15
@@ -303,9 +304,13 @@ quietReplyEnable: true
 删除默认进入回收站，分别由 `workspaceHistory*` 和 `workspaceTrashKeepDays` 控制。具体工具见
 [工具调用、工作区与交流节拍](tools.md)。
 
+`knowledgeSpoilerLevel` 控制知识库剧透等级。明确点名某个角色时会锁定该角色条目，
+避免角色因条目整体标记为高剧透而查不到；但 `剧情`、`剧透`、`主线`、`结局` 小节仍不会超过配置等级。
+
 `webEnable` 开放网页读取和搜索工具。公网域名只允许 `webWhitelist` 中的域名及其子域名；
 内网地址必须由 owner 当前发言或 `webOwnerAuthWindowSecond` 内的明确请求授权。
-`webSearchUrl` 使用 `{query}` 占位符，`webCacheSecond` 缓存网页和搜索结果。
+`webSearchUrl` 使用 `{query}` 占位符，主搜索源无结果或连接失败时会尝试
+`webSearchFallbackUrl`。`webCacheSecond` 缓存网页和搜索结果。
 `contextHardLimitEnable` 默认关闭，关闭时不按 `promptTotalChars` 截断动态资料；
 只有显式打开本地硬预算时才使用该上限。即使关闭总硬预算，各类资料仍有单项预算。
 

@@ -49,6 +49,12 @@ tool_search
 | `end_turn` | 本轮保持沉默并立即结束 |
 
 `message_send` 只负责中途补一句，最终回复仍走普通回复通道。工具循环会提醒模型不要用它重复最终正文。
+代码会把 `message_send` 限制为每轮最多一次；一旦已经拿到实质性工具结果，再调用 `message_send`
+会被直接拒绝，避免角色先说一遍结论、最终回复又说一遍。最终回复与已追加消息高度重复时也会被抑制。
+
+知识库实体锁定优先于普通全文打分：明确点名角色时，即使条目本身带高剧透标记也会锁定；
+但 `剧情`、`剧透`、`主线`、`结局` 一类小节仍会按 `knowledgeSpoilerLevel` 过滤。
+多实体查询会先返回所有被点名的条目，再补充普通检索结果，不会先被其他学院或剧情条目占满名额。
 
 旧 `draw`、`reminder`、`memory`、`global-memory`、`sticker`、`poke-back` 动作已经适配成原生工具。
 `toolEnable=true` 时，执行层不再选择独立 `actions`，统一使用 `tool_search` + `tools/tool_calls`。
@@ -80,15 +86,21 @@ toolMemoryMaxRows: 500
 
 `web_fetch` 只接受 `http/https`，默认拒绝自动跨域重定向；手动跟随重定向时每次都会重新校验域名。
 读取结果按 `webTimeoutSecond`、`webMaxBytes`、`webMaxChars` 限制，并移除脚本、样式和 HTML 标签。
-`web_search` 使用 `webSearchUrl` 模板联网搜索，搜索结果本身标记为不可信外部资料。
+`web_search` 使用 `webSearchUrl` 模板联网搜索，主搜索源无结果或连接失败时自动尝试
+`webSearchFallbackUrl`。结果会附带每个搜索源的 HTTP、页面大小、命中数和空结果原因，
+搜索结果本身标记为不可信外部资料。
 网页与搜索结果有 `webCacheSecond` TTL 缓存。
 
 ```yaml
 webEnable: true
 webWhitelist: "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,fandom.com,namu.wiki,arca.live,pixiv.net,x.com,youtube.com,b23.tv"
-webSearchUrl: "https://html.duckduckgo.com/html/?q={query}"
+webSearchUrl: "https://www.bing.com/search?q={query}"
+webSearchFallbackUrl: "https://html.duckduckgo.com/html/?q={query}"
 webOwnerAuthWindowSecond: 300
 ```
+
+搜索作品、人物或站点时优先使用官方英文名和常用英文别名。例如直接搜索
+`Blue Archive wiki` 比把中文别名硬拼成 `蔚蓝档案wiki` 更稳定。
 
 内网、回环和保留地址不会被普通群员绕过。只有当前发言者是 owner，或者最近上下文里 owner
 明确要求访问该内网地址时，`web_fetch` 才允许建立连接。授权判断会记录到工具结果和访问日志。
