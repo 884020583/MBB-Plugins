@@ -65,6 +65,11 @@ public class RoleplayTurnProcessor {
                     +decision.chance+" 原因="+decision.reason);
             return false;
         }
+        if (prepared.otherRoleBot) {
+            if (!service.hubService().botChainAllow(groupID)) return false;
+        } else {
+            service.hubService().botChainReset(groupID);
+        }
         boolean defer = shouldDeferTurn(event,prepared.otherRoleBot,prepared.hasImage);
         //延后回合把限流判定留到真正生成回复时，避免这里刚登记的冷却把同一轮的延后执行挡掉
         if (defer) {
@@ -84,14 +89,34 @@ public class RoleplayTurnProcessor {
                     prepared.emotionEvent);
             return true;
         }
-        JSONObject result = service.reply(groupID,prepared.userID,prepared.userName,content,
-                prepared.otherRoleBot,prepared.relationship,prepared.imageContext,decision);
-        if (result == null || !result.getBooleanValue("status")) {
-            service.plugin().getLogger().sendWarn("[角色] 群"+groupID+" 回复生成失败，本轮不发送");
-            return false;
+        String turnKey = "m"+event.getMessageID();
+        boolean multi = service.isMultiRoleAddress(event,content,prepared.selfID);
+        RoleplayHubService.TurnResult turn = service.hubService().claimTurn(groupID,turnKey,
+                service.hubService().turnScore(decision,prepared.direct),multi);
+        if (!turn.granted) return false;
+        if (turn.staggerMs > 0) service.sleepQuietly(turn.staggerMs);
+        service.hubService().typingStart(groupID,turnKey);
+        boolean handled = false;
+        try {
+            JSONObject result = service.reply(groupID,prepared.userID,prepared.userName,content,
+                    prepared.otherRoleBot,prepared.relationship,prepared.imageContext,decision);
+            if (result == null || !result.getBooleanValue("status")) {
+                service.plugin().getLogger().sendWarn("[角色] 群"+groupID+" 回复生成失败，本轮不发送");
+                return false;
+            }
+            if (!service.hubService().turnStillMine(groupID,turnKey)) {
+                service.plugin().getLogger().sendInfo("[角色] 群"+groupID
+                        +" 回合权已被更高优先级的角色接管，放弃本次发送");
+                return false;
+            }
+            service.replyExecutor().processReplyResult(event,groupID,prepared.selfID,prepared.userName,prepared.relationship,
+                    content,result,decision,prepared.emotionEvent);
+            handled = true;
+        } finally {
+            service.hubService().typingStop(groupID,turnKey);
+            // 成功回复后让租约自然过期，避免稍后才决定回复的另一个 bot 再补一遍
+            if (!handled) service.hubService().turnRelease(groupID,turnKey);
         }
-        service.replyExecutor().processReplyResult(event,groupID,prepared.selfID,prepared.userName,prepared.relationship,
-                content,result,decision,prepared.emotionEvent);
         return false;
     }
 
@@ -116,6 +141,11 @@ public class RoleplayTurnProcessor {
                     +decision.chance+" 原因="+decision.reason);
             return;
         }
+        if (primary.otherRoleBot) {
+            if (!service.hubService().botChainAllow(groupID)) return;
+        } else {
+            service.hubService().botChainReset(groupID);
+        }
         if (!service.canReply(groupID)) {
             service.plugin().getLogger().sendInfo("[角色] 群"+groupID+" 合批回合被回复冷却拦下，本轮不回复");
             return;
@@ -126,14 +156,33 @@ public class RoleplayTurnProcessor {
                 +" 技能="+decision.skills
                 +" 资料="+decision.materials
                 +" 原因="+decision.reason);
-        JSONObject result = service.reply(groupID,primary.userID,primary.userName,batchText,
-                primary.otherRoleBot,primary.relationship,primary.imageContext,decision,
-                batchText,messages.size());
-        if (result == null || !result.getBooleanValue("status")) {
-            service.plugin().getLogger().sendWarn("[角色] 群"+groupID+" 合批回复生成失败，本轮不发送");
-            return;
+        String turnKey = "b"+messages.get(messages.size() - 1).event.getMessageID();
+        boolean multi = service.isMultiRoleAddress(primary.event,batchText,primary.selfID);
+        RoleplayHubService.TurnResult turn = service.hubService().claimTurn(groupID,turnKey,
+                service.hubService().turnScore(decision,primary.direct),multi);
+        if (!turn.granted) return;
+        if (turn.staggerMs > 0) service.sleepQuietly(turn.staggerMs);
+        service.hubService().typingStart(groupID,turnKey);
+        boolean handled = false;
+        try {
+            JSONObject result = service.reply(groupID,primary.userID,primary.userName,batchText,
+                    primary.otherRoleBot,primary.relationship,primary.imageContext,decision,
+                    batchText,messages.size());
+            if (result == null || !result.getBooleanValue("status")) {
+                service.plugin().getLogger().sendWarn("[角色] 群"+groupID+" 合批回复生成失败，本轮不发送");
+                return;
+            }
+            if (!service.hubService().turnStillMine(groupID,turnKey)) {
+                service.plugin().getLogger().sendInfo("[角色] 群"+groupID
+                        +" 回合权已被更高优先级的角色接管，放弃本次发送");
+                return;
+            }
+            service.replyExecutor().processBatchReplyResult(groupID,primary.selfID,messages,primary,decision,result);
+            handled = true;
+        } finally {
+            service.hubService().typingStop(groupID,turnKey);
+            if (!handled) service.hubService().turnRelease(groupID,turnKey);
         }
-        service.replyExecutor().processBatchReplyResult(groupID,primary.selfID,messages,primary,decision,result);
     }
 
     private RoleplayService.PreparedMessage primaryMessage(List<RoleplayService.PreparedMessage> messages) {
@@ -274,14 +323,34 @@ public class RoleplayTurnProcessor {
                 return;
             }
             String content = service.mergeStickerEmotion(pending.content,pending.stickerEmotion);
-            JSONObject result = service.reply(groupID,pending.event.getUserID(),pending.userName,content,
-                    pending.otherRoleBot,pending.relationship,pending.imageContext,pending.decision);
-            if (result == null || !result.getBooleanValue("status")) {
-                service.plugin().getLogger().sendWarn("[角色] 群"+groupID+" 待处理回合回复生成失败，本次不发送");
-                return;
+            String turnKey = "m"+pending.event.getMessageID();
+            boolean direct = "direct".equals(pending.decision.addressed);
+            boolean multi = service.isMultiRoleAddress(pending.event,content,pending.selfID);
+            RoleplayHubService.TurnResult turn = service.hubService().claimTurn(groupID,turnKey,
+                    service.hubService().turnScore(pending.decision,direct),multi);
+            if (!turn.granted) return;
+            if (turn.staggerMs > 0) service.sleepQuietly(turn.staggerMs);
+            service.hubService().typingStart(groupID,turnKey);
+            boolean handled = false;
+            try {
+                JSONObject result = service.reply(groupID,pending.event.getUserID(),pending.userName,content,
+                        pending.otherRoleBot,pending.relationship,pending.imageContext,pending.decision);
+                if (result == null || !result.getBooleanValue("status")) {
+                    service.plugin().getLogger().sendWarn("[角色] 群"+groupID+" 待处理回合回复生成失败，本次不发送");
+                    return;
+                }
+                if (!service.hubService().turnStillMine(groupID,turnKey)) {
+                    service.plugin().getLogger().sendInfo("[角色] 群"+groupID
+                            +" 回合权已被更高优先级的角色接管，放弃本次发送");
+                    return;
+                }
+                service.replyExecutor().processReplyResult(pending.event,groupID,pending.selfID,pending.userName,
+                        pending.relationship,content,result,pending.decision,pending.emotionEvent);
+                handled = true;
+            } finally {
+                service.hubService().typingStop(groupID,turnKey);
+                if (!handled) service.hubService().turnRelease(groupID,turnKey);
             }
-            service.replyExecutor().processReplyResult(pending.event,groupID,pending.selfID,pending.userName,
-                    pending.relationship,content,result,pending.decision,pending.emotionEvent);
         } finally {
             //延后回合到这里才算结束，释放同群串行位并接着处理缓冲里的下一批
             service.batchScheduler().finishTurn(groupID);

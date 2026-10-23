@@ -108,6 +108,13 @@ public class RoleplayConfig {
     public int visionReferenceMaxChars = 32000;
     public int imageContextTimeoutSecond = 300;
     public boolean imageAsyncEnable = true;
+    public boolean hubEnable = true;
+    public boolean hubVisionShareEnable = true;
+    public int hubVisionWaitMs = 15000;
+    public boolean hubTurnShareEnable = true;
+    public boolean hubTaskDedupEnable = true;
+    public boolean hubChatGuardEnable = true;
+    public boolean hubTypingBroadcastEnable = true;
     public boolean memoryRelevanceSort = true;
     public int memoryRelevancePoolSize = 600;
     public int memoryRelevanceMaxChars = 5000;
@@ -433,6 +440,13 @@ public class RoleplayConfig {
                 plugin.getConfig().getInt("visionReferenceMaxChars",32000);
         config.imageContextTimeoutSecond = plugin.getConfig().getInt("imageContextTimeoutSecond",300);
         config.imageAsyncEnable = plugin.getConfig().getBoolean("imageAsyncEnable",true);
+        config.hubEnable = plugin.getConfig().getBoolean("hubEnable",true);
+        config.hubVisionShareEnable = plugin.getConfig().getBoolean("hubVisionShareEnable",true);
+        config.hubVisionWaitMs = plugin.getConfig().getInt("hubVisionWaitMs",15000);
+        config.hubTurnShareEnable = plugin.getConfig().getBoolean("hubTurnShareEnable",true);
+        config.hubTaskDedupEnable = plugin.getConfig().getBoolean("hubTaskDedupEnable",true);
+        config.hubChatGuardEnable = plugin.getConfig().getBoolean("hubChatGuardEnable",true);
+        config.hubTypingBroadcastEnable = plugin.getConfig().getBoolean("hubTypingBroadcastEnable",true);
         config.memoryRelevanceSort = plugin.getConfig().getBoolean("memoryRelevanceSort",true);
         config.memoryRelevancePoolSize =
                 plugin.getConfig().getInt("memoryRelevancePoolSize",600);
@@ -760,6 +774,8 @@ public class RoleplayConfig {
         if (config.visionReferenceMaxChars > 120000) config.visionReferenceMaxChars = 120000;
         if (config.imageContextTimeoutSecond < 10) config.imageContextTimeoutSecond = 10;
         if (config.imageContextTimeoutSecond > 3600) config.imageContextTimeoutSecond = 3600;
+        if (config.hubVisionWaitMs < 1000) config.hubVisionWaitMs = 1000;
+        if (config.hubVisionWaitMs > 60000) config.hubVisionWaitMs = 60000;
         if (config.stickerAttachWindowSecond < 3) config.stickerAttachWindowSecond = 3;
         if (config.stickerAttachWindowSecond > 15) config.stickerAttachWindowSecond = 15;
         if (config.stickerAttachMaxWaitSecond < config.stickerAttachWindowSecond) {

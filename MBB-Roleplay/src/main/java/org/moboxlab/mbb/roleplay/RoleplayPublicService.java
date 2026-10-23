@@ -35,6 +35,13 @@ public class RoleplayPublicService implements PluginService {
         if ("status".equalsIgnoreCase(action)) {
             return service.status(params == null ? 0L : params.getLongValue("groupID"));
         }
+        if ("identity".equalsIgnoreCase(action)) {
+            JSONObject result = new JSONObject(true);
+            RoleplayPersona persona = service.persona();
+            result.put("status",true);
+            result.put("persona",persona == null ? "" : persona.name);
+            return result;
+        }
         JSONObject result = new JSONObject(true);
         result.put("status",false);
         result.put("message","不支持的动作："+action);

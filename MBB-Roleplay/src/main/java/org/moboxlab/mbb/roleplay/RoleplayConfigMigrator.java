@@ -15,7 +15,7 @@ import java.util.List;
  * Roleplay 配置迁移与缺失项补全
  */
 public class RoleplayConfigMigrator {
-    private static final String CURRENT_VERSION = "33";
+    private static final String CURRENT_VERSION = "36";
 
     private static class ConfigEntry {
         private final String key;
@@ -129,6 +129,13 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("visionReferenceMaxChars","32000","识图时学生外貌参考的总字符预算，按学生数均分"),
             new ConfigEntry("imageContextTimeoutSecond","300","用户发送图片后，后续提问可复用原图作为上下文的时间窗口秒数"),
             new ConfigEntry("imageAsyncEnable","true","纯图片与表情消息的识图放到独立异步任务，不阻塞回复线程"),
+            new ConfigEntry("hubEnable","true","是否与 MBB-BotHub 协作；关闭后完全退回单机行为"),
+            new ConfigEntry("hubVisionShareEnable","true","是否共享识图结果，避免同群多个 bot 重复识图"),
+            new ConfigEntry("hubVisionWaitMs","15000","等待其他 bot 识图结果的毫秒数，超时回退本地识图"),
+            new ConfigEntry("hubTurnShareEnable","true","是否共享回合权，避免同群多个 bot 抢答同一条消息"),
+            new ConfigEntry("hubTaskDedupEnable","true","是否跨进程去重任务创建（提醒等），避免两个 bot 建同一个任务"),
+            new ConfigEntry("hubChatGuardEnable","true","是否用 hub 做机器人互聊熔断，避免两个 bot 旁若无人地刷屏"),
+            new ConfigEntry("hubTypingBroadcastEnable","true","是否通过 hub 广播打字状态，让其他角色知道自己在生成"),
             new ConfigEntry("stickerAttachEnable","true","是否等待用户补发表情包后再生成一次回复"),
             new ConfigEntry("stickerAttachWindowSecond","5","文字回合等待同用户补发表情包的秒数"),
             new ConfigEntry("stickerAttachMaxWaitSecond","15","表情包已开始识别时，最多额外等待多少秒"),

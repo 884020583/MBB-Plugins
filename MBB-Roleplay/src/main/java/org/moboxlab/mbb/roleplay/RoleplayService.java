@@ -77,6 +77,7 @@ public class RoleplayService {
     private final RoleplayTextUtils textUtils;
     private final RoleplayJsonUtils jsonUtils;
     private final RoleplayImageContextService imageContextService;
+    private final RoleplayHubService hubService;
     private final RoleplayStickerService stickerService;
     private final RoleplayAddressService addressService;
     private final RoleplayRateLimitService rateLimitService;
@@ -214,6 +215,7 @@ public class RoleplayService {
     static class RecentImage {
         final JSONObject data;
         final long expireAt;
+        volatile String hubKey = "";
         volatile String summary = "";
 
         RecentImage(JSONObject data,long expireAt) {
@@ -293,6 +295,7 @@ public class RoleplayService {
         this.textUtils = new RoleplayTextUtils(this);
         this.jsonUtils = new RoleplayJsonUtils();
         this.imageContextService = new RoleplayImageContextService(this);
+        this.hubService = new RoleplayHubService(this);
         this.stickerService = new RoleplayStickerService(this);
         this.addressService = new RoleplayAddressService(this);
         this.rateLimitService = new RoleplayRateLimitService(this);
@@ -555,6 +558,10 @@ public class RoleplayService {
 
     RoleplayReplyExecutor replyExecutor() {
         return replyExecutor;
+    }
+
+    RoleplayHubService hubService() {
+        return hubService;
     }
 
     RoleplayRateLimitService rateLimitService() {

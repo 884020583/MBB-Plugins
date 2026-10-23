@@ -12,6 +12,7 @@ flowchart LR
     RP ==>|"describe"| VIS["MBB-Vision（可选）"]
     RP ==>|"搜索标签 / 发送"| ST["MBB-Sticker（可选）"]
     RP ==>|"status / generate"| CU["MBB-ComfyUI（可选）"]
+    RP ==>|"vision_lookup / turn_claim"| HUB["MBB-BotHub（可选）"]
     RP -.->|"isEnabled 冲突检测"| POKE["MBB-Poke（可选）"]
     RP -.->|"共享同一套 AI profile"| CHAT["MBB-Chat（同生态参考）"]
     RP -.->|"内容风控各管各的"| GUARD["MBB-AIGuard（同生态参考）"]
@@ -29,6 +30,7 @@ flowchart LR
 | 识图 | `MBB-Vision` | `describe` | 图片与表情包描述、标签与本地缓存 | 图片消息不注入描述 |
 | 表情包 | `MBB-Sticker` | 查询标签 / 发送 | 角色按标签选择并发送表情包 | `sticker` 技能不开放 |
 | 生图 | `MBB-ComfyUI` | `status` / `generate` | 生图与群级冷却，完成后回调 | `draw` 技能不开放 |
+| 多机器人协作 | `MBB-BotHub` | `vision_lookup` / `vision_claim` / `vision_publish` / `vision_wait` / `turn_claim` / `task_claim` / `chat_guard` | 同群多 bot 共享识图、回合权、任务去重与互聊熔断 | 完全退回单机：识图各识别一次，回复不做跨进程去重 |
 | 戳一戳 | `MBB-Poke` | `isEnabled` | 检测冲突，避免同一件事回两次 | Roleplay 自行处理戳一戳 |
 
 集成约定：
@@ -37,6 +39,48 @@ flowchart LR
 2. 调用参数和返回值都是 fastjson 的 `JSONObject`，用 `status` 字段判断成败。
 3. 可选插件缺失时降级而不是报错：技能不开放、资料不注入，其余功能照常。
 4. 多个 AI 插件同时启用时，共用 `MBB-AI` 的 `maxConcurrent`，需要按总并发量配置。
+
+## 多机器人协作（MBB-BotHub）
+
+同一个群部署多个角色机器人时，`MBB-BotHub` 负责跨进程协调两件事：共享识图和回合权。
+它是可选插件，没装、没连上或被关掉时，Roleplay 完全退回单机行为。
+
+共享识图的 key 是 `群号 + 消息ID + 片段序号`，两个 bot 收到同一条消息时算出同一把 key，
+不依赖图片 URL、文件名或 `file_unique` 是否为空。流程是：
+
+1. `vision_lookup` 命中共享缓存就直接复用，不调 `MBB-Vision`；
+2. 未命中则 `vision_claim`，只有一个 bot 认领成功；
+3. 认领成功的 bot 调 `MBB-Vision.describe` 后 `vision_publish`；
+4. 认领失败的 bot 用 `vision_wait` 等广播，超时才回退本地识图，保证不丢描述。
+
+回合权在路由判定「要回复」之后、发送之前认领：单条回合用 `m<消息ID>`，合批回合用
+`b<批次最后一条消息ID>`。直接点名带 `priority`，可以接管已有租约，避免被别的 bot 抢先导致点名没回；
+回复发送完成后释放租约，默认 60 秒过期。
+
+相关配置：
+
+```yaml
+hubEnable: true
+hubVisionShareEnable: true
+hubVisionWaitMs: 15000
+hubTurnShareEnable: true
+hubTaskDedupEnable: true
+hubChatGuardEnable: true
+hubTypingBroadcastEnable: true
+```
+
+除了共享识图和回合权，Roleplay 还通过 hub 做两件事：
+
+- **任务去重**：提醒创建前用 `reminder|群|用户|时间|目标|内容` 认领一次，两个 bot 只会有一个真正建库并发确认。
+- **互聊熔断**：判定消息来自另一个角色机器人时先过 `chat_guard`，同群连续 bot-to-bot 轮数超限就一起停，真人发言后清零。
+
+回合权不再先到先得，而是带分数认领：被点名 100 / 被引用 80 / 延续自己参与的线程 60 / 泛群聊插话 40，
+同分用 `botID` 稳定哈希决定，两个进程算出的结果一致。低分先到会被高分抢占，生成完成、发送前
+Roleplay 还会用 `turn_status` 复核一次，被抢就放弃发送。赢了之后会在生成前广播打字状态
+（`typing start` / `typing stop`），让另一个角色知道这边正在生成；双方都被点名时第二个按
+`multiReplyStaggerMs` 错峰回复。
+
+部署与排查见 [MBB-BotHub 文档](../MBB-BotHub.md)。
 
 ## 生图 prompt 管线
 

@@ -1,7 +1,7 @@
 #MBB-Roleplay 插件配置
 
 #配置结构版本，插件升级时自动维护
-configVersion: 21
+configVersion: 36
 #是否启用角色扮演
 enable: true
 #AI 使用的模型配置名，对应 MBB-AI 的 profiles.json
@@ -175,6 +175,20 @@ imageUnderstandingMaxChars: 600
 imageContextTimeoutSecond: 300
 #纯图片与表情消息的识图放到独立异步任务，不阻塞回复线程
 imageAsyncEnable: true
+#是否与 MBB-BotHub 协作；关闭后完全退回单机行为
+hubEnable: true
+#是否共享识图结果，避免同群多个 bot 重复识图
+hubVisionShareEnable: true
+#等待其他 bot 识图结果的毫秒数，超时回退本地识图
+hubVisionWaitMs: 15000
+#是否共享回合权，避免同群多个 bot 抢答同一条消息
+hubTurnShareEnable: true
+#是否跨进程去重任务创建（提醒等），避免两个 bot 建同一个任务
+hubTaskDedupEnable: true
+#是否用 hub 做机器人互聊熔断，避免两个 bot 旁若无人的刷屏
+hubChatGuardEnable: true
+#是否通过 hub 广播打字状态，让其他角色知道自己在生成
+hubTypingBroadcastEnable: true
 #是否等待用户补发表情包后再生成一次回复
 stickerAttachEnable: true
 #文字回合等待同用户补发表情包的最长秒数，用户又发言或表情包先到都会提前结束等待

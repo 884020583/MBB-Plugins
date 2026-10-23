@@ -54,6 +54,7 @@ public class RoleplayImageContextService {
         JSONArray message = event.getMessage();
         if (message == null) return null;
         JSONObject latest = null;
+        int latestIndex = -1;
         for (int i = 0; i < message.size(); i++) {
             JSONObject segment = message.getJSONObject(i);
             if (segment == null) continue;
@@ -62,6 +63,7 @@ public class RoleplayImageContextService {
             if (!("image".equals(type) || "mface".equals(type))) continue;
             if (isStickerSegment(type,data)) continue;
             latest = data;
+            latestIndex = i;
         }
         if (latest == null) return null;
         JSONObject copy = new JSONObject(true);
@@ -72,8 +74,17 @@ public class RoleplayImageContextService {
         copy.put("sub_type",latest.get("sub_type"));
         RoleplayService.RecentImage recent = new RoleplayService.RecentImage(copy,
                 System.currentTimeMillis() + service.config().imageContextTimeoutSecond * 1000L);
+        recent.hubKey = hubKey(groupID,event.getMessageID(),latestIndex);
         recentImageMap.put(recentImageKey(groupID,event.getUserID()),recent);
         return recent;
+    }
+
+    /**
+     * 同群多 bot 共享识图结果的 key。
+     * 用 群号 + 消息ID + 片段序号，保证两个 bot 收到同一条消息时算出同一把 key。
+     */
+    String hubKey(long groupID,long messageID,int segmentIndex) {
+        return "g"+groupID+"-m"+messageID+"-i"+segmentIndex;
     }
 
     RoleplayService.RecentImage findRecentImageContext(long groupID,long userID,String content) {
@@ -120,7 +131,7 @@ public class RoleplayImageContextService {
         if (recent.summary != null && !recent.summary.trim().isEmpty()) return recent.summary;
         PluginService vision = service.plugin().getServer().getPluginManager().getService("MBB-Vision");
         if (vision == null) return "";
-        JSONObject result = vision.call("describe",imageParams(recent));
+        JSONObject result = service.hubService().describe(vision,imageParams(recent),recent.hubKey);
         if (result == null || !result.getBooleanValue("status")) return "";
         String summary = service.safe(result.getString("summary"));
         if (summary.isEmpty()) summary = service.safe(result.getString("description"));
@@ -214,7 +225,8 @@ public class RoleplayImageContextService {
             } else if ("at".equals(type)) {
                 builder.append("@").append(data == null ? "" : service.safe(data.getString("qq")));
             } else if ("image".equals(type) || "mface".equals(type)) {
-                builder.append(describeImageSegment(vision,type,data,context,currentImage));
+                builder.append(describeImageSegment(vision,type,data,context,currentImage,
+                        hubKey(groupID,event.getMessageID(),i)));
             } else if ("face".equals(type)) {
                 builder.append("[表情]");
             }
@@ -223,7 +235,7 @@ public class RoleplayImageContextService {
     }
 
     String describeImageSegment(PluginService vision,String type,JSONObject data,String context,
-                                        RoleplayService.RecentImage currentImage) {
+                                        RoleplayService.RecentImage currentImage,String hubKey) {
         boolean sticker = isStickerSegment(type,data);
         JSONObject params = new JSONObject(true);
         params.put("kind",sticker ? "sticker" : "image");
@@ -235,7 +247,7 @@ public class RoleplayImageContextService {
         params.put("context",context);
         params.put("reference",service.visionReferenceText());
         params.put("profile",service.config().imageUnderstandingProfile);
-        JSONObject result = vision.call("describe",params);
+        JSONObject result = service.hubService().describe(vision,params,hubKey);
         if (result == null || !result.getBooleanValue("status")) {
             return sticker ? "[表情包]" : "[图片]";
         }
