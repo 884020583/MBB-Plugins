@@ -7,20 +7,22 @@ import org.moboxlab.mbb.trpg.config.TrpgConfig;
 import org.moboxlab.mbb.trpg.session.SessionSnapshot;
 import org.moboxlab.mbb.trpg.session.SessionState;
 import org.moboxlab.mbb.trpg.store.AiTraceRow;
+import org.moboxlab.mbb.trpg.testutil.BlockingFakeAiClient;
 import org.moboxlab.mbb.trpg.testutil.FakeAiClient;
 import org.moboxlab.mbb.trpg.testutil.FakeClock;
+import org.moboxlab.mbb.trpg.testutil.FakeFailureRecorder;
+import org.moboxlab.mbb.trpg.testutil.FakeNarrationSink;
 import org.moboxlab.mbb.trpg.testutil.FakeScheduler;
+import org.moboxlab.mbb.trpg.testutil.FakeSessionView;
 import org.moboxlab.mbb.trpg.testutil.FakeTraceStore;
 import org.moboxlab.mbb.trpg.testutil.RecordingLogger;
+import org.moboxlab.mbb.trpg.testutil.SlowFakeAiClient;
 
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CountDownLatch;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
@@ -36,24 +38,24 @@ public final class AiHostEngineTest {
     private static final long SESSION = 7L;
 
     private FakeAiClient client;
-    private MutableSessionView view;
+    private FakeSessionView view;
     private FakeTraceStore trace;
     private FakeScheduler scheduler;
     private FakeClock clock;
     private RecordingLogger logger;
-    private FakeSink sink;
+    private FakeNarrationSink sink;
     private FakeFailureRecorder recorder;
     private AiHostEngine engine;
 
     @Before
     public void setUp() {
         client = new FakeAiClient();
-        view = new MutableSessionView(snapshot(GROUP, SESSION, 5L, true, 0L));
+        view = new FakeSessionView(snapshot(GROUP, SESSION, 5L, true, 0L));
         trace = new FakeTraceStore();
         scheduler = new FakeScheduler();
         clock = new FakeClock();
         logger = new RecordingLogger();
-        sink = new FakeSink();
+        sink = new FakeNarrationSink();
         recorder = new FakeFailureRecorder(3);
     }
 
@@ -184,7 +186,7 @@ public final class AiHostEngineTest {
 
     @Test
     public void timeoutIsWallClockBounded() {
-        SlowClient slow = new SlowClient(5000L);
+        SlowFakeAiClient slow = new SlowFakeAiClient(5000L);
         AiHostEngine host = newEngine(config(single("aiHost.deadlineSeconds", "1")), slow);
         long startAt = System.currentTimeMillis();
         host.submit(immediateRequest(1L));
@@ -215,6 +217,7 @@ public final class AiHostEngineTest {
         AiTraceRow row = trace.rows().get(0);
         assertEquals("degraded", row.resultStatus());
         assertEquals("verification", row.degradeReason());
+        assertEquals("verification", row.errorType());
         assertEquals(2, row.attempts());
         assertEquals(1, recorder.failures());
         assertEquals(0, sink.suspendedNotifications());
@@ -334,7 +337,7 @@ public final class AiHostEngineTest {
 
     @Test
     public void queueFullDegradesWithoutQueueing() throws Exception {
-        BlockingClient blocking = new BlockingClient();
+        BlockingFakeAiClient blocking = new BlockingFakeAiClient();
         AiHostEngine host = newEngine(config(), blocking);
         host.submit(immediateRequest(1L));
         assertTrue("首个请求应进入调用", blocking.awaitEntered());
@@ -351,7 +354,7 @@ public final class AiHostEngineTest {
 
     @Test
     public void queueAgeDegradesAfterSixtyFiveSeconds() throws Exception {
-        BlockingClient blocking = new BlockingClient();
+        BlockingFakeAiClient blocking = new BlockingFakeAiClient();
         AiHostEngine host = newEngine(config(), blocking);
         host.submit(immediateRequest(1L));
         assertTrue(blocking.awaitEntered());
@@ -465,7 +468,7 @@ public final class AiHostEngineTest {
     @Test
     public void failureThatSuspendsClearsQueueAndNotifiesOnce() throws Exception {
         recorder = new FakeFailureRecorder(1);
-        BlockingFailureClient blocking = new BlockingFailureClient();
+        BlockingFakeAiClient blocking = new BlockingFakeAiClient(AiResult.failure(AiErrorTypes.BUSY, true, 1L));
         AiHostEngine host = newEngine(config(), blocking);
         host.submit(immediateRequest(1L));
         assertTrue(blocking.awaitEntered());
@@ -526,7 +529,7 @@ public final class AiHostEngineTest {
 
     @Test
     public void failureAfterSuspensionIsDiscardedAsSkipped() throws Exception {
-        BlockingFailureClient blocking = new BlockingFailureClient();
+        BlockingFakeAiClient blocking = new BlockingFakeAiClient(AiResult.failure(AiErrorTypes.BUSY, true, 1L));
         AiHostEngine host = newEngine(config(), blocking);
         host.submit(immediateRequest(1L));
         assertTrue(blocking.awaitEntered());
@@ -539,6 +542,78 @@ public final class AiHostEngineTest {
         assertEquals("skipped", trace.rows().get(0).resultStatus());
         assertEquals(0, sink.narrations().size());
         assertEquals(0, recorder.failures());
+    }
+
+    /**
+     * 越权拒绝的审计 errorType 固定为 verification，中文原因只进日志。
+     *
+     * <p>errorType 是审计聚合用的稳定取值，不能随拒绝原因漂移成「越权：修改或宣布数值」。</p>
+     */
+    @Test
+    public void oversightRejectionKeepsStableErrorType() {
+        client.setDefaultContent("守夜人宣布 HP 减少 3。");
+        AiHostEngine host = newEngine(config());
+        host.submit(immediateRequest(1L));
+
+        await("等待越权拒绝审计", () -> trace.rows().size() == 1);
+
+        AiTraceRow row = lastRow();
+        assertEquals("degraded", row.resultStatus());
+        assertEquals("verification", row.errorType());
+        assertEquals("verification", row.degradeReason());
+        assertEquals(2, row.attempts());
+        assertEquals("verification", sink.reasons().get(0));
+        boolean logged = false;
+        for (String line : logger.warns()) {
+            if (line.contains(AiNarrationParser.REASON_VALUE_CHANGE)) {
+                logged = true;
+            }
+        }
+        assertTrue("中文拒绝原因应只写在日志里", logged);
+    }
+
+    /**
+     * 全局工作线程池满时按 queue_full 降级，提交方不抛异常。
+     *
+     * <p>并发上限 1 时工作池是 2 个线程加 2 个等待位；把全局排队上限放宽到 8，
+     * 让第 5 个群的请求先撞到工作池，而不是先撞上每群或全局排队上限。</p>
+     */
+    @Test
+    public void globalWorkerPoolRejectsWithQueueFull() {
+        BlockingFakeAiClient blocking = new BlockingFakeAiClient();
+        Map<String, String> overrides = single("aiHost.maxConcurrent", "1");
+        overrides.put("aiHost.globalQueue", "8");
+        AiHostEngine host = newEngine(config(overrides), blocking);
+        List<Long> groups = new ArrayList<Long>();
+        for (int index = 0; index < 5; index++) {
+            long groupId = 2001L + index;
+            groups.add(Long.valueOf(groupId));
+            view.set(snapshot(groupId, SESSION, 5L, true, 0L));
+        }
+
+        for (Long group : groups) {
+            host.submit(requestFor(group.longValue(), 1L));
+        }
+
+        await("等待首个请求进入客户端", () -> blocking.calls() >= 1);
+        await("等待 queue_full 审计", () -> countRows("queue_full") == 1);
+
+        boolean rejectedByWorkerPool = false;
+        for (String line : logger.warns()) {
+            if (line.contains("AI 工作线程提交被拒")) {
+                rejectedByWorkerPool = true;
+            }
+        }
+        assertTrue("queue_full 应来自全局工作池拒绝", rejectedByWorkerPool);
+        assertEquals(1, trace.rows().size());
+        AiTraceRow row = lastRow();
+        assertEquals("degraded", row.resultStatus());
+        assertEquals("queue_full", row.degradeReason());
+        assertEquals("queue_full", sink.reasons().get(0));
+
+        blocking.releaseAll();
+        await("等待队列清空", () -> host.pendingCount() == 0);
+        assertEquals(4, blocking.calls());
     }
 
     // ------------------------------------------------------------------
@@ -566,6 +641,15 @@ public final class AiHostEngineTest {
         lines.add("玩家行动 " + eventSeq);
         return new AiCallRequest(GROUP, SESSION, AiTrigger.PLAYER_ACTION, seqs,
                 eventSeq, eventSeq, sceneVersion, true, lines);
+    }
+
+    private static AiCallRequest requestFor(long groupId, long eventSeq) {
+        List<Long> seqs = new ArrayList<Long>();
+        seqs.add(Long.valueOf(eventSeq));
+        List<String> lines = new ArrayList<String>();
+        lines.add("玩家行动 " + eventSeq);
+        return new AiCallRequest(groupId, SESSION, AiTrigger.PLAYER_ACTION, seqs,
+                eventSeq, eventSeq, 5L, true, lines);
     }
 
     private static SessionSnapshot snapshot(long groupId, long sessionNo, long sceneVersion,
@@ -660,182 +744,4 @@ public final class AiHostEngineTest {
         boolean matches();
     }
 
-    /** 可修改快照的局视图。 */
-    private static final class MutableSessionView implements SessionView {
-
-        private volatile SessionSnapshot snapshot;
-
-        MutableSessionView(SessionSnapshot snapshot) {
-            this.snapshot = snapshot;
-        }
-
-        void set(SessionSnapshot snapshot) {
-            this.snapshot = snapshot;
-        }
-
-        @Override
-        public SessionSnapshot readSnapshot(long groupId) {
-            SessionSnapshot current = snapshot;
-            if (current != null && current.groupId() == groupId) {
-                return current;
-            }
-            return SessionSnapshot.none(groupId);
-        }
-    }
-
-    /** 记录发送内容的叙述端口假件。 */
-    private static final class FakeSink implements AiNarrationSink {
-
-        private final List<String> narrations = new ArrayList<String>();
-        private final List<Boolean> degradedFlags = new ArrayList<Boolean>();
-        private final List<String> reasons = new ArrayList<String>();
-        private int suspendedNotifications;
-
-        @Override
-        public synchronized void send(long groupId, String narration, boolean degraded,
-                                      String degradeReason) {
-            narrations.add(narration);
-            degradedFlags.add(Boolean.valueOf(degraded));
-            reasons.add(degradeReason);
-        }
-
-        @Override
-        public synchronized void notifySuspended(long groupId) {
-            suspendedNotifications++;
-        }
-
-        synchronized List<String> narrations() {
-            return new ArrayList<String>(narrations);
-        }
-
-        synchronized List<Boolean> degradedFlags() {
-            return new ArrayList<Boolean>(degradedFlags);
-        }
-
-        synchronized List<String> reasons() {
-            return new ArrayList<String>(reasons);
-        }
-
-        synchronized int suspendedNotifications() {
-            return suspendedNotifications;
-        }
-    }
-
-    /** 失败计数端口假件：达到阈值后返回已挂起。 */
-    private static final class FakeFailureRecorder implements AiFailureRecorder {
-
-        private final int suspendAfter;
-        private int failures;
-        private boolean suspended;
-
-        FakeFailureRecorder(int suspendAfter) {
-            this.suspendAfter = suspendAfter;
-        }
-
-        @Override
-        public synchronized AiFailureOutcome recordFailure(long groupId) {
-            failures++;
-            if (failures >= suspendAfter) {
-                suspended = true;
-            }
-            return AiFailureOutcome.of(SESSION, suspended, suspended ? 600_000L : 0L, failures);
-        }
-
-        @Override
-        public synchronized boolean recordSuccess(long groupId) {
-            failures = 0;
-            return true;
-        }
-
-        synchronized int failures() {
-            return failures;
-        }
-    }
-
-    /** 调用会阻塞在门闩上的假 AI 客户端。 */
-    private static final class BlockingClient implements AiClient {
-
-        private final CountDownLatch entered = new CountDownLatch(1);
-        private final CountDownLatch release = new CountDownLatch(1);
-        private final AtomicInteger calls = new AtomicInteger();
-
-        @Override
-        public AiResult chat(AiRequest request) {
-            calls.incrementAndGet();
-            entered.countDown();
-            try {
-                release.await(5L, TimeUnit.SECONDS);
-            } catch (InterruptedException error) {
-                Thread.currentThread().interrupt();
-                return AiResult.failure("interrupted", false, 0L);
-            }
-            return AiResult.success("假 AI 叙述", "stop", "{}", false, 1L);
-        }
-
-        boolean awaitEntered() throws InterruptedException {
-            return entered.await(3L, TimeUnit.SECONDS);
-        }
-
-        void releaseAll() {
-            release.countDown();
-        }
-
-        int calls() {
-            return calls.get();
-        }
-    }
-
-    /** 阻塞后返回 busy 失败的假 AI 客户端，用于挂起清队列测试。 */
-    private static final class BlockingFailureClient implements AiClient {
-
-        private final CountDownLatch entered = new CountDownLatch(1);
-        private final CountDownLatch release = new CountDownLatch(1);
-        private final AtomicInteger calls = new AtomicInteger();
-
-        @Override
-        public AiResult chat(AiRequest request) {
-            calls.incrementAndGet();
-            entered.countDown();
-            try {
-                release.await(5L, TimeUnit.SECONDS);
-            } catch (InterruptedException error) {
-                Thread.currentThread().interrupt();
-                return AiResult.failure("interrupted", false, 0L);
-            }
-            return AiResult.failure(AiErrorTypes.BUSY, true, 1L);
-        }
-
-        boolean awaitEntered() throws InterruptedException {
-            return entered.await(3L, TimeUnit.SECONDS);
-        }
-
-        void releaseAll() {
-            release.countDown();
-        }
-
-        int calls() {
-            return calls.get();
-        }
-    }
-
-    /** 固定睡眠的假 AI 客户端，用于墙钟测试。 */
-    private static final class SlowClient implements AiClient {
-
-        private final long sleepMillis;
-
-        SlowClient(long sleepMillis) {
-            this.sleepMillis = sleepMillis;
-        }
-
-        @Override
-        public AiResult chat(AiRequest request) {
-            try {
-                Thread.sleep(sleepMillis);
-            } catch (InterruptedException error) {
-                Thread.currentThread().interrupt();
-                return AiResult.failure("interrupted", false, 0L);
-            }
-            return AiResult.success("慢速叙述", "stop", "{}", false, 1L);
-        }
-    }
 }

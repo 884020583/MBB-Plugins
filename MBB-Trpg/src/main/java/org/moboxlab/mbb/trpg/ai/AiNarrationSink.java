@@ -12,10 +12,12 @@ public interface AiNarrationSink {
      * 发送一条叙述。
      *
      * @param groupId       群号
-     * @param narration     叙述正文；降级时为空字符串，由呈现层套用降级模板
-     * @param degraded      是否为降级提示
+     * @param narration     叙述正文。正常叙述为模型输出；降级时为剧本回退原文，
+     *                      为空则表示没有可回退的原文，呈现层只发降级提示
+     * @param degraded      是否为降级
      * @param degradeReason 降级原因（busy / network / http_&lt;code&gt; / timeout / unavailable /
-     *                      queue_full / queue_age / verification / truncated），非降级时为空字符串
+     *                      interrupted / verification / truncated / queue_full / queue_age），
+     *                      非降级时为空字符串
      */
     void send(long groupId, String narration, boolean degraded, String degradeReason);
 

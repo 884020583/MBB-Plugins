@@ -19,11 +19,9 @@ public final class TrpgAiNarrationSink implements AiNarrationSink {
     private final SessionView sessionView;
     private final TrpgNameResolver names;
 
-    /** 兼容旧装配（无局面视图）：落款用 KP 兜底名。 */
-    public TrpgAiNarrationSink(TrpgPresenter presenter) {
-        this(presenter, null, null);
-    }
-
+    /**
+     * 生产装配：需要局面视图与姓名解析来给叙述落款（§9.7）。
+     */
     public TrpgAiNarrationSink(TrpgPresenter presenter, SessionView sessionView,
                                TrpgNameResolver names) {
         if (presenter == null) {

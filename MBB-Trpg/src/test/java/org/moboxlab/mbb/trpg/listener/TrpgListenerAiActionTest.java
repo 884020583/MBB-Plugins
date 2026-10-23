@@ -130,6 +130,30 @@ public class TrpgListenerAiActionTest {
         assertTrue(triggers.fired.isEmpty());
     }
 
+    @Test
+    public void otherPluginPrefixesAreNotConsumed() {
+        String[] commands = {"#帮助", "!roll 1d100", ".trpg status", "！签到"};
+        for (String command : commands) {
+            GroupMessageEvent event = message(PLAYER, command);
+            listener.onGroupMessage(event);
+            assertFalse("其它插件前缀不应被吞：" + command, event.isCancelled());
+        }
+        assertTrue(triggers.fired.isEmpty());
+    }
+
+    @Test
+    public void trpgPrefixIsCommandButTrpgWordInsideTextIsAction() {
+        GroupMessageEvent command = message(PLAYER, "trpg 真好玩");
+        listener.onGroupMessage(command);
+        assertFalse("trpg 开头的指令不归监听器消费", command.isCancelled());
+
+        GroupMessageEvent action = message(PLAYER, "trpg真好玩，我们继续往前走");
+        listener.onGroupMessage(action);
+        assertTrue("trpg 连写的普通文本仍应算玩家行动", action.isCancelled());
+        assertEquals(1, triggers.fired.size());
+        assertEquals(AiTrigger.PLAYER_ACTION, triggers.fired.get(0));
+    }
+
     private SessionActor actor(long userId) {
         return new SessionActor(userId, GROUP, false);
     }
