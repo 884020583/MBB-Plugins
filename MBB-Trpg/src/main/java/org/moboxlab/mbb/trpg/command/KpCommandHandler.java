@@ -255,8 +255,8 @@ final class KpCommandHandler {
         if (!context.accept(actor, result)) {
             return;
         }
-        // 以局面服务写回后的状态为准，避免指令层再维护一份开关词表。
-        context.reply(actor, TrpgMessageTemplates.host(result.snapshot().aiEnabled()));
+        // v1 桩不改 aiEnabled（§9.10），回执直接用局面服务给出的分支文案。
+        context.reply(actor, TrpgMessageTemplates.aiHost(result.detail()));
     }
 
     /** 触发器提示只私聊 KP；发送失败不重试，也不回退到群内。 */

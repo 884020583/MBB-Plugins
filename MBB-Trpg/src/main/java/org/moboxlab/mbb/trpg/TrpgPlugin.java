@@ -8,6 +8,7 @@ import org.moboxlab.mbb.trpg.card.CardGenerator;
 import org.moboxlab.mbb.trpg.command.DiceCommand;
 import org.moboxlab.mbb.trpg.command.TrpgCommand;
 import org.moboxlab.mbb.trpg.command.TrpgCommandService;
+import org.moboxlab.mbb.trpg.ai.TrpgAiHostService;
 import org.moboxlab.mbb.trpg.config.TrpgConfig;
 import org.moboxlab.mbb.trpg.listener.TrpgListener;
 import org.moboxlab.mbb.trpg.listener.TrpgNoticeListener;
@@ -49,7 +50,10 @@ import java.util.List;
  *
  * <p>当前职责：加载配置、注册内置规则集并选定生效规则集、建表并保持幂等，装配存储实现、
  * 审计端口、拉黑名单、会话状态机、呈现层与归档清理，按冻结顺序执行启动序列并排入每小时
- * 清理任务；随后注册 /trpg 与 /r 指令与群监听器。AI 主持由后续切片继续装配。</p>
+ * 清理任务；随后注册 /trpg 与 /r 指令与群监听器。</p>
+ *
+ * <p>AI 主持按 §9.10 的 v1 口径装配为契约桩：读取 aiHost.* 配置、判定全局开关、承担
+ * /trpg ai 的参数与状态分支，但不调用 AI、不写审计、不注册定时器。</p>
  */
 public class TrpgPlugin extends Plugin {
 
@@ -69,6 +73,8 @@ public class TrpgPlugin extends Plugin {
     private TrpgPresenter presenter;
     private SessionLogService sessionLogService;
     private TrpgCommandService commandService;
+    /** AI 主持契约桩（S9）：v1 零调用、零审计、不注册定时器。 */
+    private TrpgAiHostService aiHostService;
     private TrpgListener listener;
     private TrpgNoticeListener noticeListener;
     /** 指令层共用登记：同群同类错误 10 秒只回一次、冷却窗口跨指令生效。 */
@@ -192,8 +198,16 @@ public class TrpgPlugin extends Plugin {
         // 冷却与去重登记跨 /trpg、/r 共用：同群同类错误 10 秒只回一次（§3.2），冷却窗口也不分指令层。
         cooldowns = new CooldownRegistry();
         dedupe = new ErrorDedupe();
+        // AI 主持先建桩：会话状态机在 /trpg ai 分支上只问桩，桩自身不持有 AI 与审计端口。
+        aiHostService = new TrpgAiHostService(trpgConfig);
         sessionService = new SessionService(store, scriptCatalog, clock, randomSource, trpgConfig,
-                presenter, getLogger(), new GroupLockRegistry(clock), cooldowns, dedupe);
+                presenter, getLogger(), new GroupLockRegistry(clock), cooldowns, dedupe,
+                aiHostService);
+        // 只读快照视图交给桩，v1.1 的叙述链路可直接复用（§9.11）。
+        aiHostService.bindSessionView(sessionService);
+        getLogger().sendInfo("[MBB-Trpg] AI 主持全局开关："
+                + (aiHostService.globallyEnabled() ? "开" : "关")
+                + "（v1 为空实现，不调用 AI、不写审计、不注册定时器）");
         sessionLogService = new SessionLogService(store, trpgConfig, clock, cooldowns, dedupe, getLogger());
         commandService = new TrpgCommandService(sessionService, sessionLogService, scriptCatalog,
                 new CardGenerator(randomSource), presenter, nameResolver, trpgConfig, clock, getLogger(),
@@ -302,6 +316,7 @@ public class TrpgPlugin extends Plugin {
         presenter = null;
         sessionLogService = null;
         commandService = null;
+        aiHostService = null;
         listener = null;
         noticeListener = null;
         cooldowns = null;
@@ -377,6 +392,11 @@ public class TrpgPlugin extends Plugin {
     /** 指令服务；未启用时为 null。 */
     public TrpgCommandService commandService() {
         return commandService;
+    }
+
+    /** AI 主持契约桩；未启用时为 null。 */
+    public TrpgAiHostService aiHostService() {
+        return aiHostService;
     }
 
     /** 群消息监听器；未启用时为 null。 */

@@ -178,16 +178,41 @@ public class TrpgKpCommandTest {
     }
 
     @Test
-    public void aiSwitchRepliesHostLayout() {
+    public void aiSwitchRepliesV1Branches() {
         startRunning();
 
+        // 默认配置 aiHost.enabled=false：ai on 按「当前状态不可用」拒绝（§9.10 / 验收 I1）。
         assertTrue(run(kpSender(), "ai", "on"));
-        assertTrue(groupText(), groupText().contains("【主持】"));
-        assertTrue(groupText(), groupText().contains("AI 叙述"));
+        assertTrue(groupText(), groupText().contains("【错误】"));
+        assertTrue(groupText(), groupText().contains("当前状态不可用"));
 
         clock.advance(ACTION_GAP_MILLIS);
         assertTrue(run(kpSender(), "ai", "off"));
-        assertTrue(groupText(), groupText().contains("人主持（AI 已关闭）"));
+        assertTrue(groupText(), groupText().contains("【主持】"));
+        assertTrue(groupText(), groupText().contains("本局 AI 主持保持关闭"));
+    }
+
+    @Test
+    public void aiOnWithGlobalSwitchReportsPlannedAndStatusStaysOff() {
+        startRunning();
+        Map<String, String> raw = new LinkedHashMap<String, String>();
+        raw.put("aiHost.enabled", "true");
+        TrpgConfig enabled = TrpgConfig.fromValues(raw);
+        SessionService stubbed = new SessionService(store, catalog, clock, random, enabled, presenter, null);
+        TrpgCommandService stubbedService = new TrpgCommandService(stubbed,
+                new SessionLogService(store, enabled, clock, null), catalog,
+                new CardGenerator(random), presenter, names, enabled, clock, null,
+                new CooldownRegistry(), new ErrorDedupe(), blacklist);
+        command = new TrpgCommand(stubbedService);
+
+        // 全局开但 v1 仍是桩：回「将在 v1.1 提供」，不置位、零调用（验收 I7）。
+        assertTrue(run(kpSender(), "ai", "on"));
+        assertTrue(groupText(), groupText().contains("【主持】"));
+        assertTrue(groupText(), groupText().contains("v1.1"));
+
+        clock.advance(ACTION_GAP_MILLIS);
+        assertTrue(run(kpSender(), "status"));
+        assertTrue(groupText(), groupText().contains("AI 主持：关"));
     }
 
     @Test
