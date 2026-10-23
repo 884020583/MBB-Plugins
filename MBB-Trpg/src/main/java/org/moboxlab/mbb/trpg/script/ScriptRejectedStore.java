@@ -69,13 +69,13 @@ public final class ScriptRejectedStore {
         }
     }
 
+    /** 文件名固定为 {@code <epoch毫秒>-<用户号>.json}；同一毫秒重复保存时顺延毫秒，保持格式不变。 */
     private String fileName(long operatorId) {
-        String base = System.currentTimeMillis() + "-" + operatorId;
-        File target = new File(dir, base + SUFFIX);
-        int seq = 2;
+        long epoch = System.currentTimeMillis();
+        File target = new File(dir, epoch + "-" + operatorId + SUFFIX);
         while (target.exists()) {
-            target = new File(dir, base + "-" + seq + SUFFIX);
-            seq++;
+            epoch++;
+            target = new File(dir, epoch + "-" + operatorId + SUFFIX);
         }
         return target.getName();
     }

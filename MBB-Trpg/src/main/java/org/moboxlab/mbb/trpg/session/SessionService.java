@@ -199,13 +199,8 @@ public final class SessionService implements SessionView, ScriptUsageIndex {
                 if (targetScript.isEmpty()) {
                     targetScript = defaultScriptId();
                 }
-                if (loadScript(targetScript) == null) {
-                    return reject(turn, SessionReject.BAD_ARGUMENT, "剧本不存在：" + targetScript);
-                }
-                SessionResult cooling = cooling(ACTION_START, turn, config.startCooldownSeconds());
-                if (cooling != null) {
-                    return cooling;
-                }
+                // 规格 §8.6：解析剧本与插入局面行期间必须持剧本库读锁，
+                // 防止「解析通过 → 删除/替换落盘 → 插入指向已消失剧本的局」。
                 long now = turn.now;
                 SessionRow row = SessionRow.builder()
                         .groupId(turn.groupId)
@@ -217,13 +212,27 @@ public final class SessionService implements SessionView, ScriptUsageIndex {
                         .createTime(now)
                         .updateTime(now)
                         .build();
-                long sessionId = store.insertSession(row);
-                if (sessionId == 0L) {
-                    if (store.findActiveByGroup(turn.groupId) != null) {
-                        return reject(turn, SessionReject.STATE_UNAVAILABLE, "本群已有未归档的局");
+                long sessionId;
+                Lock readLock = catalog.acquireReadLock();
+                readLock.lock();
+                try {
+                    if (loadScript(targetScript) == null) {
+                        return reject(turn, SessionReject.BAD_ARGUMENT, "剧本不存在：" + targetScript);
                     }
-                    error("建局写入未生效：group=" + turn.groupId);
-                    return SessionResult.storageFailure("建局写入未生效，请稍后重试");
+                    SessionResult cooling = cooling(ACTION_START, turn, config.startCooldownSeconds());
+                    if (cooling != null) {
+                        return cooling;
+                    }
+                    sessionId = store.insertSession(row);
+                    if (sessionId == 0L) {
+                        if (store.findActiveByGroup(turn.groupId) != null) {
+                            return reject(turn, SessionReject.STATE_UNAVAILABLE, "本群已有未归档的局");
+                        }
+                        error("建局写入未生效：group=" + turn.groupId);
+                        return SessionResult.storageFailure("建局写入未生效，请稍后重试");
+                    }
+                } finally {
+                    readLock.unlock();
                 }
                 MemberRow kp = MemberRow.builder()
                         .sessionId(sessionId)

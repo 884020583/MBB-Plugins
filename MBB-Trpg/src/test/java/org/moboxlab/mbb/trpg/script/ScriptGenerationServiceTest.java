@@ -125,6 +125,45 @@ public class ScriptGenerationServiceTest {
     }
 
     @Test
+    public void timeoutAndGenericFailureMapToCodes() {
+        ai.enqueue(AiResult.failure(AiErrorTypes.TIMEOUT, true, 1L));
+        ScriptGenerationOutcome timedOut = service.generate("古宅", 3, 60, 88402L);
+        assertFalse(timedOut.success());
+        assertEquals(ScriptErrorCodes.E_AI_TIMEOUT, timedOut.errorCode());
+
+        ai.enqueue(AiResult.failure(AiErrorTypes.UNKNOWN, false, 1L));
+        ScriptGenerationOutcome failed = service.generate("古宅", 3, 60, 88402L);
+        assertFalse(failed.success());
+        assertEquals(ScriptErrorCodes.E_AI_FAILED, failed.errorCode());
+        assertFalse(service.isRunning());
+    }
+
+    @Test
+    public void emptyOutputIsRecordedAsPlaceholder() {
+        ai.enqueue(AiResult.success("", "stop", "{}", false, 1L));
+
+        ScriptGenerationOutcome outcome = service.generate("古宅", 3, 60, 88402L);
+
+        assertFalse(outcome.success());
+        assertEquals(ScriptErrorCodes.E_AI_OUTPUT, outcome.errorCode());
+        assertFalse("空原文也应留下占位记录", outcome.savedFile().isEmpty());
+    }
+
+    @Test
+    public void generatedIdFollowsFormatAndAuthorDefaults() {
+        ai.enqueue(AiResult.success(ScriptResources.example(), "stop", "{}", false, 1L));
+
+        ScriptGenerationOutcome outcome = service.generate("古宅", 3, 60, 1L);
+
+        assertTrue(outcome.success());
+        assertTrue("生成 id 形如 gen-<14位时间>-<4位36进制>：" + outcome.script().id(),
+                outcome.script().id().matches("gen-\\d{14}-[0-9a-z]{4}"));
+        Script saved = library.get(outcome.script().id());
+        assertNotNull(saved);
+        assertFalse("author 缺省时应补占位", saved.author().trim().isEmpty());
+    }
+
+    @Test
     public void concurrentCallWhileRunningIsBusy() {
         final ScriptGenerationService[] holder = new ScriptGenerationService[1];
         final ScriptGenerationOutcome[] inner = new ScriptGenerationOutcome[1];

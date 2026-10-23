@@ -712,7 +712,7 @@ DELETE FROM plugin_mbb_trpg_ai_trace WHERE id < (SELECT id FROM plugin_mbb_trpg_
 ### 8.6 删除、替换与引用检查
 
 - 内置剧本不可删改；导入剧本被任何未归档局（含重启恢复的局）引用时禁止删除或替换，返回 `E_IN_USE`。
-- 引用检查复用 `SessionService` 内存中的未归档局索引，不新增 `SessionStore` 方法。
+- 引用检查经 `ScriptUsageIndex` 窄端口由 `SessionService` 实现：每次检查读取 `SessionStore.loadActiveSessions()` 的未归档局（含重启恢复）并按 `scriptId` 匹配；查询或装配失败按「被引用」处理（fail-closed），不为引用检查新增 `SessionStore` 方法。
 - 为消除「检查后、插入前被删」窗口，`ScriptCatalog` 设库级读写锁：T1 / T2 解析剧本并插入局期间持读锁，`delete` / `replace` 的检查加文件操作持写锁；锁序固定为**先群锁后库读锁**；`delete` / `replace` 不取群锁；读锁不覆盖网络发送。
 
 ### 8.7 内置示例

@@ -186,12 +186,6 @@ public final class ScriptImportSessions implements ScriptImportService {
         return entry == null ? 0L : entry.bytes;
     }
 
-    /** 当前暂存的分段数；没有暂存返回 0。 */
-    public synchronized int pendingSegments(long groupId, long operatorId) {
-        Pending entry = pending.get(key(groupId, operatorId));
-        return entry == null ? 0 : entry.segments;
-    }
-
     /** 暂存上限，供回执展示。 */
     public long maxBytes() {
         return maxBytes;

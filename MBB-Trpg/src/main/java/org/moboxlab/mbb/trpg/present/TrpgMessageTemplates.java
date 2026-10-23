@@ -613,11 +613,20 @@ public final class TrpgMessageTemplates {
 
     /** 剧本库列表（每页 10 条）。 */
     public static String scriptList(List<String> entries, int page, int totalPages) {
+        return scriptList(entries, page, totalPages, 0);
+    }
+
+    /** 剧本库列表（每页 10 条），skippedFiles 为启动时被跳过的文件数。 */
+    public static String scriptList(List<String> entries, int page, int totalPages, int skippedFiles) {
         StringBuilder body = new StringBuilder();
         body.append(TrpgTitles.of(TrpgTitles.SCRIPT_LIBRARY)).append("第 ").append(page).append('/')
                 .append(Math.max(1, totalPages)).append(" 页");
         for (String entry : entries) {
             body.append('\n').append(entry);
+        }
+        if (skippedFiles > 0) {
+            body.append("\n\n有 ").append(skippedFiles)
+                    .append(" 个剧本文件加载失败已被跳过，详见插件日志。");
         }
         body.append("\n\n发送 /trpg script show <id> 查看详情。");
         return limit(body.toString(), LIMIT_SCRIPT_LIBRARY);
@@ -743,7 +752,8 @@ public final class TrpgMessageTemplates {
         }
         StringBuilder body = new StringBuilder();
         body.append(TrpgTitles.of(TrpgTitles.ERROR)).append('\n');
-        body.append("剧本生成失败：").append(genReason(outcome.errorCode()));
+        body.append("剧本生成失败：").append(outcome.errorCode()).append("，")
+                .append(genReason(outcome.errorCode()));
         if (!outcome.errors().isEmpty()) {
             body.append("：\n");
             appendIssues(body, outcome.errors());
@@ -774,7 +784,8 @@ public final class TrpgMessageTemplates {
             return;
         }
         for (ScriptIssue issue : issues) {
-            body.append("- ").append(issueText(issue)).append('\n');
+            // 表现规格：行间不加序号符号，错误逐行平铺。
+            body.append(issueText(issue)).append('\n');
         }
     }
 

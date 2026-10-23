@@ -35,7 +35,8 @@ import org.moboxlab.mbb.trpg.store.BlacklistService;
 public final class TrpgCommandService {
 
     private static final String UNKNOWN_NEXT = "发送 /trpg help 查看可用指令。";
-    private static final String PRIVATE_NEXT = "私聊只支持 help、/roll 与 script 库管理。";
+    /** 私聊门禁的下一步提示；指令层其它入口共用同一文案，避免两处维护。 */
+    public static final String PRIVATE_NEXT = "私聊只支持 help、/roll 与 script 库管理。";
     /** 指令层同类错误的键（与局面层共用去重窗口）。 */
     private static final String KEY_UNKNOWN = "cmd-unknown";
     private static final String KEY_PRIVATE = "cmd-private";

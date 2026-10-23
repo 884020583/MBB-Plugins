@@ -35,6 +35,16 @@ public interface ScriptCatalog {
     List<ScriptInfo> list();
 
     /**
+     * 启动加载时被跳过的剧本文件数，供 {@code script list} 提示。
+     *
+     * <p>只有磁盘剧本库实现有意义：文件损坏、id 冲突、文件名与 id 不一致时跳过并计数；
+     * 内存实现与内置目录返回 0。</p>
+     */
+    default int skippedFileCount() {
+        return 0;
+    }
+
+    /**
      * 删除导入剧本。
      *
      * <p>内置剧本回 E_BUILTIN；未知 id 回 E_NOT_FOUND；被未归档局引用回 E_IN_USE

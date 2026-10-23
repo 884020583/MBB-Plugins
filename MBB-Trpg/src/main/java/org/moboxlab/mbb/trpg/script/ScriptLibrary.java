@@ -80,18 +80,14 @@ public final class ScriptLibrary implements ScriptCatalog {
         this.usageIndex = index;
     }
 
-    /** 内置剧本加载期告警，供装配层打日志。 */
-    public List<String> builtinWarnings() {
-        return builtin.warnings();
-    }
-
     /** 导入剧本数量。 */
     public int importedCount() {
         return imported.size();
     }
 
     /** 启动加载时被跳过（校验失败、内置冲突、文件名不一致、读失败）的文件数。 */
-    public int skippedCount() {
+    @Override
+    public int skippedFileCount() {
         return skippedFiles;
     }
 
@@ -192,7 +188,11 @@ public final class ScriptLibrary implements ScriptCatalog {
             }
             checkInUse(id);
             File file = new File(scriptDir, id + JSON_SUFFIX);
-            if (file.exists() && !file.delete()) {
+            if (!file.exists()) {
+                throw new ScriptException(ScriptErrorCodes.E_NOT_FOUND, "$.id",
+                        "剧本文件已不存在：" + id);
+            }
+            if (!file.delete()) {
                 throw new ScriptException(ScriptErrorCodes.E_IO, "$.id", "删除剧本文件失败：" + id);
             }
             imported.remove(id);
@@ -238,8 +238,9 @@ public final class ScriptLibrary implements ScriptCatalog {
     /**
      * 导入落盘：校验、来源冲突检查、原子写入与缓存更新在同一把写锁内完成。
      *
-     * <p>新建模式在目标 id 已存在时回 E_EXISTS；替换模式在目标不存在时回 E_NOT_FOUND，
-     * 两种模式都受内置 id 与未归档局引用限制。</p>
+     * <p>新建模式在目标 id 已存在时回 E_EXISTS；替换模式在目标不存在时按新建处理
+     * （见 docs/scripts/README.md「replace 与新建同一路径」），两种模式都受内置 id
+     * 与未归档局引用限制。</p>
      *
      * @param content 原始 UTF-8 字节，非空
      * @param mode    新建或替换
@@ -282,10 +283,7 @@ public final class ScriptLibrary implements ScriptCatalog {
                 throw new ScriptException(ScriptErrorCodes.E_BUILTIN, "$.id", "内置剧本不可覆盖：" + id);
             }
             boolean exists = imported.containsKey(id);
-            if (mode.isReplace() && !exists) {
-                // 文档口径：替换模式要求 id 已存在，否则按新建处理
-                exists = false;
-            } else if (!mode.isReplace() && exists) {
+            if (!mode.isReplace() && exists) {
                 throw new ScriptException(ScriptErrorCodes.E_EXISTS, "$.id", "剧本已存在：" + id);
             }
             checkInUse(id);
@@ -298,7 +296,8 @@ public final class ScriptLibrary implements ScriptCatalog {
         }
     }
 
-    private void checkInUse(String id) throws ScriptException {        ScriptUsageIndex index = usageIndex;
+    private void checkInUse(String id) throws ScriptException {
+        ScriptUsageIndex index = usageIndex;
         if (index != null && index.isInUse(id)) {
             throw new ScriptException(ScriptErrorCodes.E_IN_USE, "$.id",
                     "剧本仍被未归档的局引用，请先结束这些局：" + id);
@@ -318,7 +317,9 @@ public final class ScriptLibrary implements ScriptCatalog {
             try {
                 Files.move(temp, target.toPath(), StandardCopyOption.REPLACE_EXISTING,
                         StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException ignored) {
+            } catch (AtomicMoveNotSupportedException error) {
+                // 部分文件系统（网络盘、FAT）不支持原子移动：退化为普通 move，并留下日志。
+                logger.sendWarn("[MBB-Trpg] 当前文件系统不支持原子移动，退化为普通 move：" + target);
                 Files.move(temp, target.toPath(), StandardCopyOption.REPLACE_EXISTING);
             }
             temp = null;

@@ -98,7 +98,8 @@ final class AdminCommandHandler {
         }
         // 其余情况按剧本 ID 处理：换本局剧本只允许群内、由局面层判定 KP 与招募期。
         if (!actor.inGroup()) {
-            context.rejectError(actor, "script-private", "请在群内使用", "私聊只支持 help 与 /roll。");
+            context.rejectError(actor, "script-private", "请在群内使用",
+                    TrpgCommandService.PRIVATE_NEXT);
             return;
         }
         SessionResult result = context.sessions().changeScript(actor, action);
@@ -220,13 +221,13 @@ final class AdminCommandHandler {
     private static String deleteReason(ScriptException error) {
         String code = error == null ? "" : error.code();
         if (ScriptErrorCodes.E_BUILTIN.equals(code)) {
-            return "内置剧本不能删除";
+            return ScriptErrorCodes.E_BUILTIN + "：内置剧本不能删除";
         }
         if (ScriptErrorCodes.E_IN_USE.equals(code)) {
-            return "该剧本正被未归档的局引用，请先结束这些局";
+            return ScriptErrorCodes.E_IN_USE + "：该剧本正被未归档的局引用，请先结束这些局";
         }
         if (ScriptErrorCodes.E_NOT_FOUND.equals(code)) {
-            return "剧本不存在或已被删除";
+            return ScriptErrorCodes.E_NOT_FOUND + "：剧本不存在或已被删除";
         }
         return code + "：" + (error == null ? "删除失败" : error.getMessage());
     }
@@ -260,19 +261,21 @@ final class AdminCommandHandler {
         }
         long now = context.clock().nowMillis();
         long cooldownMillis = context.config().scriptGenCooldownSeconds() * 1000L;
+        // 冷却按「发起人」计，不按群：同一个人在不同群共享 60 秒窗（README §240）。
         long remaining = context.cooldowns().remainingMillis(GEN_ACTION, actor.userId(),
-                actor.groupId(), now, cooldownMillis);
+                SessionActor.PRIVATE_GROUP_ID, now, cooldownMillis);
         if (remaining > 0L) {
             context.rejectNotice(actor, "script-gen-cooldown",
                     "生成冷却中，还需等待 " + ((remaining + 999L) / 1000L) + " 秒");
             return;
         }
-        if (admin.generation().isRunning()) {
-            context.rejectError(actor, "script-gen-busy", "已有一个剧本在生成中，请等它完成后再试",
+        if (!admin.generation().tryReserve()) {
+            context.rejectError(actor, "script-gen-busy",
+                    ScriptErrorCodes.E_AI_BUSY + "：已有一个剧本在生成中，请等它完成后再试",
                     "生成通常需要几十秒，可以稍后再发送。");
             return;
         }
-        context.cooldowns().mark(GEN_ACTION, actor.userId(), actor.groupId(), now);
+        context.cooldowns().mark(GEN_ACTION, actor.userId(), SessionActor.PRIVATE_GROUP_ID, now);
         final long groupId = actor.groupId();
         final long userId = actor.userId();
         final int finalPlayers = players;
@@ -287,6 +290,7 @@ final class AdminCommandHandler {
                 }
             });
         } catch (RuntimeException error) {
+            admin.generation().releaseReservation();
             context.rejectError(actor, "script-gen-submit", "生成任务提交失败，请稍后重试",
                     RETRY_NEXT);
         }
@@ -299,10 +303,13 @@ final class AdminCommandHandler {
         String message;
         try {
             message = TrpgMessageTemplates.scriptGenResult(
-                    generation.generate(theme, players, minutes, userId));
+                    generation.generateReserved(theme, players, minutes, userId));
         } catch (RuntimeException error) {
             message = TrpgMessageTemplates.error("剧本生成异常：" + error.getMessage(),
                     "可换题材重试，或按 /trpg script import 手工导入。");
+        } finally {
+            // generateReserved 内部已释放；异常路径再兜一次，避免槽位永久占用。
+            generation.releaseReservation();
         }
         try {
             if (groupId > SessionActor.PRIVATE_GROUP_ID) {
@@ -316,8 +323,15 @@ final class AdminCommandHandler {
     }
 
     private static int intOrDefault(String token, int fallback) {
-        Long value = longValue(token);
-        return value == null ? fallback : value.intValue();
+        String text = token == null ? "" : token.trim();
+        if (text.isEmpty()) {
+            return fallback;
+        }
+        try {
+            return Integer.parseInt(text);
+        } catch (NumberFormatException error) {
+            return fallback;
+        }
     }
 
     private static void listScripts(TrpgCommandContext context, SessionActor actor, String[] params) {
@@ -340,7 +354,8 @@ final class AdminCommandHandler {
             ScriptInfo info = infos.get(index);
             entries.add("《" + info.name() + "》（" + info.id() + "）· " + info.source().label());
         }
-        context.reply(actor, TrpgMessageTemplates.scriptList(entries, page, totalPages));
+        context.reply(actor, TrpgMessageTemplates.scriptList(entries, page, totalPages,
+                context.catalog().skippedFileCount()));
     }
 
     private static void showScript(TrpgCommandContext context, SessionActor actor, String[] params) {

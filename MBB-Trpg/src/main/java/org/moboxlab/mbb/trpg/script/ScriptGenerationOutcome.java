@@ -14,19 +14,19 @@ public final class ScriptGenerationOutcome {
 
     private final boolean success;
     private final ScriptInfo script;
-    private final int nodeCount;
+    private final int sceneCount;
     private final String errorCode;
     private final String savedFile;
     private final List<ScriptIssue> errors;
     private final int errorCount;
     private final long elapsedMs;
 
-    private ScriptGenerationOutcome(boolean success, ScriptInfo script, int nodeCount,
+    private ScriptGenerationOutcome(boolean success, ScriptInfo script, int sceneCount,
                                     String errorCode, String savedFile, List<ScriptIssue> errors,
                                     int errorCount, long elapsedMs) {
         this.success = success;
         this.script = script;
-        this.nodeCount = nodeCount;
+        this.sceneCount = sceneCount;
         this.errorCode = errorCode == null ? "" : errorCode;
         this.savedFile = savedFile == null ? "" : savedFile;
         this.errors = errors == null ? Collections.<ScriptIssue>emptyList() : errors;
@@ -35,9 +35,9 @@ public final class ScriptGenerationOutcome {
     }
 
     /** 生成并保存成功。 */
-    public static ScriptGenerationOutcome success(ScriptInfo script, int nodeCount,
+    public static ScriptGenerationOutcome success(ScriptInfo script, int sceneCount,
                                                   long elapsedMs) {
-        return new ScriptGenerationOutcome(true, script, nodeCount, "", "",
+        return new ScriptGenerationOutcome(true, script, sceneCount, "", "",
                 Collections.<ScriptIssue>emptyList(), 0, elapsedMs);
     }
 
@@ -57,8 +57,8 @@ public final class ScriptGenerationOutcome {
         return script;
     }
 
-    public int nodeCount() {
-        return nodeCount;
+    public int sceneCount() {
+        return sceneCount;
     }
 
     public String errorCode() {
