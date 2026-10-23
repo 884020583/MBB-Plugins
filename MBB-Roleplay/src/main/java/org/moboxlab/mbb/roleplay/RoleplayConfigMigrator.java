@@ -15,7 +15,7 @@ import java.util.List;
  * Roleplay 配置迁移与缺失项补全
  */
 public class RoleplayConfigMigrator {
-    private static final String CURRENT_VERSION = "40";
+    private static final String CURRENT_VERSION = "41";
 
     private static class ConfigEntry {
         private final String key;
@@ -207,7 +207,7 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("toolCoreTools","tool_search,end_turn,message_send","首轮直接开放的工具"),
             new ConfigEntry("toolLoadedMaxTools","8","单轮最多同时加载多少个工具 schema"),
             new ConfigEntry("toolSearchMaxResults","4","tool_search 单次最多返回多少个工具"),
-            new ConfigEntry("toolMaxSteps","6","单轮最多进行多少次模型-工具循环"),
+            new ConfigEntry("toolMaxSteps","16","单轮最多进行多少次模型-工具循环"),
             new ConfigEntry("toolMaxCalls","12","单轮最多执行多少个工具调用"),
             new ConfigEntry("toolResultMaxChars","16000","单个工具结果注入上下文的最大字符数"),
             new ConfigEntry("toolResultTotalMaxChars","48000","单轮所有工具结果合计最大字符数"),
@@ -328,7 +328,7 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("randomTickDedupeHours","24","相同主动行为指纹的去重小时数"),
             new ConfigEntry("randomTickMaxTokens","1200","随机刻决策输出 Token 上限"),
             new ConfigEntry("randomTickTimeoutSecond","90","随机刻请求超时秒数"),
-            new ConfigEntry("randomTickReasoningEffort","none","随机刻思考强度：none / low / medium / high"));
+            new ConfigEntry("randomTickReasoningEffort","low","随机刻思考强度：none / low / medium / high"));
 
     public static int ensure(Plugin plugin) {
         if (plugin == null) return 0;
@@ -420,6 +420,10 @@ public class RoleplayConfigMigrator {
                 .equals(config.getString("webSearchUrl",""));
         boolean legacyToolStepBalance = version < 38
                 && "8".equals(config.getString("toolMaxSteps",""));
+        boolean legacyToolStepDefault = version < 41
+                && "6".equals(config.getString("toolMaxSteps",""));
+        boolean legacyRandomTickReasoning = version < 41
+                && "none".equals(config.getString("randomTickReasoningEffort",""));
         boolean legacyToolCallBalance = version < 38
                 && "16".equals(config.getString("toolMaxCalls",""));
         boolean legacyToolLoopBalance = version < 38
@@ -437,7 +441,7 @@ public class RoleplayConfigMigrator {
                 plugin.getLogger().sendWarn("自动补全 Roleplay 配置失败，请检查 config.yml 权限！");
             }
         }
-        if (version < 40) {
+        if (version < 41) {
             config.set("configVersion",CURRENT_VERSION);
             if (!versionMissing) changed++;
         }
@@ -474,7 +478,7 @@ public class RoleplayConfigMigrator {
             changed++;
         }
         if (legacyToolSteps) {
-            config.set("toolMaxSteps","6");
+            config.set("toolMaxSteps","16");
             changed++;
         }
         if (legacyToolCalls) {
@@ -499,7 +503,15 @@ public class RoleplayConfigMigrator {
             changed += 2;
         }
         if (legacyToolStepBalance) {
-            config.set("toolMaxSteps","6");
+            config.set("toolMaxSteps","16");
+            changed++;
+        }
+        if (legacyToolStepDefault) {
+            config.set("toolMaxSteps","16");
+            changed++;
+        }
+        if (legacyRandomTickReasoning) {
+            config.set("randomTickReasoningEffort","low");
             changed++;
         }
         if (legacyToolCallBalance) {
@@ -607,7 +619,7 @@ public class RoleplayConfigMigrator {
             config.set("replySegmentMaxChars","30");
             changed++;
         }
-        if (version < 40 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
+        if (version < 41 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
                 || legacyRouterMaxTokens || legacyRouterMaxTokens1200
                 || legacyPromptTotalChars || legacyMemoryRelevanceMaxChars
                 || legacyGlobalMemoryRelevanceMaxChars || legacyRouterReasoningEffort

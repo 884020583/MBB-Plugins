@@ -118,7 +118,7 @@ randomTickQzoneDailyMax: 2
 randomTickDedupeHours: 24
 randomTickMaxTokens: 1200
 randomTickTimeoutSecond: 90
-randomTickReasoningEffort: "none"
+randomTickReasoningEffort: "low"
 activeMemory: true
 imageUnderstandingEnable: true
 imageUnderstandingMode: "addressed"
@@ -191,7 +191,7 @@ toolEnable: true
 toolCoreTools: "tool_search,end_turn,message_send"
 toolLoadedMaxTools: 8
 toolSearchMaxResults: 4
-toolMaxSteps: 6
+toolMaxSteps: 16
 toolMaxCalls: 12
 toolResultMaxChars: 16000
 toolResultTotalMaxChars: 48000

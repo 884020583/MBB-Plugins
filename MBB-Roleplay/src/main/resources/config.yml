@@ -1,7 +1,7 @@
 #MBB-Roleplay 插件配置
 
 #配置结构版本，插件升级时自动维护
-configVersion: 40
+configVersion: 41
 #是否启用角色扮演
 enable: true
 #AI 使用的模型配置名，对应 MBB-AI 的 profiles.json
@@ -314,7 +314,7 @@ toolLoadedMaxTools: 8
 #tool_search 单次最多返回多少个工具
 toolSearchMaxResults: 4
 #单轮最多进行多少次模型-工具循环
-toolMaxSteps: 6
+toolMaxSteps: 16
 #单轮最多执行多少个工具调用
 toolMaxCalls: 12
 #单个工具结果注入上下文的最大字符数
@@ -558,4 +558,4 @@ randomTickMaxTokens: 1200
 #随机刻请求超时秒数
 randomTickTimeoutSecond: 90
 #随机刻思考强度：none / low / medium / high
-randomTickReasoningEffort: "none"
+randomTickReasoningEffort: "low"

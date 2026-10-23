@@ -190,7 +190,7 @@ public class RoleplayConfig {
     public String toolCoreTools = "tool_search,end_turn,message_send";
     public int toolLoadedMaxTools = 8;
     public int toolSearchMaxResults = 4;
-    public int toolMaxSteps = 6;
+    public int toolMaxSteps = 16;
     public int toolMaxCalls = 12;
     public int toolResultMaxChars = 16000;
     public int toolResultTotalMaxChars = 48000;
@@ -307,7 +307,7 @@ public class RoleplayConfig {
     public int randomTickDedupeHours = 24;
     public int randomTickMaxTokens = 1200;
     public int randomTickTimeoutSecond = 90;
-    public String randomTickReasoningEffort = "none";
+    public String randomTickReasoningEffort = "low";
     public String commandPrefixes = "/,!,＃,#";
 
     private static double parseDouble(String value,double defaultValue) {
@@ -596,7 +596,7 @@ public class RoleplayConfig {
                 "tool_search,end_turn,message_send");
         config.toolLoadedMaxTools = plugin.getConfig().getInt("toolLoadedMaxTools",8);
         config.toolSearchMaxResults = plugin.getConfig().getInt("toolSearchMaxResults",4);
-        config.toolMaxSteps = plugin.getConfig().getInt("toolMaxSteps",6);
+        config.toolMaxSteps = plugin.getConfig().getInt("toolMaxSteps",16);
         config.toolMaxCalls = plugin.getConfig().getInt("toolMaxCalls",12);
         config.toolResultMaxChars = plugin.getConfig().getInt("toolResultMaxChars",16000);
         config.toolResultTotalMaxChars =
@@ -738,7 +738,7 @@ public class RoleplayConfig {
         config.randomTickMaxTokens = plugin.getConfig().getInt("randomTickMaxTokens",1200);
         config.randomTickTimeoutSecond = plugin.getConfig().getInt("randomTickTimeoutSecond",90);
         config.randomTickReasoningEffort = normalizeEffort(
-                plugin.getConfig().getString("randomTickReasoningEffort","none"));
+                plugin.getConfig().getString("randomTickReasoningEffort","low"));
         config.commandPrefixes = plugin.getConfig().getString("commandPrefixes","/,!,＃,#");
         if (config.aiProfile == null || config.aiProfile.trim().isEmpty()) config.aiProfile = "default";
         if (config.memoryProfile == null) config.memoryProfile = "";
@@ -1002,7 +1002,7 @@ public class RoleplayConfig {
         if (config.replyReviewMinScore < 0) config.replyReviewMinScore = 0;
         if (config.replyReviewMinScore > 100) config.replyReviewMinScore = 100;
         if (config.toolMaxSteps < 1) config.toolMaxSteps = 1;
-        if (config.toolMaxSteps > 12) config.toolMaxSteps = 12;
+        if (config.toolMaxSteps > 16) config.toolMaxSteps = 16;
         if (config.toolCoreTools == null) config.toolCoreTools = "";
         if (config.toolLoadedMaxTools < 1) config.toolLoadedMaxTools = 1;
         if (config.toolLoadedMaxTools > 32) config.toolLoadedMaxTools = 32;
