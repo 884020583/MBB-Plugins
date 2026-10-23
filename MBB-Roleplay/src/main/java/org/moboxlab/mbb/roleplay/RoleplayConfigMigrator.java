@@ -15,7 +15,7 @@ import java.util.List;
  * Roleplay 配置迁移与缺失项补全
  */
 public class RoleplayConfigMigrator {
-    private static final String CURRENT_VERSION = "37";
+    private static final String CURRENT_VERSION = "38";
 
     private static class ConfigEntry {
         private final String key;
@@ -85,6 +85,7 @@ public class RoleplayConfigMigrator {
                     "同一用户刚被回复后，多少秒内的短句视为补充不再回复，0 表示关闭"),
             new ConfigEntry("splitMessageSuppressMaxChars","20","触发补充抑制的最大字数"),
             new ConfigEntry("shortContextMessages","200","即时上下文消息条数"),
+            new ConfigEntry("shortContextMaxChars","12000","即时上下文最多注入字符数"),
             new ConfigEntry("shortTermDays","3","短期记忆覆盖天数"),
             new ConfigEntry("memoryUpdateMessages","50","每累计多少条消息更新一次记忆"),
             new ConfigEntry("memoryExtractMessages","300","每次记忆整理最多读取的消息条数"),
@@ -203,12 +204,22 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("replyReviewTimeoutSecond","60","回复复核请求超时秒数"),
             new ConfigEntry("replyReviewMinScore","70","回复复核最低通过分"),
             new ConfigEntry("toolEnable","true","是否允许角色通过原生工具调用查询信息或维护私有工作区"),
-            new ConfigEntry("toolMaxSteps","8","单轮最多进行多少次模型-工具循环"),
-            new ConfigEntry("toolMaxCalls","16","单轮最多执行多少个工具调用"),
+            new ConfigEntry("toolCoreTools","tool_search,end_turn,message_send","首轮直接开放的工具"),
+            new ConfigEntry("toolLoadedMaxTools","8","单轮最多同时加载多少个工具 schema"),
+            new ConfigEntry("toolSearchMaxResults","4","tool_search 单次最多返回多少个工具"),
+            new ConfigEntry("toolMaxSteps","6","单轮最多进行多少次模型-工具循环"),
+            new ConfigEntry("toolMaxCalls","12","单轮最多执行多少个工具调用"),
             new ConfigEntry("toolResultMaxChars","16000","单个工具结果注入上下文的最大字符数"),
+            new ConfigEntry("toolResultTotalMaxChars","48000","单轮所有工具结果合计最大字符数"),
             new ConfigEntry("toolLiveMessageMax","10","工具执行期间最多并入多少条新群消息"),
-            new ConfigEntry("toolLoopMaxMillis","90000","单轮工具循环总时间上限毫秒"),
+            new ConfigEntry("toolLoopMaxMillis","75000","单轮工具循环总时间上限毫秒"),
             new ConfigEntry("toolCallMaxMillis","20000","单个工具调用时间上限毫秒"),
+            new ConfigEntry("toolParallelReadOnlyEnable","true","只读工具是否允许并行执行"),
+            new ConfigEntry("toolParallelMax","4","工具执行线程数上限"),
+            new ConfigEntry("toolAiRetryCount","0","工具循环中的 AI 请求重试次数"),
+            new ConfigEntry("toolTurnPersistEnable","true","是否持久化工具回合"),
+            new ConfigEntry("toolTurnKeepHours","24","工具回合记录保留小时数"),
+            new ConfigEntry("toolRecoverMaxMinutes","60","未完成工具回合允许恢复的最大分钟数"),
             new ConfigEntry("toolMemoryInjectItems","8","下一轮注入最近多少次工具调用结果"),
             new ConfigEntry("toolMemoryInjectMaxChars","6000","工具调用结果注入字符上限"),
             new ConfigEntry("toolMemoryKeepHours","72","工具调用记录保留小时数"),
@@ -218,11 +229,18 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("workspaceMaxWriteChars","64000","工作区单次写入最大字符数"),
             new ConfigEntry("workspaceMaxFilesPerList","200","工作区列表最多返回多少个文件"),
             new ConfigEntry("workspaceMaxTotalBytes","67108864","角色工作区总大小上限，默认 64MB"),
+            new ConfigEntry("workspaceHistoryEnable","true","覆盖写入前是否保留历史版本"),
+            new ConfigEntry("workspaceHistoryMaxVersions","10","每个文件最多保留多少个历史版本"),
+            new ConfigEntry("workspaceTrashKeepDays","30","工作区回收站保留天数"),
             new ConfigEntry("webEnable","true","是否开放受限网页浏览工具"),
-            new ConfigEntry("webWhitelist","wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com","网页允许域名，多个用英文逗号分隔"),
+            new ConfigEntry("webWhitelist","wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,fandom.com,namu.wiki,arca.live,pixiv.net,x.com,youtube.com,b23.tv","网页允许域名，多个用英文逗号分隔"),
+            new ConfigEntry("webSearchUrl","https://html.duckduckgo.com/html/?q={query}","联网搜索地址模板"),
+            new ConfigEntry("webSearchMaxResults","5","单次联网搜索最多返回多少条摘要"),
+            new ConfigEntry("webOwnerAuthWindowSecond","300","owner 内网访问授权窗口秒数"),
             new ConfigEntry("webTimeoutSecond","15","网页连接超时秒数"),
             new ConfigEntry("webMaxBytes","262144","网页最多读取字节数"),
             new ConfigEntry("webMaxChars","12000","网页净化后最多注入字符数"),
+            new ConfigEntry("webCacheSecond","300","网页和搜索结果缓存秒数"),
             new ConfigEntry("pacingEnable","true","是否在发送前加入拟人打字延迟"),
             new ConfigEntry("pacingBaseMs","350","拟人延迟基础毫秒"),
             new ConfigEntry("pacingPerCharMs","25","每个字符增加的延迟毫秒"),
@@ -376,6 +394,16 @@ public class RoleplayConfigMigrator {
                 && "8".equals(config.getString("toolMaxCalls",""));
         boolean legacyToolResultChars = version < 37
                 && "8000".equals(config.getString("toolResultMaxChars",""));
+        boolean legacyWebWhitelist = version < 38
+                && ("wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,"
+                +"kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com")
+                .equals(config.getString("webWhitelist",""));
+        boolean legacyToolStepBalance = version < 38
+                && "8".equals(config.getString("toolMaxSteps",""));
+        boolean legacyToolCallBalance = version < 38
+                && "16".equals(config.getString("toolMaxCalls",""));
+        boolean legacyToolLoopBalance = version < 38
+                && "90000".equals(config.getString("toolLoopMaxMillis",""));
         int changed = 0;
         List<ConfigEntry> missing = new ArrayList<>();
         for (ConfigEntry entry : DEFAULTS) {
@@ -389,7 +417,7 @@ public class RoleplayConfigMigrator {
                 plugin.getLogger().sendWarn("自动补全 Roleplay 配置失败，请检查 config.yml 权限！");
             }
         }
-        if (version < 37) {
+        if (version < 38) {
             config.set("configVersion",CURRENT_VERSION);
             if (!versionMissing) changed++;
         }
@@ -426,15 +454,35 @@ public class RoleplayConfigMigrator {
             changed++;
         }
         if (legacyToolSteps) {
-            config.set("toolMaxSteps","8");
+            config.set("toolMaxSteps","6");
             changed++;
         }
         if (legacyToolCalls) {
-            config.set("toolMaxCalls","16");
+            config.set("toolMaxCalls","12");
             changed++;
         }
         if (legacyToolResultChars) {
             config.set("toolResultMaxChars","16000");
+            changed++;
+        }
+        if (legacyWebWhitelist) {
+            config.set("webWhitelist",
+                    "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,"
+                            +"kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,"
+                            +"deepwiki.com,reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,"
+                            +"fandom.com,namu.wiki,arca.live,pixiv.net,x.com,youtube.com,b23.tv");
+            changed++;
+        }
+        if (legacyToolStepBalance) {
+            config.set("toolMaxSteps","6");
+            changed++;
+        }
+        if (legacyToolCallBalance) {
+            config.set("toolMaxCalls","12");
+            changed++;
+        }
+        if (legacyToolLoopBalance) {
+            config.set("toolLoopMaxMillis","75000");
             changed++;
         }
         if (legacyRoleBotChance) {

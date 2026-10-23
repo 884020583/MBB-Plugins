@@ -1,7 +1,7 @@
 #MBB-Roleplay 插件配置
 
 #配置结构版本，插件升级时自动维护
-configVersion: 36
+configVersion: 38
 #是否启用角色扮演
 enable: true
 #AI 使用的模型配置名，对应 MBB-AI 的 profiles.json
@@ -95,6 +95,8 @@ splitMessageSuppressSecond: 20
 splitMessageSuppressMaxChars: 20
 #即时上下文消息条数
 shortContextMessages: 200
+#即时上下文最多注入多少字符，按新到旧保留，避免 200 条长消息把请求撑爆
+shortContextMaxChars: 12000
 #短期记忆覆盖天数
 shortTermDays: 3
 #每累计多少条消息更新一次记忆
@@ -305,18 +307,38 @@ replyReviewTimeoutSecond: 60
 replyReviewMinScore: 70
 #是否允许角色通过原生工具调用查询信息或维护私有工作区
 toolEnable: true
+#首轮直接开放的轻量工具，其他工具通过 tool_search 按需加载
+toolCoreTools: "tool_search,end_turn,message_send"
+#单轮最多同时加载多少个工具 schema
+toolLoadedMaxTools: 8
+#tool_search 单次最多返回多少个工具
+toolSearchMaxResults: 4
 #单轮最多进行多少次模型-工具循环
-toolMaxSteps: 8
+toolMaxSteps: 6
 #单轮最多执行多少个工具调用
-toolMaxCalls: 16
+toolMaxCalls: 12
 #单个工具结果注入上下文的最大字符数
 toolResultMaxChars: 16000
+#单轮所有工具结果合计最多注入多少字符
+toolResultTotalMaxChars: 48000
 #工具执行期间最多并入多少条新群消息
 toolLiveMessageMax: 10
 #单轮工具循环总时间上限毫秒
-toolLoopMaxMillis: 90000
+toolLoopMaxMillis: 75000
 #单个工具调用时间上限毫秒
 toolCallMaxMillis: 20000
+#只读工具是否允许同一模型响应内并行执行
+toolParallelReadOnlyEnable: true
+#工具执行线程数上限
+toolParallelMax: 4
+#工具循环中的 AI 请求重试次数，默认不重试以控制整轮时间
+toolAiRetryCount: 0
+#是否持久化工具回合，进程重启后可恢复未完成回合
+toolTurnPersistEnable: true
+#工具回合记录保留小时数
+toolTurnKeepHours: 24
+#进程重启后，开始时间在多长分钟内且未完成的工具回合可以恢复
+toolRecoverMaxMinutes: 60
 #下一轮注入最近多少次工具调用结果
 toolMemoryInjectItems: 8
 #工具调用结果注入字符上限
@@ -335,16 +357,30 @@ workspaceMaxWriteChars: 64000
 workspaceMaxFilesPerList: 200
 #工作区总大小上限，默认 64MB
 workspaceMaxTotalBytes: 67108864
+#覆盖写入前是否在 .history 留下旧版本
+workspaceHistoryEnable: true
+#每个文件最多保留多少个历史版本
+workspaceHistoryMaxVersions: 10
+#工作区回收站保留天数
+workspaceTrashKeepDays: 30
 #是否开放受限网页浏览工具
 webEnable: true
 #网页允许域名，多个用英文逗号分隔
-webWhitelist: "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com"
+webWhitelist: "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,fandom.com,namu.wiki,arca.live,pixiv.net,x.com,youtube.com,b23.tv"
+#联网搜索地址模板，{query} 会替换成 URL 编码后的查询词
+webSearchUrl: "https://html.duckduckgo.com/html/?q={query}"
+#单次联网搜索最多返回多少条摘要
+webSearchMaxResults: 5
+#owner 最近多少秒内提出过内网访问请求时，允许工具访问内网地址
+webOwnerAuthWindowSecond: 300
 #网页连接超时秒数
 webTimeoutSecond: 15
 #网页最多读取字节数
 webMaxBytes: 262144
 #网页净化后最多注入字符数
 webMaxChars: 12000
+#网页和搜索结果缓存秒数，0 表示不缓存
+webCacheSecond: 300
 #是否启用本地提示词硬字符预算
 contextHardLimitEnable: false
 #启用本地硬预算时，单轮提示词总字符上限
