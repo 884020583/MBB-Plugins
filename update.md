@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.6.0.0.1732 | 2026-10-23 | `MBB-AI` 支持 OpenAI 原生 `tools/tool_calls/tool_call_id` 透传与解析，带工具请求绕过本地缓存。`MBB-Roleplay` 新增有限 Agent Loop：可先后调用工具、读取结果、继续决策，或通过 `end_turn` 主动保持沉默；新增 `self_state`、群历史、长期记忆、群员档案和角色私有工作区工具。工作区固定为 `plugins/MBB-Roleplay/data/`，拒绝绝对路径、`..` 和符号链接逃逸，支持列目录、读取、写入、追加、搜索与删除。工具执行期间到达的新群消息进入 live inbox，在工具结果后并入同一轮上下文，不会再进入下一批重复处理。回复发送增加连续节拍：角色可用换行控制 1～3 个语义节拍，运行时按长度、时段和群活跃度计算间隔；`MBB-BotHub` 的打字状态继续覆盖生成阶段。 |
 | V0.5.69.0.0908 | 2026-10-17 | `MBB-Roleplay` 新增安全与防注入：`RoleplaySafetyService` 拦截系统提示词诱导、越狱指令和现实隐私索取，命中后不进入路由和回复链路；长期记忆写入前做同样的安全检查，阻止被诱导内容污染记忆；新增 `safetyGuardEnable`、`promptInjectionGuardEnable`、`privacyGuardEnable` 配置。 |
 | V0.5.68.0.0907 | 2026-10-17 | `MBB-Roleplay` 新增拟人节奏：发送前按回复长度、深夜时段和群注意力计算打字延迟，加入随机抖动和延迟上限，让回复更像真人输入；新增 `pacingEnable`、`pacingBaseMs`、`pacingPerCharMs`、`pacingMaxMs`、`pacingNightMultiplier`、`pacingActiveMultiplier`、`pacingActiveThreshold`、`pacingNightStartHour`、`pacingNightEndHour` 配置。 |
 | V0.5.67.0.0905 | 2026-10-17 | `MBB-Roleplay` 新增记忆冲突整理：长期记忆增加 `memoryStatus` 与 `supersededBy`，写入新记忆时检测同群同类型同用户下的相反极性内容，命中后把旧记忆归档而不是删除；查询、合并、时间线和记忆计数只使用 active 记忆；备份/恢复保留归档状态；新增 `/role memory conflicts [条数]` 查看冲突归档。新增 `memoryConflictResolveEnable`、`memoryConflictMinOverlap` 配置。 |
