@@ -77,8 +77,9 @@ public class AIService implements PluginService {
             return error("没有找到 AI 模型配置："+(profileName == null ? config.defaultProfile : profileName),"profile",false);
         }
         long startTime = System.currentTimeMillis();
+        boolean toolRequest = params.getJSONArray("tools") != null;
         String cacheKey = cacheKey(profile,messages,params);
-        JSONObject cached = getCache(cacheKey);
+        JSONObject cached = toolRequest ? null : getCache(cacheKey);
         if (cached != null) {
             stats.record(profile,action,true,true,0L,null);
             return cached;
@@ -99,7 +100,9 @@ public class AIService implements PluginService {
                 result.put("cached",false);
                 result.put("content",MarkdownUtil.toPlainText(result.getString("content")));
                 stats.record(profile,action,true,false,System.currentTimeMillis() - startTime,result.getJSONObject("usage"));
-                putCache(cacheKey,result);
+                if (!toolRequest && result.getJSONArray("toolCalls") == null) {
+                    putCache(cacheKey,result);
+                }
             } else {
                 stats.record(profile,action,false,false,System.currentTimeMillis() - startTime,result.getJSONObject("usage"));
             }
@@ -233,7 +236,10 @@ public class AIService implements PluginService {
         int retryCount = retryCount(params);
         return profile.name+"|"+(sessionId == null ? "" : sessionId)+"|"
                 +temperature+"|"+maxTokens+"|"+reasoningEffort+"|"+timeoutSeconds+"|"
-                +retryCount+"|"+messages.toJSONString();
+                +retryCount+"|"+(params == null || params.get("tools") == null
+                ? "" : params.get("tools").toString())+"|"
+                +(params == null || params.get("tool_choice") == null
+                ? "" : params.get("tool_choice").toString())+"|"+messages.toJSONString();
     }
 
     private int timeoutSeconds(AIProfile profile,JSONObject params) {

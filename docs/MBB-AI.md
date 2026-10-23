@@ -33,6 +33,23 @@ JSONObject result = service.call("chat",params);
 | `usage` | 查看请求、Token、耗时和趋势统计 |
 | `reload` | 重载 AI 配置 |
 
+### 原生工具调用
+
+`chat` 参数可以透传 OpenAI 兼容工具协议：
+
+```json
+{
+  "tools": [{"type":"function","function":{"name":"example","description":"...","parameters":{}}}],
+  "tool_choice": "auto",
+  "parallel_tool_calls": false
+}
+```
+
+模型返回 `tool_calls` 时，结果会带上原始 `toolCalls` 数组。调用方需要把 assistant 的
+`tool_calls` 和后续 `role=tool`、`tool_call_id` 消息原样追加到下一轮 `messages`。
+
+带 `tools` 的请求默认绕过 MBB-AI 本地缓存；普通文本请求仍按原配置缓存。
+
 ## 配置
 
 `config.yml`：

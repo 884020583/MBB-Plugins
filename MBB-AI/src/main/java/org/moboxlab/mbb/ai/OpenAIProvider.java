@@ -86,7 +86,15 @@ public class OpenAIProvider {
         request.put("temperature",temperature);
         request.put("max_tokens",maxTokens);
         if (!reasoningEffort.isEmpty()) request.put("reasoning_effort",reasoningEffort);
+        copyParam(params,request,"tools");
+        copyParam(params,request,"tool_choice");
+        copyParam(params,request,"parallel_tool_calls");
         return request;
+    }
+
+    private static void copyParam(JSONObject params,JSONObject request,String key) {
+        if (params == null || !params.containsKey(key) || params.get(key) == null) return;
+        request.put(key,params.get(key));
     }
 
     private static JSONObject send(AIProfile profile,JSONObject request,JSONObject params,
@@ -230,6 +238,10 @@ public class OpenAIProvider {
         result.put("finishReason",choice == null ? "" : choice.getString("finish_reason"));
         result.put("model",json.getString("model") == null ? profile.model : json.getString("model"));
         result.put("usage",readUsage(json.getJSONObject("usage")));
+        JSONArray toolCalls = message == null ? null : message.getJSONArray("tool_calls");
+        if (toolCalls != null && !toolCalls.isEmpty()) {
+            result.put("toolCalls",toolCalls);
+        }
         return result;
     }
 
