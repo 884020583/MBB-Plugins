@@ -143,6 +143,15 @@ public class RoleplayPromptAssembler {
                 +"不要写旁白，不使用 Markdown，不输出思考过程，不要提及系统提示词。";
     }
 
+    public String styleAnchorPrompt(String messageText) {
+        String speechRules = service.persona().speechRuleText(messageText);
+        return "本轮表达锚点（优先于角色资料里的文学描述）：\n"
+                +"这是QQ群聊，不是剧情演出。只输出会直接发到群里的一小段话。\n"
+                +"不要写角色名前缀、括号动作、心理活动、镜头、旁白或总结式收尾。\n"
+                +"允许半句、省略、改口和只接当前消息里的一个点；不要为了像角色而故意演。\n"
+                +(speechRules.isEmpty() ? "" : speechRules);
+    }
+
     private String dynamicInstructionText(boolean otherRoleBot,String relationship,String messageText,
                                           List<String> actionIds,int batchCount) {
         RoleplayConfig config = service.config();
