@@ -174,6 +174,13 @@ public class RoleplayToolLoopService {
                 addUsage(usage,response.getJSONObject("usage"));
                 JSONArray calls = response.getJSONArray("toolCalls");
                 if (calls == null || calls.isEmpty()) {
+                    int liveCount = finishLiveMessages(groupID,token,messages,toolTrace);
+                    if (liveCount > 0) {
+                        service.toolTurnService().update(token,messages,params);
+                        service.plugin().getLogger().sendInfo("[工具] 群"+groupID
+                                +" 最终回复生成期间又收到 "+liveCount+" 条消息，丢弃旧候选并重新生成");
+                        continue;
+                    }
                     suppressDuplicateFinal(groupID,response,active);
                     response.put("usage",usage);
                     response.put("toolTrace",toolTrace);
@@ -535,29 +542,38 @@ public class RoleplayToolLoopService {
     private JSONObject recoverWithoutTools(long groupID,String token,JSONArray messages,
                                            JSONObject params,JSONObject usage,JSONArray toolTrace,
                                            long deadline) {
-        appendLiveMessages(groupID,token,messages,toolTrace);
         PluginService ai = service.plugin().getServer().getPluginManager().getService("MBB-AI");
         if (ai == null) return null;
         JSONObject callParams = copy(params);
-        callParams.put("messages",messages);
         callParams.put("retryCount",service.config().toolAiRetryCount);
-        callParams.put("timeoutSeconds",remainingSeconds(deadline));
         callParams.remove("tools");
         callParams.remove("tool_choice");
         callParams.remove("parallel_tool_calls");
-        long start = System.currentTimeMillis();
-        JSONObject response = callAi(ai,callParams,deadline,null);
-        RoleplayAiLog.log(service.plugin().getLogger(),"工具收尾",groupID,response,
-                System.currentTimeMillis() - start);
-        if (response == null || !response.getBooleanValue("status")) return null;
-        JSONArray calls = response.getJSONArray("toolCalls");
-        if (calls != null && !calls.isEmpty()) return null;
-        addUsage(usage,response.getJSONObject("usage"));
-        response.put("usage",usage);
-        response.put("toolTrace",toolTrace);
-        service.plugin().getLogger().sendInfo("[工具] 群"+groupID
-                +" 达到最大轮数后完成一次无工具收尾");
-        return response;
+        for (int attempt = 0; attempt < 3; attempt++) {
+            appendLiveMessages(groupID,token,messages,toolTrace);
+            callParams.put("messages",messages);
+            callParams.put("timeoutSeconds",remainingSeconds(deadline));
+            long start = System.currentTimeMillis();
+            JSONObject response = callAi(ai,callParams,deadline,null);
+            RoleplayAiLog.log(service.plugin().getLogger(),"工具收尾",groupID,response,
+                    System.currentTimeMillis() - start);
+            if (response == null || !response.getBooleanValue("status")) return null;
+            JSONArray calls = response.getJSONArray("toolCalls");
+            if (calls != null && !calls.isEmpty()) return null;
+            addUsage(usage,response.getJSONObject("usage"));
+            int liveCount = finishLiveMessages(groupID,token,messages,toolTrace);
+            if (liveCount > 0) {
+                service.plugin().getLogger().sendInfo("[工具] 群"+groupID
+                        +" 收尾回复生成期间又收到 "+liveCount+" 条消息，丢弃旧候选并重新生成");
+                continue;
+            }
+            response.put("usage",usage);
+            response.put("toolTrace",toolTrace);
+            service.plugin().getLogger().sendInfo("[工具] 群"+groupID
+                    +" 达到最大轮数后完成一次无工具收尾");
+            return response;
+        }
+        return null;
     }
 
     /**
@@ -578,18 +594,21 @@ public class RoleplayToolLoopService {
         if (safety.getBooleanValue("block")) return false;
         if ((service.hasImageContent(event.getMessage()) || service.hasStickerContent(event.getMessage()))
                 && !service.hasMeaningfulText(event.getMessage())) return false;
-        if (active.messages.size() >= service.config().toolLiveMessageMax) {
-            service.plugin().getLogger().sendWarn("[工具] 群"+event.getGroupID()
-                    +" 工具执行期间新消息超过上限，本条转入下一回合");
-            return false;
-        }
         LiveMessage live = new LiveMessage();
         live.userID = event.getUserID();
         live.userName = service.senderName(event);
         live.content = content;
         live.messageID = event.getMessageID();
         live.time = System.currentTimeMillis();
-        active.messages.add(live);
+        synchronized (active) {
+            if (!active.acceptingLive) return false;
+            if (active.messages.size() >= service.config().toolLiveMessageMax) {
+                service.plugin().getLogger().sendWarn("[工具] 群"+event.getGroupID()
+                        +" 工具执行期间新消息超过上限，本条转入下一回合");
+                return false;
+            }
+            active.messages.add(live);
+        }
         try {
             service.toolTurnService().appendLive(active.token,live.toJson());
         } catch (Exception e) {
@@ -680,13 +699,34 @@ public class RoleplayToolLoopService {
         }
     }
 
-    private void appendLiveMessages(long groupID,String token,JSONArray messages,JSONArray toolTrace) {
+    private int appendLiveMessages(long groupID,String token,JSONArray messages,JSONArray toolTrace) {
+        return drainLiveMessages(groupID,token,messages,toolTrace,false);
+    }
+
+    /**
+     * 最终回复采纳前关闭 live inbox，再原子地 drain 一次。
+     * 关闭后到达的消息不会再进入当前回合，而会正常进入下一批。
+     */
+    private int finishLiveMessages(long groupID,String token,JSONArray messages,JSONArray toolTrace) {
+        return drainLiveMessages(groupID,token,messages,toolTrace,true);
+    }
+
+    private int drainLiveMessages(long groupID,String token,JSONArray messages,
+                                  JSONArray toolTrace,boolean stopAccepting) {
         ActiveTurn active = activeTurns.get(groupID);
-        if (active == null || !active.token.equals(token)) return;
+        if (active == null || !active.token.equals(token)) return 0;
         List<LiveMessage> drained = new ArrayList<>();
-        LiveMessage live;
-        while ((live = active.messages.poll()) != null) drained.add(live);
-        if (drained.isEmpty()) return;
+        if (stopAccepting) {
+            synchronized (active) {
+                active.acceptingLive = false;
+                LiveMessage live;
+                while ((live = active.messages.poll()) != null) drained.add(live);
+            }
+        } else {
+            LiveMessage live;
+            while ((live = active.messages.poll()) != null) drained.add(live);
+        }
+        if (drained.isEmpty()) return 0;
         StringBuilder builder = new StringBuilder("工具执行期间又收到了新消息。把它们和工具结果一起考虑：\n");
         for (LiveMessage item : drained) {
             builder.append(item.userName).append("（QQ：").append(item.userID).append("）：")
@@ -703,6 +743,7 @@ public class RoleplayToolLoopService {
         trace.put("stage","live_messages");
         trace.put("count",drained.size());
         toolTrace.add(trace);
+        return drained.size();
     }
 
     private String begin(long groupID) {
@@ -869,6 +910,7 @@ public class RoleplayToolLoopService {
                 Collections.synchronizedList(new ArrayList<String>());
         private volatile Future<JSONObject> aiFuture;
         private volatile boolean substantiveToolSeen;
+        private boolean acceptingLive = true;
         private final java.util.concurrent.atomic.AtomicBoolean cancelled =
                 new java.util.concurrent.atomic.AtomicBoolean();
 
