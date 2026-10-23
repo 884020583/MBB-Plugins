@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.11.1.2.0530 | 2026-10-24 | Roleplay `web_search` 可观测性增强：工具摘要直接显示实际搜索关键词、命中数和来源，控制台新增 `[搜索]` 日志，记录关键词、实际搜索源、命中数和本地缓存状态；失败摘要也带关键词，便于区分搜索词问题、空结果和搜索源失败。 |
 | V0.11.1.1.0432 | 2026-10-24 | 修复 Roleplay 工具回合 live inbox 竞态：最终回复候选生成期间到达的新消息原先可能只写入队列、未在采纳回复前 drain，导致旧候选被发送而新消息没有进入当前上下文。现在最终回复和无工具收尾都会原子关闭 live inbox、再 drain 一次；若发现新消息则丢弃旧候选并重新生成，关闭后到达的消息转入下一批。 |
 | V0.11.1.0.0338 | 2026-10-24 | `MBB-Roleplay` 网页白名单改为二次元百科与游戏资料站优先，默认移除 X、Pixiv、YouTube、微博、知乎、Reddit 和短链，新增 Bangumi、Biligame、灰机 Wiki、PRTS、Wiki.gg、Game8、AppMedia、Kamigame、巴哈动画等站点；旧默认白名单自动迁移，自定义列表不覆盖。`MBB-QQ` 好友申请支持 `requestIDs` 数组和按 `userID` 批量处理，同一 QQ 的重复申请只调用一次 OneBot，成功后统一收口剩余 pending 记录，`No such request` 标记为 expired；单轮好友申请工具次数由 1 提升到 3。补充角色 workspace 的日记、个人笔记、草稿、计划、资料索引和表情灵感用法。Qzone 当前 NapCat OneBot 未开放评论事件或回复评论 action，本轮记录为接口限制，不伪装成“再发一条说说”。 |
 | V0.11.0.0.0258 | 2026-10-24 | `MBB-Roleplay` 私聊提示词拆成稳定人设前缀和动态状态块，降低时间、关系、记忆与近期消息对提示词缓存前缀的打断；私聊接入 `MBB-Vision` 识图，模型可在同一轮回复中返回可选 `memory`，写入 `visibility=private` 的长期记忆，群聊检索与长期记忆合并只处理 `shared`，不会泄漏私聊内容。新增 `sticker_save`：当前或最近图片适合复用时，角色可主动保存到 `MBB-Sticker`，支持自定义标签和描述。`MBB-QQ` 新增 owner-only `group_leave`，代码层拒绝非 owner 诱导退群；机器人退群、被移出群或被自身禁言时私聊通知 owner。所有面向群员的 QQ 工具结果补充 `operatorQQ`、`targetQQ` 和目标 QQ 摘要。 |

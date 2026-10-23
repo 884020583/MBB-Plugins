@@ -769,23 +769,35 @@ public class RoleplayToolRegistry {
                 JSONObject payload = web.searchPayload(query,false);
                 JSONArray results = payload.getJSONArray("results");
                 boolean anyProviderResponded = providerResponded(payload.getJSONArray("attempts"));
+                String displayQuery = service.shortText(
+                        query.replace("\r"," ").replace("\n"," "),80);
+                String provider = service.safe(payload.getString("provider"));
+                if (provider.isEmpty()) provider = "unknown";
+                String cacheState = payload.getBooleanValue("cached") ? "是" : "否";
+                service.plugin().getLogger().sendInfo("[搜索] 群"+context.groupID
+                        +" 关键词="+displayQuery+" 来源="+provider
+                        +" 命中="+results.size()+" 缓存="+cacheState);
                 RoleplayToolResult result;
                 if (results.isEmpty() && !anyProviderResponded) {
-                    result = RoleplayToolResult.failed("搜索源连接失败或被风控页拦截");
+                    result = RoleplayToolResult.failed("联网搜索「"+displayQuery
+                            +"」失败：搜索源连接失败或被风控页拦截");
                     result.trust = "external-untrusted";
                 } else {
                     result = RoleplayToolResult.untrusted(
-                            results.isEmpty() ? "联网搜索没有返回可解析结果"
-                                    : "联网搜索返回 "+results.size()+" 条结果");
+                            results.isEmpty() ? "联网搜索「"+displayQuery+"」没有返回可解析结果"
+                                    : "联网搜索「"+displayQuery+"」返回 "+results.size()
+                                    +" 条结果，来源="+provider);
                 }
                 result.data.putAll(payload);
+                result.data.put("query",query);
                 if (results.isEmpty()) {
                     result.data.put("retryHint",
                             "换用作品、人物或站点的官方英文名/英文别名后重试一次，不要重复原查询");
                 }
                 return result;
             } catch (Exception e) {
-                return RoleplayToolResult.failed("联网搜索失败："+service.safe(e.getMessage()));
+                return RoleplayToolResult.failed("联网搜索「"+service.shortText(query,80)
+                        +"」失败："+service.safe(e.getMessage()));
             }
         }
 

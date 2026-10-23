@@ -126,7 +126,8 @@ toolMemoryMaxRows: 500
 读取结果按 `webTimeoutSecond`、`webMaxBytes`、`webMaxChars` 限制，并移除脚本、样式和 HTML 标签。
 `web_search` 使用 `webSearchUrl` 模板联网搜索，主搜索源无结果或连接失败时自动尝试
 `webSearchFallbackUrl`。结果会附带每个搜索源的 HTTP、页面大小、命中数和空结果原因，
-搜索结果本身标记为不可信外部资料。
+搜索结果本身标记为不可信外部资料。每次调用的控制台日志和工具摘要都会带实际搜索关键词；
+日志同时显示实际来源、命中数和是否命中本地缓存，方便判断是搜索词不合适还是搜索源没有结果。
 
 `web_image_send` 支持图片直链和含 `og:image` / `twitter:image` 的白名单网页，只接受 JPEG、PNG、GIF、WebP，
 拒绝 SVG，单张图片受 `webImageMaxBytes` 限制。该工具是副作用工具，每轮最多发送一张图。
