@@ -146,7 +146,7 @@
 | J9 | 部分 | `JdbcStorageFakeTest#queryReturnsPartialRowsInsteadOfThrowing`、`SessionServiceTest#endCasFailureKeepsSessionRunning`；「内存局面不半更新」仅 CAS 一例 |
 | J10 | 部分 | `ThousandCommandsLoadTest#thousandCommandsKeepOneGroupLockAndFlatTables`、`#groupLockCacheStaysBoundedAndEvictsIdleGroups`、`#twoThousandCommandsKeepHeapUsageStable`（本轮新增，3 用例全绿）：缓存条数有界并随空闲淘汰（以 `size()==1` 为证，`isLocked` 只反映当前持锁）、四表行数零增长、活跃局唯一、两轮堆增量 ≤32MB（`System.gc` 采样，作 smoke）；`GroupLockRegistry` 容量上限 256 的分支未触达，且「日志与审计按保留策略清理过期行」无直接证据（只断言活跃局不是清理候选），由 `TrpgRetentionServiceTest` 另覆盖 |
 | J11 | 手测通过 | 对照呈现分册 §4 抽 7 条冻结样例（开团/检定/理智/AI 叙述/结束/战报/恢复），`TrpgMessageTemplatesTest` 内联冻结串逐字相等 |
-| J12 | N/A | 20 秒合并窗口属 v1.1 能力，`TrpgAiHostService` 注释已声明；v1 不纳入验收 |
+| J12 | 通过（v1.1 补测） | v1.1 交付 20 秒或 5 条先到的合并窗口：`AiHostEngineTest` 覆盖立即触发、窗口追加、窗口到达 5 条或 20 秒后合并、每群单槽位只留最新窗口；详见 §5 |
 | J13 | 通过 | `TrpgTitlesTest#allTitlesAreUniqueAndCount29`、`#allTitlesAppearInSpecOrder`、`TrpgMessageFormatterTest#cleansMarkdownAndEmoji`；词表实为 29 个标题（§2.3 分册），§10/§12 的「24 词表」已改 |
 | J14 | 部分 | 结束/恢复路径已测（`TrpgPresenterTest#endedEventSendFailureAddsCriticalNotice`、`#recoveredEventFallsBackWhenSendFails`）；开团、开局发送失败未测 |
 
@@ -174,3 +174,22 @@
 1. P0：B4 错误命中顺序、C1 状态机非法路径矩阵、B2 五角色 × 指令权限矩阵（表驱动）。
 2. P1：E3/E4/E5 恢复逐项还原与告警、H4/H5/H6 导入与删除边界、J4/J5b/J9/J14 异常路径。
 3. P2：A2 产物依赖检查、B5 三次去重与窗口过期、I2 命令层入口与 AI 提示数断言、I5 零定时器注册显式断言、J10 过期日志/审计清理直证、D2/D5/I3 补直接证据。
+
+## 5. v1.1 补测（AI 主持真实调用）
+
+v1.1 接 issue #15，v1 的 §12 清单不变；以下条目在 v1.1 由「N/A / 桩」转为可验收，证据全部为自动化测试。
+
+| 条目 | 结果 | 证据 |
+| --- | --- | --- |
+| J12 合并窗口 | 通过 | `AiHostEngineTest`：立即触发绕过窗口、`PLAYER_ACTION` / 玩家自助 `CHECK` 进窗口、5 条先到立即合并、20 秒到期由 `tick` 结算、同局跨场景仍在同一窗口且结算取最新场景版本、玩家行动原文进入提示词 |
+| 网关与降级 | 通过 | `AiHostEngineTest`：全局关/关 AI/挂起/非进行中静默且零调用；降级表逐类断言「计失败、写审计、发降级提示」，含 `network`、`http_401`、`http_500` 与 `finishReason=length`（按成功截断）；`disabled` / `unavailable` / `interrupted` / `queue_full` 不计失败，`network` / `http_<code>` 与未列出错误码原样透传 |
+| 挂起与恢复 | 通过 | `AiHostEngineTest`：连续 3 次可计失败写 `aiSuspendedUntil` 并清队列；挂起期零调用、每周期只发一次提示；`/trpg ai on` 清挂起并清零计数 |
+| 审计 | 通过 | `AiHostEngineTest`：每请求至多 1 行；全局关、未授权、窗口无内容不写行，挂起丢弃写 `skipped`、换局换场景写 `stale`；`traceEnabled=false` 不写、写失败不阻断叙述 |
+| 提示词装配 | 通过 | `AiPromptAssemblerTest`：稳定前缀与可缓存中段稳定、动态段按预算截断并保留最近事件行 |
+| 输出清洗 | 通过 | `AiNarrationParserTest`：300 字截断、建议最多 3 条、数值变化/检定结论/推进句式拒绝、空输出拒绝 |
+| 开关落库 | 通过 | `SessionServiceTest`：`ai on` 写 `aiEnabled=1` 并清挂起、`ai off` 写 0、无效词不写库、全局关按「当前状态不可用」拒绝 |
+| 触发点 | 通过 | `TrpgKpCommandTest#playerCheckUsesMergedTriggerWithEventText`、`TrpgListenerAiActionTest`：玩家自助检定进合并窗口并携带判定摘要；玩家自由文本行动取消事件并按事件序号进窗口；KP 自由文本不被识别 |
+| 投递门禁 | 通过 | `AiHostEngineTest#suspendedTriggerNotifiesOncePerSuspensionPeriod`、`#failureAfterSuspensionIsDiscardedAsSkipped`：局结束、挂起、换局或换场景一律不发消息，只记 `skipped` / `stale` |
+| 呈现文案 | 通过 | `TrpgMessageTemplatesTest` / 呈现规范 §3.6：叙述落款、降级原因、挂起提示；降级先发剧本模板叙述再发说明 |
+
+测试总数 497 → 554（49 个测试类）。

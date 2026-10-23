@@ -113,6 +113,11 @@ public final class TrpgCommandService {
         return context;
     }
 
+    /** 装配 AI 触发端口（v1.1）：装配失败或全局关闭时不调用，触发静默跳过。 */
+    public void bindAiTriggers(org.moboxlab.mbb.trpg.ai.AiTriggerSink aiTriggers) {
+        context.bindAiTriggers(aiTriggers);
+    }
+
     /**
      * 处理一条 /trpg 指令。
      *

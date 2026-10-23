@@ -2,10 +2,13 @@ package org.moboxlab.mbb.trpg;
 
 import org.moboxlab.moboxbot.API.Plugin;
 import org.moboxlab.moboxbot.API.PluginManager;
+import org.moboxlab.moboxbot.API.PluginService;
 import org.moboxlab.moboxbot.API.Storage.StorageService;
+import org.moboxlab.mbb.trpg.ai.AiHostEngine;
 import org.moboxlab.mbb.trpg.ai.MbbAiClient;
 import org.moboxlab.mbb.trpg.ai.TraceStore;
 import org.moboxlab.mbb.trpg.ai.TrpgAiHostService;
+import org.moboxlab.mbb.trpg.ai.TrpgAiNarrationSink;
 import org.moboxlab.mbb.trpg.card.CardGenerator;
 import org.moboxlab.mbb.trpg.command.DiceCommand;
 import org.moboxlab.mbb.trpg.command.TrpgCommand;
@@ -17,6 +20,7 @@ import org.moboxlab.mbb.trpg.present.ImageUtilRenderer;
 import org.moboxlab.mbb.trpg.present.OneBotMessaging;
 import org.moboxlab.mbb.trpg.present.OneBotNameResolver;
 import org.moboxlab.mbb.trpg.present.TrpgLogReportSource;
+import org.moboxlab.mbb.trpg.present.TrpgNameResolver;
 import org.moboxlab.mbb.trpg.present.TrpgPresentConfig;
 import org.moboxlab.mbb.trpg.present.TrpgPresenter;
 import org.moboxlab.mbb.trpg.rule.D100RuleSet;
@@ -56,6 +60,8 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
 import java.util.function.LongSupplier;
 
+import com.alibaba.fastjson.JSONObject;
+
 /**
  * MBB-Trpg 插件主类。
  *
@@ -80,6 +86,8 @@ public class TrpgPlugin extends Plugin {
     private SessionService sessionService;
     private TrpgRetentionService retentionService;
     private ScheduledTask retentionTask;
+    private AiHostEngine aiEngine;
+    private ScheduledTask aiTickTask;
     private ScriptCatalog scriptCatalog;
     /** S10：内置 + 导入的组合剧本库；未启用时为 null。 */
     private ScriptLibrary scriptLibrary;
@@ -88,6 +96,8 @@ public class TrpgPlugin extends Plugin {
     /** 生成任务执行器：单线程守护，避免占用主程序调度池。 */
     private ExecutorService scriptExecutor;
     private TrpgPresenter presenter;
+    /** 群昵称解析端口：呈现层与 AI 叙述落款共用。 */
+    private TrpgNameResolver nameResolver;
     private SessionLogService sessionLogService;
     private TrpgCommandService commandService;
     /** AI 主持契约桩（S9）：v1 零调用、零审计、不注册定时器。 */
@@ -211,7 +221,7 @@ public class TrpgPlugin extends Plugin {
         sessionStore = store;
         traceStore = new SqlTraceStore(store);
         blacklistService = new BlacklistService(store);
-        OneBotNameResolver nameResolver = new OneBotNameResolver(getServer());
+        nameResolver = new OneBotNameResolver(getServer());
         presenter = new TrpgPresenter(new TrpgPresentConfig(trpgConfig),
                 new OneBotMessaging(getServer()), new ImageUtilRenderer(), nameResolver,
                 scriptCatalog,
@@ -241,7 +251,7 @@ public class TrpgPlugin extends Plugin {
                 new CardGenerator(randomSource), presenter, nameResolver, trpgConfig, clock, getLogger(),
                 cooldowns, dedupe, blacklistService, scriptAdmin);
         listener = new TrpgListener(sessionService, blacklistService, importSessions, presenter,
-                getLogger());
+                getLogger(), trpgConfig, aiHostService);
         noticeListener = new TrpgNoticeListener(sessionService, getLogger());
         retentionService = new TrpgRetentionService(store, getLogger(), clock,
                 trpgConfig.retentionSessionDays(), trpgConfig.aiTraceKeepHours(),
@@ -284,12 +294,73 @@ public class TrpgPlugin extends Plugin {
         }
         registerCommands(pluginManager, clock);
         registerListeners(pluginManager);
+        assembleAiHost(pluginManager, clock);
         try {
             retentionTask = retentionService.scheduleHourly(
                     new PluginManagerScheduler(this, pluginManager, getLogger()));
         } catch (RuntimeException e) {
             retentionTask = null;
             getLogger().sendWarn("[MBB-Trpg] 归档清理定时任务注册失败：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 读 MBB-AI 启动时报告的全局并发上限；读不到返回 0（只用本插件配置的 2）。
+     *
+     * <p>对应规格 §9.7「v1.1 启动时读 AIService.status() 的 maxConcurrent，取较小值」。</p>
+     */
+    private int aiServiceMaxConcurrent(PluginManager pluginManager) {
+        try {
+            PluginService ai = pluginManager.getService(MbbAiClient.SERVICE_NAME);
+            if (ai == null) {
+                return 0;
+            }
+            JSONObject status = ai.call("status", new JSONObject(true));
+            if (status == null || !status.getBooleanValue("status")) {
+                return 0;
+            }
+            return status.getIntValue("maxConcurrent");
+        } catch (RuntimeException e) {
+            getLogger().sendWarn("[MBB-Trpg] 读取 MBB-AI 并发上限失败，按插件配置执行：" + e.getMessage());
+            return 0;
+        }
+    }
+
+    /**
+     * 装配 v1.1 AI 主持引擎（§9）：MBB-AI 客户端、叙述发送端口、失败计数与剧本目录。
+     *
+     * <p>全局开关关闭时保持 v1 桩：零调用、零审计、不注册定时器（§9.10）。</p>
+     */
+    private void assembleAiHost(PluginManager pluginManager, Clock clock) {
+        if (!trpgConfig.aiHostEnabled()) {
+            getLogger().sendInfo("[MBB-Trpg] AI 主持未启用：保持零调用桩");
+            return;
+        }
+        try {
+            PluginManagerScheduler scheduler = new PluginManagerScheduler(this, pluginManager,
+                    getLogger());
+            int aiLimit = aiServiceMaxConcurrent(pluginManager);
+            AiHostEngine engine = new AiHostEngine(trpgConfig, new MbbAiClient(this, trpgConfig), sessionService,
+                    traceStore, scheduler, clock, getLogger(),
+                    new TrpgAiNarrationSink(presenter, sessionService, nameResolver), aiLimit);
+            engine.bindFailureRecorder(sessionService);
+            engine.bindScriptCatalog(scriptCatalog);
+            aiHostService.bindEngine(engine);
+            if (commandService != null) {
+                commandService.bindAiTriggers(aiHostService);
+            }
+            aiEngine = engine;
+            aiTickTask = scheduler.runTimer(new Runnable() {
+                @Override
+                public void run() {
+                    aiHostService.tick();
+                }
+            }, 1000L, 1000L);
+            getLogger().sendInfo("[MBB-Trpg] AI 主持已启用（每 1 秒结算合并窗口）");
+        } catch (RuntimeException e) {
+            aiEngine = null;
+            aiTickTask = null;
+            getLogger().sendWarn("[MBB-Trpg] AI 主持装配失败，保持零调用桩：" + e.getMessage());
         }
     }
 
@@ -319,7 +390,7 @@ public class TrpgPlugin extends Plugin {
                         }
                     });
             ScriptGenerationService generation = new ScriptGenerationService(scriptLibrary,
-                    scriptValidator, new MbbAiClient(this), rejected);
+                    scriptValidator, new MbbAiClient(this, trpgConfig), rejected);
             scriptExecutor = Executors.newSingleThreadExecutor(new ThreadFactory() {
                 @Override
                 public Thread newThread(Runnable runnable) {
@@ -379,6 +450,14 @@ public class TrpgPlugin extends Plugin {
             retentionTask.cancel();
             retentionTask = null;
         }
+        if (aiTickTask != null) {
+            aiTickTask.cancel();
+            aiTickTask = null;
+        }
+        if (aiHostService != null) {
+            aiHostService.shutdown();
+        }
+        aiEngine = null;
         if (scriptExecutor != null) {
             scriptExecutor.shutdownNow();
             scriptExecutor = null;

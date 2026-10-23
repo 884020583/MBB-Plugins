@@ -6,6 +6,9 @@ import org.moboxlab.moboxbot.API.Event.GroupMessageEvent;
 import org.moboxlab.moboxbot.API.Event.Listener;
 import org.moboxlab.moboxbot.API.Event.PrivateMessageEvent;
 import org.moboxlab.moboxbot.API.PluginLogger;
+import org.moboxlab.mbb.trpg.ai.AiTrigger;
+import org.moboxlab.mbb.trpg.ai.AiTriggerSink;
+import org.moboxlab.mbb.trpg.config.TrpgConfig;
 import org.moboxlab.mbb.trpg.present.TrpgMessageTemplates;
 import org.moboxlab.mbb.trpg.present.TrpgPresenter;
 import org.moboxlab.mbb.trpg.script.ScriptErrorCodes;
@@ -17,16 +20,21 @@ import org.moboxlab.mbb.trpg.script.ScriptIssue;
 import org.moboxlab.mbb.trpg.script.ScriptValidationException;
 import org.moboxlab.mbb.trpg.script.ScriptValidationResult;
 import org.moboxlab.mbb.trpg.session.SessionActor;
+import org.moboxlab.mbb.trpg.session.SessionResult;
 import org.moboxlab.mbb.trpg.session.SessionService;
+import org.moboxlab.mbb.trpg.session.SessionSnapshot;
+import org.moboxlab.mbb.trpg.session.SessionState;
 import org.moboxlab.mbb.trpg.store.BlacklistService;
 
 /**
- * 群/私聊消息入口：黑名单静默拦截 → 导入暂存吞消息（含控制字）→ 局内活动刷新。
+ * 群/私聊消息入口：黑名单静默拦截 → 导入暂存吞消息（含控制字）→ 局内活动刷新 → 玩家行动触发 AI。
  *
  * <p>本监听器不做任何业务判定：命中黑名单只把消息取消掉、不回复；导入暂存期间把该用户
  * 同一会话的消息原文交给 {@link ScriptImportService#append}，并就地处理
  * {@code /trpg script import end|cancel} 两个控制字（§S10：控制字优先于指令分发）。
- * 其余群消息只用于刷新局内活动，60 秒节流由 {@link SessionService#touchActivity} 内部判定。</p>
+ * 其余群消息先刷新局内活动（60 秒节流由 {@link SessionService#touchActivity} 内部判定），
+ * 再进行中的局把非指令自由文本当作玩家行动：记 action 日志并触发 AI 合并窗口（§9.4），
+ * 命中后同样取消事件，避免再被指令分发处理。</p>
  */
 public final class TrpgListener implements Listener {
 
@@ -35,6 +43,8 @@ public final class TrpgListener implements Listener {
     private final ScriptImportService imports;
     private final TrpgPresenter presenter;
     private final PluginLogger logger;
+    private final TrpgConfig config;
+    private final AiTriggerSink aiTriggers;
 
     /**
      * @param imports 导入暂存服务；S10 之前传 null，此时不吞消息
@@ -49,6 +59,15 @@ public final class TrpgListener implements Listener {
      */
     public TrpgListener(SessionService sessions, BlacklistService blacklist,
                         ScriptImportService imports, TrpgPresenter presenter, PluginLogger logger) {
+        this(sessions, blacklist, imports, presenter, logger, null, null);
+    }
+
+    /**
+     * 生产装配：额外注入配置与 AI 触发端口，用于把局内自由文本当作玩家行动（§9.4）。
+     */
+    public TrpgListener(SessionService sessions, BlacklistService blacklist,
+                        ScriptImportService imports, TrpgPresenter presenter, PluginLogger logger,
+                        TrpgConfig config, AiTriggerSink aiTriggers) {
         if (sessions == null) {
             throw new IllegalArgumentException("局面服务不能为空");
         }
@@ -57,6 +76,8 @@ public final class TrpgListener implements Listener {
         this.imports = imports;
         this.presenter = presenter;
         this.logger = logger;
+        this.config = config;
+        this.aiTriggers = aiTriggers;
     }
 
     /** 群消息入口（§5.4 的判定位次：黑名单 → 导入暂存 → 局内活动）。 */
@@ -82,7 +103,48 @@ public final class TrpgListener implements Listener {
                 return;
             }
         }
+        if (consumePlayerAction(raw, groupId, userId)) {
+            event.setCancelled(true);
+            return;
+        }
         sessions.touchActivity(groupId, userId);
+    }
+
+    /**
+     * 局内自由文本行动（§9.4）：命令与空消息之外的群消息记一次 action 事件，再进合并窗口。
+     *
+     * @return 是否已消费（消费后取消事件，避免再进指令分发）
+     */
+    private boolean consumePlayerAction(String raw, long groupId, long userId) {
+        if (aiTriggers == null || config == null || !config.aiHostEnabled()) {
+            return false;
+        }
+        String text = raw == null ? "" : raw.trim();
+        if (text.isEmpty() || text.startsWith("/") || text.startsWith("／")
+                || text.toLowerCase(java.util.Locale.ROOT).startsWith("trpg")) {
+            return false;
+        }
+        SessionSnapshot snapshot = sessions.readSnapshot(groupId);
+        if (!snapshot.active() || snapshot.state() != SessionState.RUNNING) {
+            return false;
+        }
+        // 本局 AI 关着时就是纯工具局：自由文本不吞、也不记 action（§9.2）。
+        if (!snapshot.aiEnabled()) {
+            return false;
+        }
+        // KP 的自由文本是 KP 叙述，任务书 §9.4 明确不识别；只收玩家行动。
+        if (snapshot.kpUserId() == userId) {
+            return false;
+        }
+        SessionResult result = sessions.playerAction(
+                new SessionActor(userId, groupId, false, false), text);
+        if (!result.ok()) {
+            return false;
+        }
+        SessionSnapshot after = result.snapshot();
+        long eventSeq = after == null ? snapshot.sceneVersion() : after.sceneVersion();
+        aiTriggers.fire(AiTrigger.PLAYER_ACTION, groupId, eventSeq, text);
+        return true;
     }
 
     /** 私聊消息入口：私聊只承载导入暂存，其余消息交给指令层。 */

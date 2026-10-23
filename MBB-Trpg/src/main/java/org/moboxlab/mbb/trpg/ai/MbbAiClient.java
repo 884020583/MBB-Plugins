@@ -1,7 +1,10 @@
 package org.moboxlab.mbb.trpg.ai;
 
+import java.util.Locale;
+
 import org.moboxlab.moboxbot.API.Plugin;
 import org.moboxlab.moboxbot.API.PluginService;
+import org.moboxlab.mbb.trpg.config.TrpgConfig;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
@@ -19,12 +22,22 @@ public final class MbbAiClient implements AiClient {
     public static final String SERVICE_NAME = "MBB-AI";
 
     private final Plugin plugin;
+    private final TrpgConfig config;
 
     public MbbAiClient(Plugin plugin) {
+        this(plugin, null);
+    }
+
+    /**
+     * @param plugin 插件实例
+     * @param config 插件配置；用于透传 {@code aiHost.retryCount}，为 null 时按 0 处理
+     */
+    public MbbAiClient(Plugin plugin, TrpgConfig config) {
         if (plugin == null) {
             throw new IllegalArgumentException("插件实例不能为空");
         }
         this.plugin = plugin;
+        this.config = config;
     }
 
     @Override
@@ -48,7 +61,11 @@ public final class MbbAiClient implements AiClient {
         if (request.temperature() >= 0.0D) {
             params.put("temperature", request.temperature());
         }
-        params.put("retryCount", 0);
+        if (!request.sessionId().isEmpty()) {
+            params.put("sessionId", request.sessionId());
+        }
+        // 插件侧只管调用次数；MBB-AI 的服务层重试由 provider 配置决定（§9.5 默认 0）。
+        params.put("retryCount", config == null ? 0 : config.aiRetryCount());
         JSONObject response;
         try {
             response = ai.call("chat", params);
@@ -66,9 +83,13 @@ public final class MbbAiClient implements AiClient {
                     usage == null ? "" : usage.toJSONString(),
                     response.getBooleanValue("cached"), elapsed);
         }
-        String code = response.getString("code");
+        // 契约（docs/MBB-AI.md）失败体用 errorType；旧实现读 code，导致 busy/timeout 全折成 unknown。
+        String errorType = response.getString("errorType");
+        if (errorType == null || errorType.isEmpty()) {
+            errorType = response.getString("code");
+        }
         boolean retryable = response.getBooleanValue("retryable");
-        return AiResult.failure(mapError(code), retryable, elapsed);
+        return AiResult.failure(mapError(errorType), retryable, elapsed);
     }
 
     private static JSONArray messages(AiRequest request) {
@@ -100,27 +121,37 @@ public final class MbbAiClient implements AiClient {
     }
 
     /**
-     * 把 MBB-AI 的错误码折叠成插件侧六类错误里的底层类型。
+     * 归一 MBB-AI 的错误类型（§9.5）：只折叠插件认识的取值，未列出的原样保留交给引擎。
      *
-     * @param code MBB-AI 返回的 code，可能为空
+     * <p>{@code unavailable}、{@code unknown} 及后续新增码不在插件降级表里，原样透传；
+     * 引擎按「不计失败 + 通用中文标签」处理，避免把它们误记成「服务未启用」。</p>
+     *
+     * @param code MBB-AI 返回的 errorType 或 code，可能为空
      */
     public static String mapError(String code) {
         if (code == null || code.isEmpty()) {
             return AiErrorTypes.UNKNOWN;
         }
-        if ("disabled".equals(code)) {
+        String lower = code.toLowerCase(Locale.ROOT);
+        if (AiErrorTypes.NETWORK.equals(lower) || lower.startsWith(AiErrorTypes.HTTP_PREFIX)) {
+            return lower;
+        }
+        if (AiErrorTypes.DISABLED.equals(lower)) {
             return AiErrorTypes.DISABLED;
         }
-        if ("busy".equals(code)) {
+        if (AiErrorTypes.BUSY.equals(lower)) {
             return AiErrorTypes.BUSY;
         }
-        if ("interrupted".equals(code) || "timeout".equals(code)) {
+        if (AiErrorTypes.TIMEOUT.equals(lower)) {
             return AiErrorTypes.TIMEOUT;
         }
-        if ("params".equals(code)) {
+        if (AiErrorTypes.INTERRUPTED.equals(lower)) {
+            return AiErrorTypes.INTERRUPTED;
+        }
+        if (AiErrorTypes.PARAMS.equals(lower)) {
             return AiErrorTypes.PARAMS;
         }
-        return AiErrorTypes.UNKNOWN;
+        return lower;
     }
 
     private static long elapsed(long startTime) {

@@ -4,6 +4,7 @@ import java.util.Collections;
 import java.util.EnumMap;
 import java.util.Map;
 
+import org.moboxlab.mbb.trpg.ai.AiTrigger;
 import org.moboxlab.mbb.trpg.present.TrpgCheckView;
 import org.moboxlab.mbb.trpg.present.TrpgMessageTemplates;
 import org.moboxlab.mbb.trpg.script.Clue;
@@ -110,6 +111,8 @@ final class KpCommandHandler {
                     clue.unlockedText());
         }
         sendKpHint(context, snapshot.kpUserId(), detail.sceneTitle(), detail.triggerHint());
+        // §9.9 触发枚举没有 clue：新线索随场景叙述一并交代，一次推进只发一条叙述。
+        context.fireAiNow(AiTrigger.SCENE, actor.groupId());
     }
 
     static void check(TrpgCommandContext context, SessionActor actor, String[] params) {
@@ -142,6 +145,15 @@ final class KpCommandHandler {
                 detail.note())));
         sendKpHint(context, played.result().snapshot().kpUserId(), detail.skillLabel(),
                 detail.triggerHint());
+        // KP 或 BOT_ADMIN 代掷属于「立即触发」（§9.3），玩家自助检定才进合并窗口。
+        if (actor.userId() == played.result().snapshot().kpUserId() || actor.botAdmin()) {
+            context.fireAiNow(AiTrigger.CHECK, actor.groupId());
+        } else {
+            long eventSeq = played.result().snapshot().sceneVersion();
+            context.fireAi(AiTrigger.CHECK, actor.groupId(), eventSeq,
+                    rollerName + " 的" + detail.skillLabel() + "检定：" + detail.rolled() + "/"
+                            + detail.target());
+        }
     }
 
     static void opposed(TrpgCommandContext context, SessionActor actor, String[] params) {
@@ -167,6 +179,7 @@ final class KpCommandHandler {
         TrpgCheckView right = TrpgCheckView.skill(rightName(context, actor.groupId(), detail),
                 detail.rightLabel(), detail.rightRolled(), detail.rightTarget(), detail.rightDegree(),
                 "");
+        context.fireAiNow(AiTrigger.OPPOSED, actor.groupId());
         if (!detail.decided()) {
             context.reply(actor, TrpgMessageTemplates.opposedDraw(left, right, detail.tieBreakLabel()));
             return;
@@ -189,6 +202,7 @@ final class KpCommandHandler {
                 rollerName, detail.rolled(), detail.target(), detail.degree(), detail.sanBefore(),
                 detail.sanAfter()), detail.permanent(), detail.maddened(), detail.madnessUntil()));
         sendKpHint(context, played.result().snapshot().kpUserId(), "理智", detail.triggerHint());
+        context.fireAiNow(AiTrigger.SAN, actor.groupId());
     }
 
     static void adjust(TrpgCommandContext context, SessionActor actor, String[] params) {
@@ -255,8 +269,12 @@ final class KpCommandHandler {
         if (!context.accept(actor, result)) {
             return;
         }
-        // v1 桩不改 aiEnabled（§9.10），回执直接用局面服务给出的分支文案。
+        // v1.1 起开关真实落库：打开时清掉本局去重缓存（§9.2）。
         context.reply(actor, TrpgMessageTemplates.aiHost(result.detail()));
+        SessionSnapshot after = result.snapshot();
+        if (after != null && after.aiEnabled()) {
+            context.notifyAiEnabled(after.sessionId());
+        }
     }
 
     /** 触发器提示只私聊 KP；发送失败不重试，也不回退到群内。 */

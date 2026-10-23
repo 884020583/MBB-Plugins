@@ -751,8 +751,9 @@ DELETE FROM plugin_mbb_trpg_ai_trace WHERE id < (SELECT id FROM plugin_mbb_trpg_
 ### 9.3 触发与合并窗口
 
 - **立即触发**（不进窗口）：`/trpg scene` 推进、KP 代掷的 `check` / `opposed` / `san` 结算、`begin` 后的开场叙述。
-- **合并窗口**：局内成员自由文本行动与玩家本人发起的自助 `check`；同群 20 秒或 5 条事件先到先触发，5 条先到时立即结算并取消定时器；窗口内事件按事件序号拼接为一次调用。
+- **合并窗口**：局内成员自由文本行动与玩家本人发起的自助 `check`；同群 20 秒或 5 条事件先到先触发，5 条先到时立即结算并取消定时器；窗口键只认局号，同局内场景推进不打断窗口，结算时取窗口内最新场景版本判断过期；窗口内事件按事件序号拼接为一次调用，玩家行动原文与判定摘要一并进入提示词动态段。
 - 同一事件只走一条路径：玩家自助 check 并入窗口，KP 代掷立即触发。
+- 关键节点固定为 `begin / scene / check / opposed / san` 与合并出的 `merged`，没有独立的「线索发放」触发：新线索随场景叙述一次交代。
 - 去重键：局号 | 场景版本 | 窗口首序号 | 窗口末序号；同键只调用一次，结果缓存 60 秒；`/trpg ai on` 只清当前局缓存。
 - 窗口定时器不持久化，重启丢窗不补发。
 
@@ -781,14 +782,14 @@ DELETE FROM plugin_mbb_trpg_ai_trace WHERE id < (SELECT id FROM plugin_mbb_trpg_
 | 合并窗口内无新内容 | 触发前 | 不调用、不写 | 不写 |
 | 结果返回时场景版本已变 | 发送前 | 丢弃不发 | `stale` |
 
-空输出、超长截断后为空、解析不出任何叙述 → 按验证失败处理。`queue_full`、未授权、`unavailable` 不计入失败计数；`busy / timeout / network / http / verification` 计入。验证失败时：第 1 次验证拒绝只记 `attempts=1`、不计失败；按 `aiHost.retryCount=0` 重试一次后仍失败才计入 1 次失败。
+空输出、超长截断后为空、解析不出任何叙述 → 按验证失败处理。`queue_full`、未授权、`unavailable`、`interrupted` 不计入失败计数；`busy / timeout / network / http / verification` 计入。失败来源以 MBB-AI `chat` 失败体的 `errorType` 为准（缺失时回退 `code`），`network` 与 `http_<code>` 原样透传。验证失败时：第 1 次验证拒绝只记 `attempts=1`、不计失败；按 `aiHost.retryCount=0` 重试一次后仍失败才计入 1 次失败。
 
 ### 9.6 挂起与恢复
 
 - 连续 3 次失败把 `aiSuspendedUntil` 写为 now + 10 分钟，并把 `aiFailStreak` 清零；0 哨兵表示未挂起。
 - 挂起判定惰性（每次请求前比 `Clock`），重启后按落库时间戳继续生效；挂起期间不再调用。
 - 挂起动作同时清空本群待发队列；在途请求照常收尾，若已挂起则结果丢弃并记 `skipped`。
-- 挂起提示每个挂起周期只发一次，由设置挂起的动作触发；重启不补发；`/trpg ai on` 清挂起并重置计数，`/trpg ai off` 使挂起自然失效。挂起不会自动解除。
+- 挂起提示每个挂起周期只发一次，由设置挂起的动作触发；挂起期间再有触发（指令或自由文本）时，直接按当前挂起周期回一次挂起提示后丢弃，不再静默消失；重启不补发；`/trpg ai on` 清挂起并重置计数，`/trpg ai off` 使挂起自然失效。挂起不会自动解除。
 
 ### 9.7 输出契约与防越权
 
@@ -816,11 +817,12 @@ DELETE FROM plugin_mbb_trpg_ai_trace WHERE id < (SELECT id FROM plugin_mbb_trpg_
 - `skipped` 只在挂起清队列与在途请求被丢弃时写；全局关、未授权、窗口无内容不写行。
 - 不存完整提示词与完整输出，只存输出前 240 字预览；受 `aiHost.traceEnabled` 控制（默认开）；保留 168 小时 / 最多 5000 行（§7.7）。
 
-### 9.10 sessionId 与 v1 契约桩
+### 9.10 sessionId 与 v1.1 交付
 
 - AI 会话标识 `trpg-<群号>-<局号>` 同时作为本地键与 MBB-AI `chat` 的 `sessionId`（写入 `x-opencode-session`）；依据 `docs/MBB-AI.md`，opencodego 要求每个对话请求携带稳定会话头；返回 `cached=true` 按成功处理并记录。该标识不含用户身份。
-- **v1 交付**：配置项、全局关判定、`/trpg ai` 参数解析与全局关拒绝、空实现、零 AI 调用、零审计写入、不注册定时器；`aiEnabled` 不落库（v1 没有 AI），授权持久化随 v1.1 落地。v1 遇到全局开（`aiHost.enabled=true`）时 `/trpg ai on` 回「AI 主持将在 v1.1 提供」，不置位、零调用、不写审计；`status` 的 AI 行恒显「关」。
-- **v1 验收**：默认配置下 `/trpg ai` 在全局关时回拒绝且 `AiClient` 零调用；桩不写审计、不设置定时器；开关关闭时所有局指令行为与纯工具模式一致。
+- **v1.1 交付**：`/trpg ai on|off` 是真实开关，授权、连续失败计数与挂起时间戳落库（`aiEnabled` / `aiFailStreak` / `aiSuspendedUntil`，只经 `SessionService` 群锁内 CAS 写入）；全局 `aiHost.enabled=false` 时零调用、零审计、不注册定时器；全局开时按 §9.3–§9.9 触发、合并、排队、降级与审计，叙述与降级文案见呈现规范 §4.3。
+- **挂起语义**：连续失败达到 `aiHost.suspendFailStreak` 后本局挂起 `aiHost.suspendMinutes` 分钟，期间触发直接回挂起提示；`/trpg ai on` 会清除挂起并重新开启。
+- **v1.1 验收**：`/trpg ai` 四分支（无参数/on/off/全局关）、挂起提示、重启后挂起与授权生效、失败计数清零、审计每请求至多一行；验收记录见 [验收记录](MBB-Trpg-acceptance.md) 的 v1.1 补测段。
 
 ### 9.11 AI 测试缝
 

@@ -1,31 +1,41 @@
 package org.moboxlab.mbb.trpg.ai;
 
+import java.util.Collections;
 import java.util.Locale;
 
 import org.moboxlab.mbb.trpg.config.TrpgConfig;
+import org.moboxlab.mbb.trpg.session.SessionSnapshot;
 
 /**
- * AI 主持契约桩（规格 §9.10）：v1 只锁契约，不做任何 AI 调用。
+ * AI 主持服务（规格 §9）：全局开关、{@code /trpg ai} 判定与真实调用门面。
  *
- * <p>v1 交付范围：读取 {@code aiHost.*} 配置、判定全局开关、解析 {@code /trpg ai} 参数、
- * 给出固定分支；<b>不调用 AI、不写审计、不注册定时器、不落库 {@code aiEnabled}</b>。
- * 因为没有持有 {@code AiClient} / {@code TraceStore} / {@code Scheduler} 端口，零调用与零审计是结构性的，
- * 不依赖运行期判断。真实实现（排队、降级、审计、合并窗口）随 v1.1 在本类内落地。</p>
+ * <p>本类不直接写局面也不发消息：触发交给 {@link AiHostEngine}（队列、合并窗口、降级、审计），
+ * 发送交给 {@link AiNarrationSink}，失败计数交给 {@link AiFailureRecorder}。
+ * AI 子状态（开关、失败计数、挂起）统一经 {@code SessionService} 在群锁内 CAS 落库。</p>
  */
-public final class TrpgAiHostService {
+public final class TrpgAiHostService implements AiTriggerSink {
 
-    /** 全局开时 {@code /trpg ai on} 的回执说明（§9.10）。 */
-    public static final String DETAIL_PLANNED = "AI 主持将在 v1.1 提供";
+    /** {@code /trpg ai on} 已开启。 */
+    public static final String DETAIL_ENABLED = "已开启 AI 主持";
 
-    /** 全局关时 {@code /trpg ai on} 的拒绝说明（§6.3 的「当前状态不可用」）。 */
-    public static final String DETAIL_UNAVAILABLE = "当前状态不可用";
+    /** {@code /trpg ai on} 清除挂起后开启。 */
+    public static final String DETAIL_RESUMED = "已清除挂起并重新开启 AI 主持";
 
-    /** {@code /trpg ai off} 的回执说明：v1 从未开启过，因此是保持关闭。 */
-    public static final String DETAIL_OFF = "本局 AI 主持保持关闭";
+    /** {@code /trpg ai off} 已关闭。 */
+    public static final String DETAIL_OFF = "已关闭 AI 主持";
 
+    /** {@code /trpg ai off} 本来就关着。 */
+    public static final String DETAIL_ALREADY_OFF = "本局 AI 主持保持关闭";
+
+    /** 全局未启用时的拒绝说明（§9.2：不新增拒绝类别，走「当前状态不可用」）。 */
+    public static final String DETAIL_GLOBAL_OFF = "当前状态不可用：AI 主持未在配置中启用";
+
+    /** 写库失败时的拒绝说明。 */
+    public static final String DETAIL_WRITE_FAILED = "状态写入失败，请重试";
 
     private final TrpgConfig config;
     private SessionView sessionView;
+    private AiHostEngine engine;
 
     public TrpgAiHostService(TrpgConfig config) {
         if (config == null) {
@@ -51,25 +61,27 @@ public final class TrpgAiHostService {
         return null;
     }
 
-    /** 判定 {@code /trpg ai} 的 v1 分支；权限与状态由局面服务先行判定。 */
+    /** 判定 {@code /trpg ai} 的参数分支；权限与局面状态由局面服务先行判定。 */
     public AiToggle toggle(String rawWord) {
         Boolean parsed = parseWord(rawWord);
         if (parsed == null) {
             return AiToggle.USAGE;
         }
-        if (!parsed.booleanValue()) {
-            return AiToggle.OFF_ACK;
-        }
-        return globallyEnabled() ? AiToggle.ON_PLANNED : AiToggle.ON_DISABLED;
+        return parsed.booleanValue() ? AiToggle.ON_ACK : AiToggle.OFF_ACK;
     }
 
     /**
-     * 绑定局面只读视图（§9.11 的测试缝）。
+     * 绑定局面只读视图（§9.11 的测试缝）：提示词装配时通过它取快照。
      *
-     * <p>v1 桩不读局面；v1.1 装配提示词时才通过它取快照。允许重复绑定，最后一次生效。</p>
+     * <p>允许重复绑定，最后一次生效。</p>
      */
     public void bindSessionView(SessionView view) {
         this.sessionView = view;
+    }
+
+    /** 绑定引擎；未装配时为桩（v1 语义：零调用）。 */
+    public void bindEngine(AiHostEngine engine) {
+        this.engine = engine;
     }
 
     /** 已绑定的局面只读视图；未装配时为 null。 */
@@ -77,4 +89,66 @@ public final class TrpgAiHostService {
         return sessionView;
     }
 
+    /** 读本群快照；未绑定视图时返回空局面。 */
+    public SessionSnapshot snapshot(long groupId) {
+        if (sessionView == null) {
+            return SessionSnapshot.none(groupId);
+        }
+        return sessionView.readSnapshot(groupId);
+    }
+
+    @Override
+    public void fire(AiTrigger trigger, long groupId, long eventSeq, String eventText) {
+        if (engine == null || trigger == null || groupId <= 0L) {
+            return;
+        }
+        SessionSnapshot snapshot = snapshot(groupId);
+        long seq = eventSeq > 0L ? eventSeq : snapshot.sceneVersion();
+        if (seq <= 0L) {
+            return;
+        }
+        AiCallRequest request = new AiCallRequest(groupId, snapshot.sessionId(), trigger,
+                Collections.singletonList(Long.valueOf(seq)), seq, seq, snapshot.sceneVersion(),
+                false, Collections.singletonList(eventText == null ? "" : eventText));
+        engine.submit(request);
+    }
+
+    @Override
+    public void fireNow(AiTrigger trigger, long groupId) {
+        fire(trigger, groupId, true);
+    }
+
+    private void fire(AiTrigger trigger, long groupId, boolean immediate) {
+        if (engine == null || trigger == null || groupId <= 0L) {
+            return;
+        }
+        SessionSnapshot snapshot = snapshot(groupId);
+        long seq = snapshot.sceneVersion();
+        AiCallRequest request = new AiCallRequest(groupId, snapshot.sessionId(), trigger,
+                Collections.singletonList(Long.valueOf(seq)), seq, seq, seq,
+                immediate, Collections.<String>emptyList());
+        engine.submit(request);
+    }
+
+    /** 开关被重新打开时清掉本局去重缓存（§9.2）。 */
+    @Override
+    public void onEnabled(long sessionNo) {
+        if (engine != null) {
+            engine.clearDedupe(sessionNo);
+        }
+    }
+
+    /** 每秒 tick：结算到期合并窗口、清理超龄队列（由插件调度器驱动）。 */
+    public void tick() {
+        if (engine != null) {
+            engine.tick();
+        }
+    }
+
+    /** 插件停用：停止接受新请求。 */
+    public void shutdown() {
+        if (engine != null) {
+            engine.shutdown();
+        }
+    }
 }
