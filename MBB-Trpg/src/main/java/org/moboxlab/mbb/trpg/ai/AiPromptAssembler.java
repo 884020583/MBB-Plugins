@@ -315,25 +315,38 @@ public final class AiPromptAssembler {
     }
 
     /**
-     * 在场角色：只给名字（当前模型只有 userId，没有昵称）与公开状态标签，不给任何数值。
+     * 在场角色：只给代号与公开状态标签，不给任何数值，也不给 QQ 号。
+     *
+     * <p>局面里没有昵称字段，因此按加入顺序编匿名代号（玩家A、玩家B……），
+     * 保证多次装配同一局时代号稳定，且不把可识别用户身份的数字送进模型。</p>
      */
     private static String membersBlock(SessionSnapshot snapshot) {
         StringBuilder builder = new StringBuilder("【在场角色】\n");
         List<MemberView> members = snapshot == null
                 ? new ArrayList<MemberView>() : snapshot.members();
         boolean any = false;
+        int index = 0;
         for (MemberView member : members) {
             if (member == null || !member.inSession()) {
                 continue;
             }
             any = true;
-            builder.append("- 玩家 ").append(member.userId()).append("：")
+            builder.append("- ").append(anonymousLabel(index)).append("：")
                     .append(joinText(publicStatusLabels(member), "、")).append('\n');
+            index++;
         }
         if (!any) {
             builder.append("（暂无在场角色）");
         }
         return builder.toString().trim();
+    }
+
+    /** 匿名代号：前 26 位用字母，之后退回序号，避免出现 QQ 号等身份信息。 */
+    private static String anonymousLabel(int index) {
+        if (index < 26) {
+            return "玩家" + (char) ('A' + index);
+        }
+        return "玩家" + (index + 1);
     }
 
     /** 由角色卡推导公开状态标签；具体 HP/SAN 数值只在内部用于阈值，不输出。 */

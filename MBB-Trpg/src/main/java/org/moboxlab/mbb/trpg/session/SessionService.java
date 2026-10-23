@@ -576,7 +576,7 @@ public final class SessionService implements SessionView, ScriptUsageIndex, AiFa
                     return reject(turn, SessionReject.STATE_UNAVAILABLE,
                             TrpgAiHostService.DETAIL_GLOBAL_OFF);
                 }
-                boolean resumed = row.aiSuspendedUntil() > turn.now || row.aiFailStreak() > 0;
+                boolean resumed = row.aiSuspendedUntil() > turn.now;
                 int affected = store.casAiState(row.id(), row.state(), true, 0L, 0, turn.now);
                 if (affected != 1) {
                     return reject(turn, SessionReject.STATE_UNAVAILABLE,
@@ -616,8 +616,7 @@ public final class SessionService implements SessionView, ScriptUsageIndex, AiFa
         if (raw.isEmpty()) {
             return SessionResult.rejected(SessionReject.BAD_ARGUMENT, "行动内容不能为空");
         }
-        final String content = raw.length() > ACTION_MAX_CHARS
-                ? raw.substring(0, ACTION_MAX_CHARS) : raw;
+        final String content = truncateByCodePoint(raw, ACTION_MAX_CHARS);
         return withGroupLock(actor, ACTION_PLAYER_ACTION, new LockedAction() {
 
             @Override
@@ -1160,5 +1159,23 @@ public final class SessionService implements SessionView, ScriptUsageIndex, AiFa
         private StorageAbort(String message) {
             super(message);
         }
+    }
+
+    /**
+     * 按 Unicode 码点截断，避免把 emoji 等代理对劈成半个字符写进日志与提示词。
+     *
+     * @param text     原文
+     * @param maxChars 最多保留的码点数
+     * @return 截断后的文本
+     */
+    static String truncateByCodePoint(String text, int maxChars) {
+        if (text == null || maxChars < 0) {
+            return "";
+        }
+        if (text.codePointCount(0, text.length()) <= maxChars) {
+            return text;
+        }
+        int end = text.offsetByCodePoints(0, maxChars);
+        return text.substring(0, end);
     }
 }

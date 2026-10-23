@@ -133,8 +133,8 @@ flowchart TD
         D4["TrpgRetentionService<br/>30 天 / 168 小时 / 5000 行清理"]
     end
 
-    subgraph AI["AI 主持（v1 仅契约桩）"]
-        A1["TrpgAiHostService<br/>开关 / 队列 / 降级 / 校验 / 审计"]
+    subgraph AI["AI 主持（v1.1 真实实现）"]
+        A1["TrpgAiHostService 宿主（开关 / 触发）<br/>AiHostEngine（排队 / 合并 / 降级 / 校验 / 审计）"]
     end
 
     C1 --> S1
@@ -171,7 +171,7 @@ flowchart TD
 | `ScriptGenerationService` | `/trpg script gen` 一次性 AI 生成（单线程 daemon） | 不进 AI 主持队列、不写 `ai_trace` |
 | `BlacklistService` | 本群黑名单 add / remove / list，直连 `SessionStore` | 不占群锁、不做跨群解封以外的事 |
 | `TrpgPresenter` 六件套 | 模板、格式化、拆分、图片、出口与配置 | 不决定信息是否可见（归 §5 / §6） |
-| `TrpgAiHostService` | AI 主持唯一入口：开关判定、排队、输出校验、降级、审计 | 不写局状态；不绕过判定顺序与 CAS |
+| `TrpgAiHostService` | AI 主持宿主服务：全局开关、触发入口、引擎装配与挂起/去重绑定 | 不写局状态；排队/合并/降级由 `AiHostEngine` 承担 |
 | `Messaging` / `Clock` / `RandomSource` / `Scheduler` / `AiClient` / `TraceStore` / `SessionView` | 注入端口，测试用假实现 | — |
 
 ### 3.3 写入边界
@@ -592,7 +592,7 @@ CREATE INDEX IF NOT EXISTS ix_trpg_trace_cleanup ON plugin_mbb_trpg_ai_trace(cre
 - 时间一律 epoch 毫秒 INTEGER；布尔一律 0/1；`aiSuspendedUntil=0` 表示未挂起，不落 NULL。
 - 有 DEFAULT 的列用默认值；`state`、`kpUserID`、`groupID`、`createTime`、`updateTime`、`eventType`、`triggerType`、`resultStatus`、`member.sessionID`、`member.userID`、`text_log.seq` 无 DEFAULT，写入必须显式给值；`summary` 缺失写空串，不写 NULL。
 - `ai_trace.eventSeq` 固定 `NOT NULL DEFAULT 0`：0 表示没有触发它的日志，否则存触发它的那条日志 `seq`（AI 事件本身不写日志）。
-- `ai_trace.triggerType` 取值冻结为 `scene / check / opposed / san / begin / merged`（与 §9.3 的触发路径一一对应）。
+- `ai_trace.triggerType` 取值冻结为 `scene / check / opposed / san / begin / merged / player_action`（与 §9.3 的触发路径一一对应；`player_action` 表示玩家自由文本单独触发，合并窗口结算写 `merged`）。
 - 仅 `id` 使用 `INTEGER PRIMARY KEY AUTOINCREMENT`；不使用 BLOB，不存图片与剧本正文。
 - 迁移补列必须带常量默认值，读取侧把 NULL 按默认值处理。
 
@@ -804,7 +804,7 @@ DELETE FROM plugin_mbb_trpg_ai_trace WHERE id < (SELECT id FROM plugin_mbb_trpg_
 
 - 三段：稳定前缀（剧本核心设定 + 已登场 NPC 卡）、可缓存中段（风格与规则约束摘要）、动态区（当前场景、在场角色与公开状态标签、最近事件、已解锁线索原文、未解锁线索后果摘要、KP 最近叙述）。
 - 预算总长 6000 字，动态区至少保留 1500 字，素材按优先级裁剪。
-- 在场角色只给名字与公开状态标签（受伤 / 昏迷等），不给具体数值。
+- 在场角色只给匿名代号（玩家A、玩家B……，按加入顺序稳定编号）与公开状态标签（受伤 / 昏迷等），不给具体数值，也不给 QQ 号。
 - 未解锁线索只给 `lockedSummary`，已解锁给 `unlockedText`。
 - 系统提示固定约束：你是回合叙述员；不改数值、不代替做检定结论、不推进回合、不复述系统播报与指令回执；300 字以内；只输出叙述与可选建议行。
 - 剧本无场景级 `fallbackNarration` 时，回退插件内置通用模板。
@@ -813,7 +813,7 @@ DELETE FROM plugin_mbb_trpg_ai_trace WHERE id < (SELECT id FROM plugin_mbb_trpg_
 
 - 端口 `TraceStore`，默认写 `plugin_mbb_trpg_ai_trace`（字段见 §7.2）。
 - 每次入队请求最多写 1 行（含 `attempts`），不按调用次数重复写；结果状态 ∈ `success / degraded / suspended / stale / skipped`。
-- **取值落列映射**：`success / degraded / suspended / stale / skipped` 写 `resultStatus`；`queue_full`、`unavailable`、`busy`、`timeout`、`network`、`http_<code>`、`verification` 也写 `resultStatus`（都是当次请求的结果状态）；具体原因写 `degradeReason`（`queue_age`、`suspended`、`stale`），外部错误码写 `errorType`（`unavailable` 保留原 errorType，`http_404` 这类写 `errorType`）。
+- **取值落列映射**：`resultStatus` 只取 `success / degraded / suspended / skipped / stale`；`degradeReason` 存触发原因（`queue_full / queue_age / timeout / network / http_<code> / busy / unavailable / interrupted / verification / truncated` 等）；`errorType` 只存外部错误码（`busy / timeout / network / http_<code> / unavailable` 等），输出校验失败固定写 `verification`，中文原因只进日志。
 - `skipped` 只在挂起清队列与在途请求被丢弃时写；全局关、未授权、窗口无内容不写行。
 - 不存完整提示词与完整输出，只存输出前 240 字预览；受 `aiHost.traceEnabled` 控制（默认开）；保留 168 小时 / 最多 5000 行（§7.7）。
 
@@ -827,7 +827,7 @@ DELETE FROM plugin_mbb_trpg_ai_trace WHERE id < (SELECT id FROM plugin_mbb_trpg_
 ### 9.11 AI 测试缝
 
 - 主缝 `TrpgAiHostService`：注入假 `AiClient`（成功 / 空输出 / 超长 / 越权断言 / busy / timeout / network / http_5xx / disabled / cached / `finishReason=length`）、记录型 `Messaging`、可控 `Clock`、手动推进的假 `Scheduler`、假 `SessionView`、内存 `TraceStore`。覆盖降级表每一行、单请求 2 次调用与计次、挂起惰性与重启生效、去重与 60 秒缓存、合并窗口三种收口、队列超龄、stale、300 字截断、建议白名单、审计字段与 240 字截断、审计失败不影响叙述、全局关零调用零审计零发送。
-- 次缝 `TrpgCommand` 的 `/trpg ai`：参数、无参数提示、私聊拒绝、权限与状态判定、全局关拒绝。不新增测试缝：`SessionView` 的实现委托 `SessionService.readSnapshot`，测试只注入假实现。
+- 次缝 `TrpgCommand` 的 `/trpg ai` 与监听器入口：参数、无参数提示、私聊拒绝、权限与状态判定、全局关拒绝、自由文本与指令前缀分流。`SessionView` 的实现委托 `SessionService.readSnapshot`，测试只注入假实现。
 
 ## 10. 呈现规范
 

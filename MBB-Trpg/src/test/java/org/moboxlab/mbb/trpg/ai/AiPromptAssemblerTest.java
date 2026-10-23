@@ -108,13 +108,16 @@ public class AiPromptAssemblerTest {
     }
 
     @Test
-    public void membersShowNamesAndPublicLabelsOnly() {
+    public void membersUseAnonymousLabelsAndPublicStatusOnly() {
         SessionSnapshot snapshot = snapshot(0);
         String dynamic = AiPromptAssembler.dynamic(snapshot, script(), events(),
                 AiPromptAssembler.DEFAULT_PROMPT_BUDGET_CHARS,
                 AiPromptAssembler.DEFAULT_DYNAMIC_MIN_CHARS);
 
-        assertTrue(dynamic.contains("玩家 1001"));
+        assertTrue(dynamic.contains("玩家A"));
+        assertTrue(dynamic.contains("玩家B"));
+        assertFalse("提示词不得出现玩家 QQ 号", dynamic.contains("1001"));
+        assertFalse("提示词不得出现玩家 QQ 号", dynamic.contains("1002"));
         // 3/11 生命对应重伤，SAN 归零对应精神崩溃；只给标签，不给数值。
         assertTrue(dynamic.contains("重伤"));
         assertTrue(dynamic.contains("精神崩溃"));
@@ -254,7 +257,7 @@ public class AiPromptAssemblerTest {
     private static List<String> events() {
         List<String> lines = new ArrayList<String>();
         for (int index = 0; index < 30; index++) {
-            lines.add("玩家 1001 推开第 " + index + " 扇侧门，冷风顺着走廊灌进来。");
+            lines.add("玩家推开第 " + index + " 扇侧门，冷风顺着走廊灌进来。");
         }
         lines.add("KP：他抬起头，眼神里闪过一丝慌乱，随即又低下头去。");
         lines.add("KP：窗外传来树枝刮过玻璃的声响，没有人说话。");

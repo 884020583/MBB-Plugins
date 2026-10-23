@@ -29,12 +29,13 @@ import org.moboxlab.mbb.trpg.store.BlacklistService;
 /**
  * 群/私聊消息入口：黑名单静默拦截 → 导入暂存吞消息（含控制字）→ 局内活动刷新 → 玩家行动触发 AI。
  *
- * <p>本监听器不做任何业务判定：命中黑名单只把消息取消掉、不回复；导入暂存期间把该用户
- * 同一会话的消息原文交给 {@link ScriptImportService#append}，并就地处理
+ * <p>监听器只做入口分流，不做任何业务判定：命中黑名单只把消息取消掉、不回复；导入暂存期间
+ * 把该用户同一会话的消息原文交给 {@link ScriptImportService#append}，并就地处理
  * {@code /trpg script import end|cancel} 两个控制字（§S10：控制字优先于指令分发）。
  * 其余群消息先刷新局内活动（60 秒节流由 {@link SessionService#touchActivity} 内部判定），
- * 再进行中的局把非指令自由文本当作玩家行动：记 action 日志并触发 AI 合并窗口（§9.4），
- * 命中后同样取消事件，避免再被指令分发处理。</p>
+ * 再把「进行中且本局开启 AI」的非指令自由文本交给局面服务记为玩家行动并触发合并窗口（§9.4）；
+ * 命中后取消事件，避免再被指令分发处理。是否算玩家行动（KP 不识别、局状态、AI 开关）
+ * 全部由 {@link SessionService#playerAction} 判定。</p>
  */
 public final class TrpgListener implements Listener {
 
@@ -120,8 +121,7 @@ public final class TrpgListener implements Listener {
             return false;
         }
         String text = raw == null ? "" : raw.trim();
-        if (text.isEmpty() || text.startsWith("/") || text.startsWith("／")
-                || text.toLowerCase(java.util.Locale.ROOT).startsWith("trpg")) {
+        if (text.isEmpty() || looksLikeCommand(text)) {
             return false;
         }
         SessionSnapshot snapshot = sessions.readSnapshot(groupId);
@@ -136,15 +136,44 @@ public final class TrpgListener implements Listener {
         if (snapshot.kpUserId() == userId) {
             return false;
         }
-        SessionResult result = sessions.playerAction(
-                new SessionActor(userId, groupId, false, false), text);
-        if (!result.ok()) {
+        try {
+            SessionResult result = sessions.playerAction(
+                    new SessionActor(userId, groupId, false, false), text);
+            if (!result.ok()) {
+                return false;
+            }
+            SessionSnapshot after = result.snapshot();
+            long eventSeq = after == null ? snapshot.sceneVersion() : after.sceneVersion();
+            aiTriggers.fire(AiTrigger.PLAYER_ACTION, groupId, eventSeq, text);
+            return true;
+        } catch (RuntimeException e) {
+            // 记行动失败只影响 AI，不阻断消息：交给指令分发与后续消息处理。
+            if (logger != null) {
+                logger.sendWarn("[MBB-Trpg] 玩家行动记录失败：" + e.getMessage());
+            }
             return false;
         }
-        SessionSnapshot after = result.snapshot();
-        long eventSeq = after == null ? snapshot.sceneVersion() : after.sceneVersion();
-        aiTriggers.fire(AiTrigger.PLAYER_ACTION, groupId, eventSeq, text);
-        return true;
+    }
+
+    /**
+     * 是否为指令或其它插件的命令，避免把「trpg真好玩」「#帮助」「!roll」误当玩家行动吞掉。
+     *
+     * <p>只认三种形态：斜杠前缀（/ 与全角／）、其它插件常用前缀（# . ! 与全角！）、
+     * 以及首个空白分隔词恰为 {@code trpg}（含大小写与全角斜杠）。</p>
+     */
+    private static boolean looksLikeCommand(String text) {
+        char first = text.charAt(0);
+        if (first == '/' || first == '／' || first == '#' || first == '.' || first == '!'
+                || first == '！') {
+            return true;
+        }
+        String lower = text.toLowerCase(java.util.Locale.ROOT);
+        int end = 0;
+        while (end < lower.length() && !Character.isWhitespace(lower.charAt(end))) {
+            end++;
+        }
+        String head = lower.substring(0, end);
+        return "trpg".equals(head) || "／trpg".equals(head) || "/trpg".equals(head);
     }
 
     /** 私聊消息入口：私聊只承载导入暂存，其余消息交给指令层。 */

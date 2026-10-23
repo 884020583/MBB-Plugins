@@ -525,8 +525,8 @@ public class SessionServiceTest extends SessionTestFixture {
         SessionService stubbed = new SessionService(store, catalog, clock, DefaultRandomSource.INSTANCE,
                 enabled, collectingPublisher(), null, locks, new CooldownRegistry(), new ErrorDedupe(),
                 new TrpgAiHostService(enabled));
-        store.casAiState(activeSessionId(), SessionState.RUNNING, false, 123L, 2,
-                clock.nowMillis());
+        store.casAiState(activeSessionId(), SessionState.RUNNING, false,
+                clock.nowMillis() + 600000L, 2, clock.nowMillis());
 
         SessionResult result = stubbed.aiState(actor(KP), "on");
 
@@ -541,6 +541,34 @@ public class SessionServiceTest extends SessionTestFixture {
         assertTrue(off.ok());
         assertEquals(TrpgAiHostService.DETAIL_OFF, off.detail());
         assertFalse(row(activeSessionId()).aiEnabled());
+    }
+
+    @Test
+    public void aiOnWithoutSuspensionKeepsEnabledWordingEvenWithStreak() {
+        startRunning();
+        Map<String, String> raw = new LinkedHashMap<String, String>();
+        raw.put("aiHost.enabled", "true");
+        TrpgConfig enabled = TrpgConfig.fromValues(raw);
+        SessionService stubbed = new SessionService(store, catalog, clock, DefaultRandomSource.INSTANCE,
+                enabled, collectingPublisher(), null, locks, new CooldownRegistry(), new ErrorDedupe(),
+                new TrpgAiHostService(enabled));
+        // 未挂起、但已累计 1 次失败：不应说「已清除挂起」。
+        store.casAiState(activeSessionId(), SessionState.RUNNING, false, 0L, 1, clock.nowMillis());
+
+        SessionResult result = stubbed.aiState(actor(KP), "on");
+
+        assertTrue(result.detail(), result.ok());
+        assertEquals(TrpgAiHostService.DETAIL_ENABLED, result.detail());
+        assertEquals(0, row(activeSessionId()).aiFailStreak());
+    }
+
+    @Test
+    public void playerActionTruncatesByCodePointWithoutSplittingEmoji() {
+        String emoji = "\uD83D\uDE00";
+        String longText = emoji + emoji + emoji;
+        assertEquals(emoji + emoji, SessionService.truncateByCodePoint(longText, 2));
+        assertEquals(longText, SessionService.truncateByCodePoint(longText, 3));
+        assertEquals("", SessionService.truncateByCodePoint(null, 2));
     }
 
     @Test

@@ -1,7 +1,7 @@
 # MBB-Trpg v1 验收记录（S11）
 
 - 记录日期：2026-10-23
-- 验收对象：`master` 之上的 S11 交付分支，插件版本 `V0.1.9.1.2011`
+- 验收对象：`master` 之上的 S11 交付分支，插件版本 `V0.1.10.0.2155`，后续补测追加至 v1.1 审查修复版
 - 规格依据：[MBB-Trpg.md](MBB-Trpg.md) 第 12 节（86 条口径，表内 87 行，J5 拆 J5a/J5b）；[呈现规范分册](MBB-Trpg-presentation.md)
 - 判定口径：**通过**＝有自动化断言直接覆盖且本轮全绿；**部分**＝主要预期已覆盖、个别边界无断言；**间接**＝仅下层证据；**手测**＝本轮人工执行并留记录；**N/A**＝不属 v1 范围（J12）。
 
@@ -165,7 +165,7 @@
 - 新增 `MBB-Trpg/src/test/java/org/moboxlab/mbb/trpg/session/FullSessionAcceptanceTest.java`（I2 整局回归）。
 - 新增 `MBB-Trpg/src/test/java/org/moboxlab/mbb/trpg/session/ThousandCommandsLoadTest.java`（J10 千次长跑）。
 - 规格裁决：§12 E1 改为招募期不发提示、`recovered=true`，并同步 §5.2 T8、§5.7 恢复段；§10/§12 J13 词表计数改为 29，并补「86 条 / 87 行 / J12 N/A」计数口径。
-- 本记录纳入版本控制，作为 S11 交付证据；测试总数 493 → 497。
+- 本记录纳入版本控制，作为 S11 交付证据；测试总数 493 → 497 → 560（v1.1 补测与审查修复）。
 
 ## 4. 后续切片建议（不阻断 v1）
 
@@ -192,4 +192,4 @@ v1.1 接 issue #15，v1 的 §12 清单不变；以下条目在 v1.1 由「N/A /
 | 投递门禁 | 通过 | `AiHostEngineTest#suspendedTriggerNotifiesOncePerSuspensionPeriod`、`#failureAfterSuspensionIsDiscardedAsSkipped`：局结束、挂起、换局或换场景一律不发消息，只记 `skipped` / `stale` |
 | 呈现文案 | 通过 | `TrpgMessageTemplatesTest` / 呈现规范 §3.6：叙述落款、降级原因、挂起提示；降级先发剧本模板叙述再发说明 |
 
-测试总数 497 → 554（49 个测试类）。
+测试总数 497 → 554 → 560（49 个测试类）。

@@ -69,8 +69,8 @@ import com.alibaba.fastjson.JSONObject;
  * 审计端口、拉黑名单、会话状态机、呈现层与归档清理，按冻结顺序执行启动序列并排入每小时
  * 清理任务；随后注册 /trpg 与 /r 指令与群监听器。</p>
  *
- * <p>AI 主持按 §9.10 的 v1 口径装配为契约桩：读取 aiHost.* 配置、判定全局开关、承担
- * /trpg ai 的参数与状态分支，但不调用 AI、不写审计、不注册定时器。</p>
+ * <p>AI 主持按 §9.10 装配：读取 aiHost.* 配置、判定全局开关、承担 /trpg ai 的参数与状态分支；
+ * 全局开启时装配真实调用、合并窗口与审计，关闭时保持零调用桩。</p>
  */
 public class TrpgPlugin extends Plugin {
 
@@ -100,7 +100,7 @@ public class TrpgPlugin extends Plugin {
     private TrpgNameResolver nameResolver;
     private SessionLogService sessionLogService;
     private TrpgCommandService commandService;
-    /** AI 主持契约桩（S9）：v1 零调用、零审计、不注册定时器。 */
+    /** AI 主持宿主服务；全局关闭时为零调用桩。 */
     private TrpgAiHostService aiHostService;
     private TrpgListener listener;
     private TrpgNoticeListener noticeListener;
@@ -240,11 +240,11 @@ public class TrpgPlugin extends Plugin {
         if (scriptLibrary != null) {
             scriptLibrary.bindUsageIndex(sessionService);
         }
-        // 只读快照视图交给桩，v1.1 的叙述链路可直接复用（§9.11）。
+        // 只读快照视图交给宿主服务，v1.1 的叙述链路复用它（§9.11）。
         aiHostService.bindSessionView(sessionService);
         getLogger().sendInfo("[MBB-Trpg] AI 主持全局开关："
-                + (aiHostService.globallyEnabled() ? "开" : "关")
-                + "（v1 为空实现，不调用 AI、不写审计、不注册定时器）");
+                + (aiHostService.globallyEnabled()
+                ? "开（装配真实调用与审计）" : "关（零调用桩）"));
         sessionLogService = new SessionLogService(store, trpgConfig, clock, cooldowns, dedupe, getLogger());
         ScriptImportSessions importSessions = assembleScriptAdmin();
         commandService = new TrpgCommandService(sessionService, sessionLogService, scriptCatalog,
@@ -554,7 +554,7 @@ public class TrpgPlugin extends Plugin {
         return commandService;
     }
 
-    /** AI 主持契约桩；未启用时为 null。 */
+    /** AI 主持宿主服务；装配失败时为未启用桩。 */
     public TrpgAiHostService aiHostService() {
         return aiHostService;
     }

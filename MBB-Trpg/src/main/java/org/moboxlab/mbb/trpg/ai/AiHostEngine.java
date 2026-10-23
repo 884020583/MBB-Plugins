@@ -2,27 +2,20 @@ package org.moboxlab.mbb.trpg.ai;
 
 import org.moboxlab.moboxbot.API.PluginLogger;
 import org.moboxlab.mbb.trpg.config.TrpgConfig;
-import org.moboxlab.mbb.trpg.script.Scene;
-import org.moboxlab.mbb.trpg.script.Script;
 import org.moboxlab.mbb.trpg.script.ScriptCatalog;
 import org.moboxlab.mbb.trpg.session.Clock;
 import org.moboxlab.mbb.trpg.session.ScheduledTask;
 import org.moboxlab.mbb.trpg.session.Scheduler;
 import org.moboxlab.mbb.trpg.session.SessionSnapshot;
-import org.moboxlab.mbb.trpg.session.SessionState;
-import org.moboxlab.mbb.trpg.store.AiTraceRow;
 
-import java.util.ArrayDeque;
 import java.util.ArrayList;
-import java.util.Collections;
-import java.util.Deque;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.LinkedHashSet;
 import java.util.List;
-import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.ArrayBlockingQueue;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -31,23 +24,28 @@ import java.util.concurrent.Future;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.Semaphore;
 import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
 /**
- * AI 主持引擎：触发合并、排队与并发、调用、输出校验、降级与审计。
+ * AI 主持引擎：触发合并、排队与并发、调用、降级与审计的总装。
  *
  * <p>职责边界：</p>
  * <ul>
  *   <li>只做编排与降级，不直接发群消息：发送由 {@link AiNarrationSink} 接线；</li>
  *   <li>连续失败阈值、挂起时间戳与失败计数清零由 SessionService 负责，引擎通过
  *       {@link AiFailureRecorder} 回调并只消费返回结果；</li>
- *   <li>提示词装配与叙述解析分别委托 {@link AiPromptAssembler} 与 {@link AiNarrationParser}。</li>
+ *   <li>提示词装配、叙述校验、局视图门禁与审计分别委托 {@link AiPromptBuilder}、
+ *       {@link AiNarrationValidator}、{@link AiSessionGate} 与 {@link AiTraceWriter}。</li>
  * </ul>
  *
  * <p>调用必须异步：submit 只做入队，实际 AI 调用在守护线程池中执行，并用
  * Future.get(deadline) 做插件侧墙钟，不阻塞事件监听线程。</p>
+ *
+ * <p>背压分两层：每群串行队列按 {@code aiPerGroupQueue} 限长，全局工作线程池本身也用
+ * 有界队列，池满时按 queue_full 降级，不按群无限堆线程。</p>
  */
 public final class AiHostEngine {
 
@@ -62,25 +60,23 @@ public final class AiHostEngine {
     private static final String REASON_VERIFICATION = "verification";
     private static final String REASON_TRUNCATED = "truncated";
     private static final String REASON_UNAVAILABLE = "unavailable";
-    private static final String REASON_BUSY = "busy";
     private static final String REASON_TIMEOUT = "timeout";
-    private static final String REASON_NETWORK = "network";
-    private static final String REASON_INTERRUPTED = "interrupted";    private static final String ERROR_HTTP_PREFIX = "http_";
-    private static final String FINISH_LENGTH = "length";
-    private static final int PREVIEW_MAX_CHARS = 240;
 
     private final TrpgConfig config;
     private final AiClient client;
-    private final SessionView view;
-    private final TraceStore trace;
     private final Scheduler scheduler;
     private final Clock clock;
-    private final PluginLogger logger;
     private final AiNarrationSink sink;
+    private final AiEngineLog log;
+    private final AiTraceWriter traces;
+    private final AiPromptBuilder prompts;
+    private final AiNarrationValidator validator;
+    private final AiSessionGate gate;
+    private final AiFailureCounter failures;
 
     /** 全局并发许可，数量等于 config.aiMaxConcurrent()。 */
     private final Semaphore concurrency;
-    /** 每群串行工作线程所在的线程池（缓存线程池，守护线程）。 */
+    /** 每群串行工作线程所在的有界工作池：池满时拒绝，转成 queue_full 降级。 */
     private final ExecutorService groupExecutor;
     /** 真正执行 AI 调用的线程池，容量等于全局并发上限。 */
     private final ExecutorService callExecutor;
@@ -94,9 +90,6 @@ public final class AiHostEngine {
     private int globalWaiting;
     private int inFlight;
     private boolean shutdown;
-
-    private volatile AiFailureRecorder failureRecorder;
-    private volatile ScriptCatalog scriptCatalog;
 
     /**
      * 创建引擎。
@@ -137,32 +130,48 @@ public final class AiHostEngine {
         }
         this.config = config;
         this.client = client;
-        this.view = view;
-        this.trace = trace;
         this.scheduler = scheduler;
         this.clock = clock;
-        this.logger = logger;
         this.sink = sink;
+        AiEngineLog engineLog = new AiEngineLog(logger);
+        this.log = engineLog;
+        this.traces = new AiTraceWriter(trace, config, clock, engineLog);
+        this.prompts = new AiPromptBuilder(config, view, engineLog);
+        this.validator = new AiNarrationValidator(config, engineLog);
+        this.gate = new AiSessionGate(view, clock, traces);
+        this.failures = new AiFailureCounter(engineLog);
         int limit = config.aiMaxConcurrent();
         if (maxConcurrent > 0) {
             limit = Math.min(limit, maxConcurrent);
         }
         limit = Math.max(1, limit);
         this.concurrency = new Semaphore(limit);
-        // 每群串行任务会阻塞在并发许可或墙钟上；固定池避免按群无限增线程。
-        this.groupExecutor = Executors.newFixedThreadPool(Math.max(2, limit * 2),
-                daemonFactory("mbb-trpg-ai-group"));
+        // 每群串行任务会阻塞在并发许可或墙钟上；固定大小加有界队列，池满即拒绝。
+        int workers = Math.max(2, limit * 2);
+        this.groupExecutor = new ThreadPoolExecutor(workers, workers, 0L, TimeUnit.MILLISECONDS,
+                new ArrayBlockingQueue<Runnable>(workerQueueCapacity(limit)),
+                daemonFactory("mbb-trpg-ai-group"), new ThreadPoolExecutor.AbortPolicy());
         this.callExecutor = Executors.newFixedThreadPool(limit, daemonFactory("mbb-trpg-ai-call"));
+    }
+
+    /**
+     * 全局工作池的等待位：与全局排队上限同量级，至少留 2 个位置。
+     *
+     * <p>不能直接用 {@code aiGlobalQueue}：请求在池里排队时仍占着每群队列与全局排队计数，
+     * 等待位与排队上限相同就基本不会拒绝，等于没有背压。</p>
+     */
+    private int workerQueueCapacity(int limit) {
+        return Math.max(2, Math.min(Math.max(1, config.aiGlobalQueue()), limit));
     }
 
     /** 绑定失败计数端口（由 SessionService 实现）。未绑定时引擎不记录失败、不清零。 */
     public void bindFailureRecorder(AiFailureRecorder recorder) {
-        this.failureRecorder = recorder;
+        failures.bind(recorder);
     }
 
     /** 绑定剧本目录，用于按 snapshot.scriptId() 取剧本传给提示词装配。 */
     public void bindScriptCatalog(ScriptCatalog catalog) {
-        this.scriptCatalog = catalog;
+        prompts.bindScriptCatalog(catalog);
     }
 
     /**
@@ -367,11 +376,35 @@ public final class AiHostEngine {
         }
     }
 
+    /**
+     * 提交本群的工作线程；全局工作池已满时按 queue_full 降级本群积压，不抛给调用方。
+     */
     private void startWorker(final long groupId) {
         try {
             groupExecutor.execute(new GroupWorker(groupId));
         } catch (RejectedExecutionException error) {
-            warn("AI 队列线程提交失败，群 " + groupId + "：" + error);
+            log.warn("AI 工作线程提交被拒，群 " + groupId + "：" + error);
+            rejectWorker(groupId);
+        }
+    }
+
+    /** 全局工作池拒绝后的收尾：复位本群工作线程标记，把积压请求按 queue_full 降级。 */
+    private void rejectWorker(long groupId) {
+        List<PendingCall> rejected = new ArrayList<PendingCall>();
+        synchronized (lock) {
+            GroupQueue queue = queues.remove(Long.valueOf(groupId));
+            if (queue == null) {
+                return;
+            }
+            queue.workerRunning = false;
+            while (!queue.waiting.isEmpty()) {
+                PendingCall pending = queue.waiting.pollFirst();
+                globalWaiting--;
+                rejected.add(pending);
+            }
+        }
+        for (PendingCall pending : rejected) {
+            degradeQueueFull(pending.request);
         }
     }
 
@@ -414,7 +447,7 @@ public final class AiHostEngine {
                         concurrency.release();
                     }
                 } catch (RuntimeException error) {
-                    warn("AI 调用线程异常，群 " + groupId + "：" + error);
+                    log.warn("AI 调用线程异常，群 " + groupId + "：" + error);
                 } finally {
                     finishOne();
                 }
@@ -557,17 +590,17 @@ public final class AiHostEngine {
 
     private void execute(PendingCall pending) {
         AiCallRequest request = pending.request;
-        long startAt = System.currentTimeMillis();
+        long startAt = clock.nowMillis();
         long deadlineAt = startAt + deadlineMillis();
-        SessionSnapshot snapshot = snapshot(request.groupId());
-        if (!enabled(snapshot) || suspended(snapshot) || !running(snapshot)) {
+        SessionSnapshot snapshot = gate.snapshot(request.groupId());
+        if (!gate.enabled(snapshot) || gate.suspended(snapshot) || !gate.running(snapshot)) {
             return;
         }
         AiRequest prompt;
         try {
-            prompt = buildRequest(request, snapshot);
+            prompt = prompts.buildRequest(request, snapshot);
         } catch (RuntimeException error) {
-            warn("AI 提示词装配失败，群 " + request.groupId() + "：" + error);
+            log.warn("AI 提示词装配失败，群 " + request.groupId() + "：" + error);
             degrade(request, REASON_UNAVAILABLE, "", 0, 0L, null, "");
             return;
         }
@@ -581,9 +614,9 @@ public final class AiHostEngine {
             failResult(request, result, attempts, startAt);
             return;
         }
-        Validation validation = validate(result.content(), result.finishReason());
+        AiNarrationValidation validation = validator.validate(result.content(), result.finishReason());
         if (!validation.valid) {
-            if (deadlineAt - System.currentTimeMillis() > 0L) {
+            if (deadlineAt - clock.nowMillis() > 0L) {
                 result = invoke(prompt, deadlineAt);
                 attempts = 2;
                 if (result == null) {
@@ -594,7 +627,7 @@ public final class AiHostEngine {
                     failResult(request, result, attempts, startAt);
                     return;
                 }
-                validation = validate(result.content(), result.finishReason());
+                validation = validator.validate(result.content(), result.finishReason());
             }
             if (!validation.valid) {
                 // 墙钟已过时无法重试：只发生过 1 次调用，按 §9.5 不计失败。
@@ -608,7 +641,7 @@ public final class AiHostEngine {
 
     /** 异步调用并做插件侧墙钟；超时返回 null，中断与线程拒绝按不计数失败返回。 */
     private AiResult invoke(final AiRequest prompt, long deadlineAt) {
-        long remaining = deadlineAt - System.currentTimeMillis();
+        long remaining = deadlineAt - clock.nowMillis();
         if (remaining <= 0L) {
             return null;
         }
@@ -631,234 +664,124 @@ public final class AiHostEngine {
         } catch (InterruptedException error) {
             future.cancel(true);
             Thread.currentThread().interrupt();
-            return AiResult.failure(REASON_INTERRUPTED, false, 0L);
+            return AiResult.failure(AiErrorTypes.INTERRUPTED, false, 0L);
         } catch (ExecutionException error) {
-            warn("AI 调用异常：" + error.getCause());
+            log.warn("AI 调用异常：" + error.getCause());
             return AiResult.failure(AiErrorTypes.UNKNOWN, false, 0L);
         }
     }
 
-    private AiRequest buildRequest(AiCallRequest request, SessionSnapshot snapshot) {
-        Script script = null;
-        ScriptCatalog catalog = scriptCatalog;
-        if (catalog != null) {
-            try {
-                script = catalog.get(snapshot.scriptId());
-            } catch (RuntimeException error) {
-                warn("读取剧本失败，剧本 " + snapshot.scriptId() + "：" + error);
-            }
-        }
-        AiPromptParts parts = AiPromptAssembler.fit(snapshot, script, request.recentEventLines(),
-                config.aiPromptBudgetChars(), config.aiDynamicMinChars());
-        return new AiRequest(request.trigger().traceName(), parts.stablePrefix(), parts.cacheable(),
-                parts.dynamic(), config.aiProviderTimeoutSeconds(), 0, 0.7D, request.sessionKey());
-    }
-
-    private Validation validate(String content, String finishReason) {
-        if (content == null) {
-            return Validation.invalid("empty");
-        }
-        AiNarrationParser.ParseResult parsed;
-        try {
-            parsed = AiNarrationParser.parse(content, Math.max(1, config.aiNarrationMaxChars()));
-        } catch (RuntimeException error) {
-            warn("AI 叙述解析异常：" + error);
-            return Validation.invalid("parse_error");
-        }
-        if (parsed == null || !parsed.valid()) {
-            String reason = parsed == null ? "parse_error" : parsed.rejectReason();
-            return Validation.invalid(reason == null ? "invalid" : reason);
-        }
-        String text = parsed.narration();
-        if (text == null || text.trim().isEmpty()) {
-            return Validation.invalid("empty");
-        }
-        List<String> suggestions = parsed.suggestions();
-        if (suggestions != null && !suggestions.isEmpty()) {
-            StringBuilder builder = new StringBuilder(text);
-            for (String suggestion : suggestions) {
-                if (suggestion == null || suggestion.trim().isEmpty()) {
-                    continue;
-                }
-                builder.append('\n').append(formatSuggestion(suggestion));
-            }
-            text = builder.toString();
-        }
-        boolean truncated = parsed.truncated() || FINISH_LENGTH.equalsIgnoreCase(finishReason);
-        return Validation.ok(text, truncated);
-    }
-
-    private void succeed(AiCallRequest request, AiResult result, Validation validation,
+    private void succeed(AiCallRequest request, AiResult result, AiNarrationValidation validation,
                          int attempts, long startAt) {
-        SessionSnapshot latest = snapshot(request.groupId());
-        if (latest == null || !enabled(latest)) {
+        SessionSnapshot latest = gate.snapshot(request.groupId());
+        if (latest == null || !gate.enabled(latest)) {
             return;
         }
         if (!latest.active()) {
-            audit(request, RESULT_SKIPPED, "", "", attempts, elapsed(startAt),
+            traces.write(request, RESULT_SKIPPED, "", "", attempts, traces.elapsed(startAt),
                     result.finishReason(), result.usageJson(), result.cached(), "");
             return;
         }
-        if (suspended(latest)) {
-            audit(request, RESULT_SKIPPED, "", "", attempts, elapsed(startAt),
+        if (gate.suspended(latest)) {
+            traces.write(request, RESULT_SKIPPED, "", "", attempts, traces.elapsed(startAt),
                     result.finishReason(), result.usageJson(), result.cached(), "");
             return;
         }
         if (latest.sessionId() != request.sessionNo()
                 || latest.sceneVersion() != request.sceneVersion()) {
-            audit(request, RESULT_STALE, "", "", attempts, elapsed(startAt),
+            traces.write(request, RESULT_STALE, "", "", attempts, traces.elapsed(startAt),
                     result.finishReason(), result.usageJson(), result.cached(), "");
             return;
         }
-        recordSuccess(request.groupId());
+        failures.recordSuccess(request.groupId());
         send(request.groupId(), validation.text, false, "");
-        audit(request, RESULT_SUCCESS, validation.truncated ? REASON_TRUNCATED : "",
-                "", attempts, elapsed(startAt), result.finishReason(), result.usageJson(),
+        traces.write(request, RESULT_SUCCESS, validation.truncated ? REASON_TRUNCATED : "",
+                "", attempts, traces.elapsed(startAt), result.finishReason(), result.usageJson(),
                 result.cached(), validation.text);
     }
 
     private void failResult(AiCallRequest request, AiResult result, int attempts, long startAt) {
-        if (!deliverable(request, attempts, startAt)) {
+        if (!gate.deliverable(request, attempts, startAt)) {
             return;
         }
         String errorType = result.errorType() == null ? AiErrorTypes.UNKNOWN : result.errorType();
-        boolean counts = countsAsFailure(errorType);
-        String reason = degradeReason(errorType);
-        boolean suspendedNow = counts && recordFailure(request.groupId());
-        send(request.groupId(), fallbackNarration(request.groupId()), true, reason);
-        audit(request, suspendedNow ? RESULT_SUSPENDED : RESULT_DEGRADED, reason, errorType,
-                attempts, elapsed(startAt), result.finishReason(), result.usageJson(),
+        boolean counts = AiDegradeClassifier.countsAsFailure(errorType);
+        String reason = AiDegradeClassifier.degradeReason(errorType, REASON_UNAVAILABLE);
+        boolean suspendedNow = counts && failures.recordFailure(request.groupId());
+        send(request.groupId(), prompts.fallbackNarration(request.groupId()), true, reason);
+        traces.write(request, suspendedNow ? RESULT_SUSPENDED : RESULT_DEGRADED, reason, errorType,
+                attempts, traces.elapsed(startAt), result.finishReason(), result.usageJson(),
                 result.cached(), "");
-        if (suspendedNow) {
-            notifySuspended(request.groupId());
-            clearQueueOnSuspend(request.groupId());
-        }
+        afterFailure(request.groupId(), suspendedNow);
     }
 
     private void failTimeout(AiCallRequest request, int attempts, long startAt) {
-        if (!deliverable(request, attempts, startAt)) {
+        if (!gate.deliverable(request, attempts, startAt)) {
             return;
         }
-        boolean suspendedNow = recordFailure(request.groupId());
-        send(request.groupId(), fallbackNarration(request.groupId()), true, REASON_TIMEOUT);
-        audit(request, suspendedNow ? RESULT_SUSPENDED : RESULT_DEGRADED, REASON_TIMEOUT,
-                AiErrorTypes.TIMEOUT, attempts, elapsed(startAt), "", "", false, "");
-        if (suspendedNow) {
-            notifySuspended(request.groupId());
-            clearQueueOnSuspend(request.groupId());
-        }
+        boolean suspendedNow = failures.recordFailure(request.groupId());
+        send(request.groupId(), prompts.fallbackNarration(request.groupId()), true, REASON_TIMEOUT);
+        traces.write(request, suspendedNow ? RESULT_SUSPENDED : RESULT_DEGRADED, REASON_TIMEOUT,
+                AiErrorTypes.TIMEOUT, attempts, traces.elapsed(startAt), "", "", false, "");
+        afterFailure(request.groupId(), suspendedNow);
     }
 
+    /**
+     * 输出校验失败：中文越权原因只进日志，审计的 errorType 固定为 verification。
+     *
+     * <p>errorType 是审计的稳定取值，混入「越权：修改或宣布数值」这类文案会让按类型聚合失真。</p>
+     */
     private void failVerification(AiCallRequest request, AiResult result, String rejectReason,
                                   int attempts, long startAt, boolean counts) {
-        if (!deliverable(request, attempts, startAt)) {
+        if (!gate.deliverable(request, attempts, startAt)) {
             return;
         }
-        boolean suspendedNow = counts && recordFailure(request.groupId());
-        String errorType = rejectReason == null ? "" : rejectReason;
-        send(request.groupId(), fallbackNarration(request.groupId()), true, REASON_VERIFICATION);
-        audit(request, suspendedNow ? RESULT_SUSPENDED : RESULT_DEGRADED, REASON_VERIFICATION,
-                errorType, attempts, elapsed(startAt), result.finishReason(), result.usageJson(),
-                result.cached(), "");
-        if (suspendedNow) {
-            notifySuspended(request.groupId());
-            clearQueueOnSuspend(request.groupId());
-        }
+        boolean suspendedNow = counts && failures.recordFailure(request.groupId());
+        log.warn("AI 输出校验未通过，群 " + request.groupId() + "，原因："
+                + (rejectReason == null ? "" : rejectReason));
+        send(request.groupId(), prompts.fallbackNarration(request.groupId()), true,
+                REASON_VERIFICATION);
+        traces.write(request, suspendedNow ? RESULT_SUSPENDED : RESULT_DEGRADED, REASON_VERIFICATION,
+                REASON_VERIFICATION, attempts, traces.elapsed(startAt), result.finishReason(),
+                result.usageJson(), result.cached(), "");
+        afterFailure(request.groupId(), suspendedNow);
     }
 
     private void degrade(AiCallRequest request, String reason, String errorType, int attempts,
                          long elapsedMs, AiResult result, String preview) {
-        if (!deliverable(request, attempts, clock.nowMillis() - elapsedMs)) {
+        if (!gate.deliverable(request, attempts, clock.nowMillis() - elapsedMs)) {
             return;
         }
-        send(request.groupId(), fallbackNarration(request.groupId()), true, reason);
-        audit(request, RESULT_DEGRADED, reason, errorType, attempts, elapsedMs,
+        send(request.groupId(), prompts.fallbackNarration(request.groupId()), true, reason);
+        traces.write(request, RESULT_DEGRADED, reason, errorType, attempts, elapsedMs,
                 result == null ? "" : result.finishReason(),
                 result == null ? "" : result.usageJson(),
                 result != null && result.cached(), preview);
     }
 
     private void degradeQueueFull(AiCallRequest request) {
-        if (!deliverableQueued(request)) {
+        if (!gate.deliverableQueued(request)) {
             return;
         }
-        send(request.groupId(), fallbackNarration(request.groupId()), true, REASON_QUEUE_FULL);
-        audit(request, RESULT_DEGRADED, REASON_QUEUE_FULL, "", 0, 0L, "", "", false, "");
+        send(request.groupId(), prompts.fallbackNarration(request.groupId()), true, REASON_QUEUE_FULL);
+        traces.write(request, RESULT_DEGRADED, REASON_QUEUE_FULL, "", 0, 0L, "", "", false, "");
     }
 
     private void degradeQueueAge(PendingCall pending, long waitedMs) {
-        if (!deliverableQueued(pending.request)) {
+        if (!gate.deliverableQueued(pending.request)) {
             return;
         }
-        send(pending.request.groupId(), fallbackNarration(pending.request.groupId()), true, REASON_QUEUE_AGE);
-        audit(pending.request, RESULT_DEGRADED, REASON_QUEUE_AGE, "", 0, waitedMs,
+        send(pending.request.groupId(), prompts.fallbackNarration(pending.request.groupId()), true,
+                REASON_QUEUE_AGE);
+        traces.write(pending.request, RESULT_DEGRADED, REASON_QUEUE_AGE, "", 0, waitedMs,
                 "", "", false, "");
     }
 
-    /** 队列阶段的门禁：还没开始调用，审计里的耗时固定为 0。 */
-    private boolean deliverableQueued(AiCallRequest request) {
-        SessionSnapshot current = snapshot(request.groupId());
-        if (current == null || !enabled(current)) {
-            return false;
-        }
-        if (!current.active() || suspended(current)) {
-            audit(request, RESULT_SKIPPED, "", "", 0, 0L, "", "", false, "");
-            return false;
-        }
-        if (current.sessionId() != request.sessionNo()
-                || current.sceneVersion() != request.sceneVersion()) {
-            audit(request, RESULT_STALE, "", "", 0, 0L, "", "", false, "");
-            return false;
-        }
-        return true;
-    }
-
-    /**
-     * 投递门禁（§9.6）：本局 AI 关时静默丢弃（零审计），局已结束、挂起、换局或换场景时只记审计。
-     *
-     * @return true 表示可以发送叙述或降级提示
-     */
-    private boolean deliverable(AiCallRequest request, int attempts, long startAt) {
-        SessionSnapshot current = snapshot(request.groupId());
-        if (current == null || !enabled(current)) {
-            return false;
-        }
-        if (!current.active() || suspended(current)) {
-            audit(request, RESULT_SKIPPED, "", "", attempts, elapsed(startAt), "", "", false, "");
-            return false;
-        }
-        if (current.sessionId() != request.sessionNo()
-                || current.sceneVersion() != request.sceneVersion()) {
-            audit(request, RESULT_STALE, "", "", attempts, elapsed(startAt), "", "", false, "");
-            return false;
-        }
-        return true;
-    }
-
-    /** 记录一次计入失败的失败；返回是否已触发挂起。 */
-    private boolean recordFailure(long groupId) {
-        AiFailureRecorder recorder = failureRecorder;
-        if (recorder == null) {
-            return false;
-        }
-        try {
-            AiFailureOutcome outcome = recorder.recordFailure(groupId);
-            return outcome != null && outcome.available() && outcome.suspendedNow();
-        } catch (RuntimeException error) {
-            warn("AI 失败计数写入异常，群 " + groupId + "：" + error);
-            return false;
-        }
-    }
-
-    private void recordSuccess(long groupId) {
-        AiFailureRecorder recorder = failureRecorder;
-        if (recorder == null) {
-            return;
-        }
-        try {
-            recorder.recordSuccess(groupId);
-        } catch (RuntimeException error) {
-            warn("AI 失败计数清零异常，群 " + groupId + "：" + error);
+    /** 失败已发出后的挂起收尾：提示一次并清掉本群积压。 */
+    private void afterFailure(long groupId, boolean suspendedNow) {
+        if (suspendedNow) {
+            notifySuspended(groupId);
+            clearQueueOnSuspend(groupId);
         }
     }
 
@@ -870,7 +793,7 @@ public final class AiHostEngine {
         try {
             sink.notifySuspended(groupId);
         } catch (RuntimeException error) {
-            warn("AI 挂起提示发送失败，群 " + groupId + "：" + error);
+            log.warn("AI 挂起提示发送失败，群 " + groupId + "：" + error);
         }
     }
 
@@ -881,8 +804,8 @@ public final class AiHostEngine {
             groups.addAll(suspensionNotified);
         }
         for (Long group : groups) {
-            SessionSnapshot snapshot = view.readSnapshot(group.longValue());
-            if (!enabled(snapshot) || suspended(snapshot) == false) {
+            SessionSnapshot snapshot = gate.snapshot(group.longValue());
+            if (!gate.enabled(snapshot) || !gate.suspended(snapshot)) {
                 synchronized (lock) {
                     suspensionNotified.remove(group);
                 }
@@ -902,7 +825,7 @@ public final class AiHostEngine {
             }
         }
         for (PendingCall pending : cleared) {
-            audit(pending.request, RESULT_SKIPPED, "", "", 0, 0L, "", "", false, "");
+            traces.write(pending.request, RESULT_SKIPPED, "", "", 0, 0L, "", "", false, "");
         }
     }
 
@@ -911,39 +834,12 @@ public final class AiHostEngine {
             sink.send(groupId, narration == null ? "" : narration, degraded,
                     degradeReason == null ? "" : degradeReason);
         } catch (RuntimeException error) {
-            warn("AI 叙述发送失败，群 " + groupId + "：" + error);
+            log.warn("AI 叙述发送失败，群 " + groupId + "：" + error);
         }
     }
 
     // ------------------------------------------------------------------
-    // 审计
-    // ------------------------------------------------------------------
-
-    private void audit(AiCallRequest request, String resultStatus, String degradeReason,
-                       String errorType, int attempts, long elapsedMs, String finishReason,
-                       String usageJson, boolean cached, String preview) {
-        if (trace == null || !config.aiTraceEnabled()) {
-            return;
-        }
-        AiTraceRow row = new AiTraceRow(0L, request.groupId(), request.sessionNo(),
-                request.latestEventSeq(), request.trigger().traceName(), resultStatus,
-                degradeReason == null ? "" : degradeReason,
-                errorType == null ? "" : errorType,
-                Math.max(0, attempts), Math.max(0L, elapsedMs),
-                finishReason == null ? "" : finishReason,
-                usageJson == null ? "" : usageJson, cached,
-                truncate(preview, PREVIEW_MAX_CHARS), clock.nowMillis());
-        try {
-            if (!trace.record(row)) {
-                warn("AI 审计写入失败，群 " + request.groupId());
-            }
-        } catch (RuntimeException error) {
-            warn("AI 审计写入异常，群 " + request.groupId() + "：" + error);
-        }
-    }
-
-    // ------------------------------------------------------------------
-    // 去重、门禁与配置换算
+    // 去重与门禁
     // ------------------------------------------------------------------
 
     private boolean registerDedupeLocked(AiCallRequest request) {
@@ -980,8 +876,8 @@ public final class AiHostEngine {
         if (!globallyEnabled()) {
             return false;
         }
-        SessionSnapshot snapshot = view.readSnapshot(groupId);
-        return enabled(snapshot) && running(snapshot) && !suspended(snapshot);
+        SessionSnapshot snapshot = gate.snapshot(groupId);
+        return gate.enabled(snapshot) && gate.running(snapshot) && !gate.suspended(snapshot);
     }
 
     /**
@@ -999,8 +895,8 @@ public final class AiHostEngine {
         if (!globallyEnabled()) {
             return false;
         }
-        SessionSnapshot snapshot = view.readSnapshot(groupId);
-        if (!enabled(snapshot) || !suspended(snapshot)) {
+        SessionSnapshot snapshot = gate.snapshot(groupId);
+        if (!gate.enabled(snapshot) || !gate.suspended(snapshot)) {
             return false;
         }
         long until = snapshot.aiSuspendedUntil();
@@ -1015,55 +911,6 @@ public final class AiHostEngine {
             notifySuspended(groupId);
         }
         return false;
-    }
-
-    private static boolean enabled(SessionSnapshot snapshot) {
-        return snapshot != null && snapshot.aiEnabled();
-    }
-
-    /** 只在进行中调用（§9.3）；招募期、已结束与挂起局一律不调。 */
-    private static boolean running(SessionSnapshot snapshot) {
-        return snapshot != null && snapshot.state() == SessionState.RUNNING;
-    }
-
-    private boolean suspended(SessionSnapshot snapshot) {
-        return snapshot != null && snapshot.aiSuspendedUntil() > clock.nowMillis();
-    }
-
-    private SessionSnapshot snapshot(long groupId) {
-        return view.readSnapshot(groupId);
-    }
-
-    /**
-     * 取当前场景的模板叙述（§9.5）：优先 {@code fallbackNarration}，没有则退回 {@code narration}。
-     *
-     * <p>降级时必须先发模板叙述再发提示；取不到剧本时返回空串，由发送端口只发提示。</p>
-     */
-    private String fallbackNarration(long groupId) {
-        ScriptCatalog catalog = scriptCatalog;
-        if (catalog == null) {
-            return "";
-        }
-        try {
-            SessionSnapshot snapshot = view.readSnapshot(groupId);
-            if (snapshot == null) {
-                return "";
-            }
-            Script script = catalog.get(snapshot.scriptId());
-            if (script == null || script.scenes().isEmpty()) {
-                return "";
-            }
-            int index = snapshot.sceneIndex();
-            if (index < 0 || index >= script.scenes().size()) {
-                return "";
-            }
-            Scene scene = script.scenes().get(index);
-            String text = scene.fallbackNarration();
-            return text.isEmpty() ? scene.narration() : text;
-        } catch (RuntimeException error) {
-            warn("读取模板叙述失败，群 " + groupId + "：" + error);
-            return "";
-        }
     }
 
     private boolean isExpired(PendingCall pending) {
@@ -1082,59 +929,6 @@ public final class AiHostEngine {
         return Math.max(1, config.aiQueueMaxAgeSeconds()) * 1000L;
     }
 
-    private static boolean countsAsFailure(String errorType) {
-        if (errorType == null || errorType.isEmpty()) {
-            return false;
-        }
-        String lower = errorType.toLowerCase(Locale.ROOT);
-        return AiErrorTypes.BUSY.equals(lower)
-                || AiErrorTypes.TIMEOUT.equals(lower)
-                || REASON_NETWORK.equals(lower)
-                || lower.startsWith(ERROR_HTTP_PREFIX);
-    }
-
-    private static String degradeReason(String errorType) {
-        if (errorType == null || errorType.isEmpty()) {
-            return REASON_UNAVAILABLE;
-        }
-        String lower = errorType.toLowerCase(Locale.ROOT);
-        if (AiErrorTypes.BUSY.equals(lower)) {
-            return REASON_BUSY;
-        }
-        if (AiErrorTypes.TIMEOUT.equals(lower)) {
-            return REASON_TIMEOUT;
-        }
-        if (REASON_NETWORK.equals(lower) || lower.startsWith(ERROR_HTTP_PREFIX)) {
-            return lower;
-        }
-        if (AiErrorTypes.INTERRUPTED.equals(lower)) {
-            return REASON_INTERRUPTED;
-        }
-        return REASON_UNAVAILABLE;
-    }
-
-    private static String formatSuggestion(String suggestion) {
-        String text = suggestion.trim();
-        if (text.startsWith("建议")) {
-            return text;
-        }
-        return "建议：" + text;
-    }
-
-    private static String truncate(String text, int maxChars) {
-        if (text == null || text.isEmpty()) {
-            return "";
-        }
-        if (text.length() <= maxChars) {
-            return text;
-        }
-        return text.substring(0, maxChars);
-    }
-
-    private static long elapsed(long startAt) {
-        return System.currentTimeMillis() - startAt;
-    }
-
     private void cancel(ScheduledTask task) {
         if (task == null) {
             return;
@@ -1142,13 +936,7 @@ public final class AiHostEngine {
         try {
             task.cancel();
         } catch (RuntimeException error) {
-            warn("AI 合并窗口定时器取消失败：" + error);
-        }
-    }
-
-    private void warn(String message) {
-        if (logger != null) {
-            logger.sendWarn("[MBB-Trpg] " + message);
+            log.warn("AI 合并窗口定时器取消失败：" + error);
         }
     }
 
@@ -1162,74 +950,5 @@ public final class AiHostEngine {
                 return thread;
             }
         };
-    }
-
-    // ------------------------------------------------------------------
-    // 内部数据结构
-    // ------------------------------------------------------------------
-
-    private static final class PendingCall {
-
-        private final AiCallRequest request;
-        private final long enqueuedAt;
-
-        PendingCall(AiCallRequest request, long enqueuedAt) {
-            this.request = request;
-            this.enqueuedAt = enqueuedAt;
-        }
-    }
-
-    private static final class GroupQueue {
-
-        private final long groupId;
-        private final Deque<PendingCall> waiting = new ArrayDeque<PendingCall>();
-        private boolean workerRunning;
-
-        GroupQueue(long groupId) {
-            this.groupId = groupId;
-        }
-    }
-
-    private static final class MergeWindow {
-
-        private final long groupId;
-        private final long sessionNo;
-        private long sceneVersion;
-        private final long openedAt;
-        private final List<Long> seqs = new ArrayList<Long>();
-        private final List<String> lines = new ArrayList<String>();
-        private long firstSeq;
-        private long lastSeq;
-        private ScheduledTask timer;
-
-        MergeWindow(long groupId, long sessionNo, long sceneVersion, long openedAt) {
-            this.groupId = groupId;
-            this.sessionNo = sessionNo;
-            this.sceneVersion = sceneVersion;
-            this.openedAt = openedAt;
-        }
-    }
-
-    private static final class Validation {
-
-        private final boolean valid;
-        private final String text;
-        private final boolean truncated;
-        private final String rejectReason;
-
-        private Validation(boolean valid, String text, boolean truncated, String rejectReason) {
-            this.valid = valid;
-            this.text = text;
-            this.truncated = truncated;
-            this.rejectReason = rejectReason;
-        }
-
-        static Validation ok(String text, boolean truncated) {
-            return new Validation(true, text, truncated, "");
-        }
-
-        static Validation invalid(String rejectReason) {
-            return new Validation(false, "", false, rejectReason);
-        }
     }
 }
