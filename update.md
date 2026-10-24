@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.14.0.0.0150 | 2026-10-25 | 新增 `MBB-Trpg` 跑团插件：每群一局的四态局面状态机（无局 / 招募 / 进行中 / 结束），CoC 风格 d100 检定（三档难度、六档成功等级、奖惩骰抵消、对抗、SAN 与临时疯狂、成长检定），八属性角色卡，剧本 JSON 格式与分段粘贴导入、AI 生成、删除替换引用保护，群内播报式呈现（超长拆分、情景卡与战报出图、秘密信息只走私聊），可选 AI 主持（合并窗口、按群串行队列、12 类降级与失败挂起、审计轨迹），以及归档清理与黑名单。插件只依赖 `org.moboxlab.moboxbot.API`，`aiHost.enabled` 默认关闭。 |
 | V0.13.0.1.2020 | 2026-10-24 | Roleplay 工具主动性优化：系统提示词常驻按分类列出的工具名能力索引，角色无需先 `tool_search` 即可调用已知工具；明确只读/低风险工具应主动使用，副作用工具需意图和权限明确。新增事实查证、工作区检索、待办记录、档案纠正等主动使用场景提示，`tool_search` 仅用于发现不确定能力或查询参数。 |
 | V0.13.0.0.0831 | 2026-10-24 | `MBB-Roleplay` 新增 `todo_add / todo_list / todo_done / todo_snooze`：待办落 SQLite，支持用户待办与 owner-only 角色自身待办，可关联 reminder 并在完成/延后时同步处理提醒。`workspace_search` 升级为按正文、标题、kind、tags 和 days 的结构化检索，新增 `workspace_recent`。新增 `time_calc`，支持 now/add/diff/until 和角色时区。新增 `profile_update`，普通群员只能修订自己的称呼、喜好和相处边界，owner 才能修改他人档案。 |
 | V0.12.0.0.0757 | 2026-10-24 | `MBB-Roleplay` 扩展 workspace：新增 `workspace_import_image`、`workspace_media_list`、`workspace_note_append`、`workspace_draft_save`，支持当前/最近/白名单网页图片导入、媒体索引、结构化日记与笔记、回复/Qzone/生图/剧情草稿归档；图片导入按文件头验证格式并受 `workspaceMaxMediaBytes` 限制。`MBB-ComfyUI` 完成生图时把输出文件路径回调给 Roleplay，自动归档到 `media/generated/comfyui/`。同时修复生图完成重复回复：draw 提交成功后抑制本轮额外最终正文，只由 ComfyUI 完成回调发送图片和完成提醒。 |
