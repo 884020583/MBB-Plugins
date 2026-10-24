@@ -111,6 +111,10 @@ public class RoleplayToolLoopService {
         if (canSaveSticker(context) && registry.isEnabled("sticker_save",service.config())) {
             exposedTools.add("sticker_save");
         }
+        if (canSaveSticker(context)
+                && registry.isEnabled("workspace_import_image",service.config())) {
+            exposedTools.add("workspace_import_image");
+        }
         int totalCalls = 0;
         int resultCharsUsed = 0;
         boolean finished = false;
@@ -182,6 +186,15 @@ public class RoleplayToolLoopService {
                         continue;
                     }
                     suppressDuplicateFinal(groupID,response,active);
+                    if (active != null && active.drawSubmitted) {
+                        String content = service.safe(response.getString("content")).trim();
+                        if (!content.isEmpty() && !"<SKIP>".equalsIgnoreCase(content)) {
+                            service.plugin().getLogger().sendInfo("[工具] 群"+groupID
+                                    +" 已提交生图任务，抑制本轮额外完成回复，等待 ComfyUI 回调");
+                        }
+                        response.put("content","<SKIP>");
+                        response.put("drawCallbackSuppressed",true);
+                    }
                     response.put("usage",usage);
                     response.put("toolTrace",toolTrace);
                     service.toolTurnService().update(token,messages,params);
@@ -334,6 +347,9 @@ public class RoleplayToolLoopService {
             }
             call.result = result;
             if (active != null) active.lastResults.put(call.index,result);
+            if (active != null && result.success && "draw".equals(call.name)) {
+                active.drawSubmitted = true;
+            }
             recordToolState(active,call,result);
             try {
                 service.toolMemoryService().record(context,call.name,call.args,result);
@@ -910,6 +926,7 @@ public class RoleplayToolLoopService {
                 Collections.synchronizedList(new ArrayList<String>());
         private volatile Future<JSONObject> aiFuture;
         private volatile boolean substantiveToolSeen;
+        private volatile boolean drawSubmitted;
         private boolean acceptingLive = true;
         private final java.util.concurrent.atomic.AtomicBoolean cancelled =
                 new java.util.concurrent.atomic.AtomicBoolean();

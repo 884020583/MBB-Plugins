@@ -359,6 +359,8 @@ workspaceMaxWriteChars: 64000
 workspaceMaxFilesPerList: 200
 #工作区总大小上限，默认 64MB
 workspaceMaxTotalBytes: 67108864
+#工作区单张导入图片最大字节数，默认 8MB
+workspaceMaxMediaBytes: 8388608
 #覆盖写入前是否在 .history 留下旧版本
 workspaceHistoryEnable: true
 #每个文件最多保留多少个历史版本

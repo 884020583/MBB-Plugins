@@ -447,6 +447,8 @@ public class RoleplaySkillRegistry {
                     +"不要写发色、瞳色、光环、服装和武器的具体 tag，编译层会从角色设定里补全。"
                     +"不要写 masterpiece、best quality、highres、highly detailed 等质量词。"
                     +"不要控制模型、steps、cfg、sampler、seed。"
+                    +"draw 成功只表示任务已经提交，最终正文不要再说“画好了”“生成完成”或类似内容；"
+                    +"图片和完成提醒会由 MBB-ComfyUI 通过独立回调发送。"
                     +"当前群生图冷却剩余 "+remaining+" 秒，"
                     +"当前群任务中："+(busy ? "是" : "否")+"。冷却中或有任务时不要调用 draw，"
                     +"直接用角色语气说明还需要等多久。尺寸上限 "

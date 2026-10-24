@@ -11,11 +11,15 @@ import java.nio.file.FileAlreadyExistsException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
+import java.security.MessageDigest;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Base64;
 import java.util.Comparator;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Locale;
+import java.util.Set;
 import java.util.UUID;
 
 /**
@@ -26,6 +30,12 @@ import java.util.UUID;
 public class RoleplayWorkspaceService {
     private static final String TRASH = ".trash";
     private static final String HISTORY = ".history";
+    private static final Set<String> IMAGE_EXTENSIONS = new HashSet<>(Arrays.asList(
+            "jpg","jpeg","png","gif","webp"));
+    private static final Set<String> AUDIO_EXTENSIONS = new HashSet<>(Arrays.asList(
+            "mp3","wav","ogg","m4a","flac","silk","amr"));
+    private static final Set<String> VIDEO_EXTENSIONS = new HashSet<>(Arrays.asList(
+            "mp4","webm","mov"));
     private final Plugin plugin;
     private volatile RoleplayConfig config;
 
@@ -100,6 +110,148 @@ public class RoleplayWorkspaceService {
             throw new IllegalArgumentException("文件过大，最多 "+maxBytes+" 字节");
         }
         return Base64.getEncoder().encodeToString(Files.readAllBytes(target.toPath()));
+    }
+
+    public JSONObject importImage(String path,byte[] bytes,String mime,String source,
+                                  boolean overwrite) throws Exception {
+        if (!config.workspaceEnable) throw new IllegalArgumentException("角色工作区未启用");
+        if (bytes == null || bytes.length == 0) throw new IllegalArgumentException("图片内容为空");
+        int maxBytes = Math.max(1024,config.workspaceMaxMediaBytes);
+        if (bytes.length > maxBytes) {
+            throw new IllegalArgumentException("图片过大，最多 "+maxBytes+" 字节");
+        }
+        String format = imageFormat(bytes,mime);
+        if (format.isEmpty()) throw new IllegalArgumentException("只支持 JPEG、PNG、GIF、WebP 图片");
+        String relativePath = safePath(path);
+        String fileName = generatedMediaName("image",format);
+        if (relativePath.isEmpty()) {
+            relativePath = "media/images/"+fileName;
+        } else if (relativePath.endsWith("/")) {
+            relativePath += fileName;
+        } else if (!IMAGE_EXTENSIONS.contains(extension(relativePath))) {
+            relativePath += "."+format;
+        }
+        File target = resolve(relativePath,false);
+        rejectInternalNamespace(target);
+        rejectSymlink(target);
+        if (target.exists() && !overwrite) throw new FileAlreadyExistsException(relativePath);
+        writeBytes(target,bytes,overwrite);
+        JSONObject result = new JSONObject(true);
+        result.put("path",relative(target));
+        result.put("mediaType","image");
+        result.put("format",format);
+        result.put("mime",mime == null ? "image/"+format : mime);
+        result.put("size",bytes.length);
+        result.put("sha256",sha256(bytes));
+        result.put("source",serviceSafe(source));
+        result.put("updateTime",target.lastModified());
+        return result;
+    }
+
+    public JSONObject mediaList(String path,String kind,int maxResults) throws Exception {
+        File start = resolve(path,true);
+        rejectInternalNamespace(start);
+        if (!start.exists()) throw new IllegalArgumentException("路径不存在");
+        int limit = Math.max(1,Math.min(200,maxResults <= 0 ? 50 : maxResults));
+        String filter = serviceSafe(kind).trim().toLowerCase(Locale.ROOT);
+        if (!"image".equals(filter) && !"audio".equals(filter)
+                && !"video".equals(filter)) filter = "all";
+        List<File> files = new ArrayList<>();
+        collectFiles(start,files,5000);
+        List<JSONObject> items = new ArrayList<>();
+        for (File file : files) {
+            if (isInternalNamespace(file)) continue;
+            String extension = extension(file.getName());
+            String mediaType = mediaType(extension);
+            if (mediaType.isEmpty()) continue;
+            if (!"all".equals(filter) && !filter.equals(mediaType)) continue;
+            JSONObject item = new JSONObject(true);
+            item.put("name",file.getName());
+            item.put("path",relative(file));
+            item.put("mediaType",mediaType);
+            item.put("extension",extension);
+            item.put("size",file.length());
+            item.put("updateTime",file.lastModified());
+            items.add(item);
+        }
+        items.sort((left,right) -> Long.compare(
+                right.getLongValue("updateTime"),left.getLongValue("updateTime")));
+        JSONArray resultItems = new JSONArray();
+        for (int i = 0; i < items.size() && i < limit; i++) resultItems.add(items.get(i));
+        JSONObject result = new JSONObject(true);
+        result.put("path",relative(start));
+        result.put("kind",filter);
+        result.put("items",resultItems);
+        result.put("truncated",items.size() > resultItems.size());
+        return result;
+    }
+
+    public JSONObject appendNote(String kind,String title,String content,JSONArray tags)
+            throws Exception {
+        String noteKind = normalizeNoteKind(kind);
+        String text = serviceSafe(content).trim();
+        if (text.isEmpty()) throw new IllegalArgumentException("笔记内容不能为空");
+        if (text.length() > config.workspaceMaxWriteChars) {
+            throw new IllegalArgumentException("笔记内容过长，最多 "
+                    +config.workspaceMaxWriteChars+" 字符");
+        }
+        String name = safeName(title);
+        String date = new java.text.SimpleDateFormat("yyyy-MM-dd",Locale.CHINA)
+                .format(new java.util.Date());
+        String month = date.substring(0,7);
+        String path;
+        if ("journal".equals(noteKind)) {
+            path = "notes/journal/"+date+".md";
+            if ("未命名".equals(name)) name = date;
+        } else if ("person".equals(noteKind)) {
+            if ("未命名".equals(name)) throw new IllegalArgumentException("人物笔记需要 title");
+            path = "notes/people/"+name+".md";
+        } else if ("reference".equals(noteKind)) {
+            if ("未命名".equals(name)) throw new IllegalArgumentException("资料笔记需要 title");
+            path = "notes/references/"+name+".md";
+        } else if ("idea".equals(noteKind)) {
+            path = "notes/ideas/"+("未命名".equals(name) ? date : name)+".md";
+        } else {
+            path = "notes/general/"+("未命名".equals(name) ? date : name)+".md";
+        }
+        String time = new java.text.SimpleDateFormat("HH:mm",Locale.CHINA)
+                .format(new java.util.Date());
+        StringBuilder block = new StringBuilder();
+        block.append("\n## ").append(time).append(" ").append(name).append("\n");
+        String tagText = tagText(tags);
+        if (!tagText.isEmpty()) block.append("- 标签：").append(tagText).append("\n");
+        block.append(text).append("\n");
+        JSONObject written = write(path,block.toString(),true);
+        written.put("kind",noteKind);
+        written.put("title",name);
+        return written;
+    }
+
+    public JSONObject saveDraft(String kind,String title,String content,JSONArray tags)
+            throws Exception {
+        String draftKind = normalizeDraftKind(kind);
+        String text = serviceSafe(content).trim();
+        if (text.isEmpty()) throw new IllegalArgumentException("草稿内容不能为空");
+        if (text.length() > config.workspaceMaxWriteChars) {
+            throw new IllegalArgumentException("草稿内容过长，最多 "
+                    +config.workspaceMaxWriteChars+" 字符");
+        }
+        String name = safeName(title);
+        String stamp = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss",Locale.CHINA)
+                .format(new java.util.Date());
+        String suffix = UUID.randomUUID().toString().replace("-","").substring(0,6);
+        String path = "drafts/"+draftKind+"/"+stamp+"-"+suffix+"-"+name+".md";
+        String tagText = tagText(tags);
+        StringBuilder body = new StringBuilder();
+        body.append("# ").append(name).append("\n\n")
+                .append("- 类型：").append(draftKind).append("\n")
+                .append("- 创建时间：").append(nowText()).append("\n");
+        if (!tagText.isEmpty()) body.append("- 标签：").append(tagText).append("\n");
+        body.append("\n").append(text).append("\n");
+        JSONObject written = write(path,body.toString(),false);
+        written.put("kind",draftKind);
+        written.put("title",name);
+        return written;
     }
 
     public JSONObject write(String path,String content,boolean append) throws Exception {
@@ -272,6 +424,126 @@ public class RoleplayWorkspaceService {
         JSONObject result = new JSONObject(true);
         result.put("matches",matches);
         return result;
+    }
+
+    private void writeBytes(File target,byte[] bytes,boolean overwrite) throws Exception {
+        File parent = target.getParentFile();
+        if (parent == null) throw new IllegalArgumentException("目标路径无效");
+        if (!parent.exists() && !parent.mkdirs()) throw new IllegalStateException("无法创建父目录");
+        verifyInsideRoot(parent.getCanonicalFile());
+        long oldSize = target.exists() ? target.length() : 0L;
+        if (target.exists() && !overwrite) throw new FileAlreadyExistsException(target.getPath());
+        long total = directorySize(root());
+        if (total - oldSize + bytes.length > config.workspaceMaxTotalBytes) {
+            throw new IllegalArgumentException("工作区总大小超过上限 "
+                    +config.workspaceMaxTotalBytes+" 字节");
+        }
+        if (target.exists() && config.workspaceHistoryEnable) backupHistory(target);
+        Path temp = parent.toPath().resolve("."+target.getName()+".tmp-"
+                +UUID.randomUUID().toString().replace("-",""));
+        try {
+            Files.write(temp,bytes);
+            try {
+                Files.move(temp,target.toPath(),StandardCopyOption.REPLACE_EXISTING,
+                        StandardCopyOption.ATOMIC_MOVE);
+            } catch (AtomicMoveNotSupportedException e) {
+                Files.move(temp,target.toPath(),StandardCopyOption.REPLACE_EXISTING);
+            }
+        } finally {
+            Files.deleteIfExists(temp);
+        }
+    }
+
+    private String generatedMediaName(String prefix,String extension) {
+        String time = new java.text.SimpleDateFormat("yyyyMMdd-HHmmss",Locale.CHINA)
+                .format(new java.util.Date());
+        String suffix = UUID.randomUUID().toString().replace("-","").substring(0,6);
+        return prefix+"-"+time+"-"+suffix+"."+extension;
+    }
+
+    private String imageFormat(byte[] bytes,String mime) {
+        if (bytes == null || bytes.length < 4) return "";
+        if ((bytes[0] & 0xff) == 0xff && (bytes[1] & 0xff) == 0xd8
+                && (bytes[2] & 0xff) == 0xff) return "jpg";
+        if ((bytes[0] & 0xff) == 0x89 && bytes[1] == 0x50
+                && bytes[2] == 0x4e && bytes[3] == 0x47) return "png";
+        if (bytes[0] == 0x47 && bytes[1] == 0x49
+                && bytes[2] == 0x46 && bytes[3] == 0x38) return "gif";
+        if (bytes.length >= 12 && bytes[0] == 0x52 && bytes[1] == 0x49
+                && bytes[2] == 0x46 && bytes[3] == 0x46
+                && bytes[8] == 0x57 && bytes[9] == 0x45
+                && bytes[10] == 0x42 && bytes[11] == 0x50) return "webp";
+        return "";
+    }
+
+    private String mediaType(String extension) {
+        String value = serviceSafe(extension).toLowerCase(Locale.ROOT);
+        if (IMAGE_EXTENSIONS.contains(value)) return "image";
+        if (AUDIO_EXTENSIONS.contains(value)) return "audio";
+        if (VIDEO_EXTENSIONS.contains(value)) return "video";
+        return "";
+    }
+
+    private String extension(String name) {
+        String value = serviceSafe(name);
+        int dot = value.lastIndexOf('.');
+        if (dot < 0 || dot + 1 >= value.length()) return "";
+        return value.substring(dot + 1).toLowerCase(Locale.ROOT);
+    }
+
+    private String sha256(byte[] bytes) throws Exception {
+        MessageDigest digest = MessageDigest.getInstance("SHA-256");
+        byte[] value = digest.digest(bytes);
+        StringBuilder builder = new StringBuilder();
+        for (byte item : value) builder.append(String.format("%02x",item & 0xff));
+        return builder.toString();
+    }
+
+    private String normalizeNoteKind(String kind) {
+        String value = serviceSafe(kind).trim().toLowerCase(Locale.ROOT);
+        if ("person".equals(value) || "reference".equals(value)
+                || "idea".equals(value) || "general".equals(value)) return value;
+        return "journal";
+    }
+
+    private String normalizeDraftKind(String kind) {
+        String value = serviceSafe(kind).trim().toLowerCase(Locale.ROOT);
+        if ("reply".equals(value) || "qzone".equals(value)
+                || "draw".equals(value) || "story".equals(value)) return value;
+        return "other";
+    }
+
+    private String safeName(String value) {
+        String name = serviceSafe(value).trim();
+        name = name.replaceAll("[\\\\/:*?\"<>|\\p{Cntrl}]","_")
+                .replaceAll("\\s+","_").replaceAll("^\\.+|\\.+$","");
+        if (name.isEmpty()) return "未命名";
+        return name.length() > 60 ? name.substring(0,60) : name;
+    }
+
+    private String safePath(String value) {
+        return serviceSafe(value).trim().replace("\\","/");
+    }
+
+    private String tagText(JSONArray tags) {
+        if (tags == null || tags.isEmpty()) return "";
+        StringBuilder builder = new StringBuilder();
+        for (Object object : tags) {
+            String value = serviceSafe(String.valueOf(object)).trim();
+            if (value.isEmpty()) continue;
+            if (builder.length() > 0) builder.append(", ");
+            builder.append(value.length() > 24 ? value.substring(0,24) : value);
+        }
+        return builder.toString();
+    }
+
+    private String nowText() {
+        return new java.text.SimpleDateFormat("yyyy-MM-dd HH:mm:ss",Locale.CHINA)
+                .format(new java.util.Date());
+    }
+
+    private String serviceSafe(String value) {
+        return value == null ? "" : value;
     }
 
     public String rootPath() {

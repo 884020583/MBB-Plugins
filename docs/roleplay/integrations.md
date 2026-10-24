@@ -93,6 +93,10 @@ Roleplay 还会用 `turn_status` 复核一次，被抢就放弃发送。赢了�
 
 `MBB-ComfyUI` 生成完成后，如果 `identityCheckEnable` 为 `true`，会调用 `MBB-Vision` 对图片做一次身份/外貌校验：命中 `forbiddenTags` 时在控制台输出“身份校验疑似不符”，校验只记录日志，不阻断图片发送。
 
+draw 工具成功只表示任务已提交。Roleplay 会在本轮最终回复阶段抑制额外正文，由 MBB-ComfyUI 在图片完成时
+发送图片和完成提醒；回调同时携带生成文件路径，Roleplay 工作区启用时会自动归档到
+`media/generated/comfyui/`。
+
 ## 回复复核与隐式反馈
 
 主动发言反馈除了“窗口内有人接话”，还会把引用角色消息、戳一戳、表情回应作为隐式反馈。发送前 `RoleplayReplyReviewService` 会对回复候选做一次复核，低于 `replyReviewMinScore` 且模型给出改写时使用改写文本。

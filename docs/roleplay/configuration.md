@@ -215,6 +215,7 @@ workspaceMaxReadChars: 32000
 workspaceMaxWriteChars: 64000
 workspaceMaxFilesPerList: 200
 workspaceMaxTotalBytes: 67108864
+workspaceMaxMediaBytes: 8388608
 workspaceHistoryEnable: true
 workspaceHistoryMaxVersions: 10
 workspaceTrashKeepDays: 30
@@ -326,7 +327,8 @@ quietReplyEnable: true
 `plugins/MBB-Roleplay/data/`，读写大小和列表数量分别由 `workspaceMaxReadChars`、
 `workspaceMaxWriteChars`、`workspaceMaxFilesPerList` 控制。覆盖写入默认保留历史版本，
 删除默认进入回收站，分别由 `workspaceHistory*` 和 `workspaceTrashKeepDays` 控制。具体工具见
-[工具调用、工作区与交流节拍](tools.md)。
+[工具调用、工作区与交流节拍](tools.md)。单张导入图片受 `workspaceMaxMediaBytes` 限制，
+默认 8MB；生图完成图会自动归档到 `media/generated/comfyui/`。
 
 `knowledgeSpoilerLevel` 控制知识库剧透等级。明确点名某个角色时会锁定该角色条目，
 避免角色因条目整体标记为高剧透而查不到；但 `剧情`、`剧透`、`主线`、`结局` 小节仍不会超过配置等级。

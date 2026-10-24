@@ -167,6 +167,7 @@ public class RoleplayPromptAssembler {
                     +"参考使用率约 "+chance+"%，连续两条回复不要连发，"
                     +"tags 可留空随机选择。如果当前消息里的图片或表情确实很适合以后复用，"
                     +"可以调用 sticker_save 主动收藏，并尽量给 1 到 2 个标签和一句画面描述；"
+                    +"需要长期保存原始素材时可用 workspace_import_image 归入私人素材库；"
                     +"普通聊天截图、隐私内容和一次性图片不要收藏。";
         }
         return "工具协议说明：这是能力说明，不是当前聊天内容。可用能力分类：\n"+catalogue

@@ -489,6 +489,29 @@ public class RoleplayService {
         return recent == null ? null : recent.data;
     }
 
+    JSONObject currentOrRecentImage(long groupID,long userID,String eventRaw,String content) {
+        try {
+            JSONObject raw = JSONObject.parseObject(eventRaw);
+            JSONArray message = raw == null ? null : raw.getJSONArray("message");
+            if (message != null) {
+                for (int i = 0; i < message.size(); i++) {
+                    JSONObject segment = message.getJSONObject(i);
+                    if (segment == null) continue;
+                    String type = segment.getString("type");
+                    if ("image".equals(type) || "mface".equals(type)) {
+                        return segment.getJSONObject("data");
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return recentImageForSave(groupID,userID,content);
+    }
+
+    RoleplayWorkspaceService workspaceService() {
+        return toolLoopService.registry().workspace();
+    }
+
 
     void executeSkillCalls(RoleplayRouteDecision decision,RoleplayReplyDraft draft,
                            long groupID,long userID,long messageID,long selfID,

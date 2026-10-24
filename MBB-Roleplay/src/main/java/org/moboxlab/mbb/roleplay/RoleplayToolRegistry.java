@@ -39,6 +39,10 @@ public class RoleplayToolRegistry {
         register(new WorkspaceListTool());
         register(new WorkspaceReadTool());
         register(new WorkspaceWriteTool());
+        register(new WorkspaceImportImageTool());
+        register(new WorkspaceMediaListTool());
+        register(new WorkspaceNoteAppendTool());
+        register(new WorkspaceDraftSaveTool());
         register(new WorkspaceDeleteTool());
         register(new WorkspaceSearchTool());
         register(new WorkspaceRenameTool());
@@ -683,21 +687,8 @@ public class RoleplayToolRegistry {
         }
 
         private JSONObject currentImage(RoleplayToolContext context) {
-            try {
-                JSONObject raw = JSONObject.parseObject(context.eventRaw);
-                JSONArray message = raw == null ? null : raw.getJSONArray("message");
-                if (message == null) return null;
-                for (int i = 0; i < message.size(); i++) {
-                    JSONObject segment = message.getJSONObject(i);
-                    if (segment == null) continue;
-                    String type = segment.getString("type");
-                    if ("image".equals(type) || "mface".equals(type)) {
-                        return segment.getJSONObject("data");
-                    }
-                }
-            } catch (Exception ignored) {
-            }
-            return service.recentImageForSave(context.groupID,context.userID,context.message);
+            return service.currentOrRecentImage(context.groupID,context.userID,
+                    context.eventRaw,context.message);
         }
     }
 
@@ -990,6 +981,205 @@ public class RoleplayToolRegistry {
                 RoleplayToolResult result = RoleplayToolResult.ok("文件已写入");
                 result.data = workspace.write(args.getString("path"),args.getString("content"),
                         args.getBooleanValue("append"));
+                return result;
+            } catch (Exception e) {
+                return RoleplayToolResult.failed(e.getMessage());
+            }
+        }
+    }
+
+    private class WorkspaceImportImageTool extends BaseTool {
+        @Override
+        public String name() { return "workspace_import_image"; }
+
+        @Override
+        public String description() {
+            return "把当前消息图片、最近图片或白名单网页图片保存到角色工作区";
+        }
+
+        @Override
+        public String category() { return "workspace"; }
+
+        @Override
+        public boolean sideEffect() { return true; }
+
+        @Override
+        public int maxCallsPerTurn() { return 2; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("path",property("string","可选，目标相对路径；省略时自动写入 media/images/"));
+            properties.put("url",property("string","可选，白名单网页图片地址；省略时使用当前或最近图片"));
+            properties.put("overwrite",property("boolean","目标存在时是否覆盖，默认 false"));
+            return functionSchema(name(),description(),properties,new String[0]);
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            try {
+                String url = service.safe(args.getString("url")).trim();
+                if (!url.isEmpty()) {
+                    boolean internal = web.isInternal(url);
+                    boolean ownerAllowed = !internal || context.ownerAuthorizedInternalNetwork
+                            || service.ownerAuthorizedInternalWeb(
+                            context.groupID,context.userID,url);
+                    RoleplayWebService.ImagePayload image = web.fetchImage(url,ownerAllowed);
+                    JSONObject saved = workspace.importImage(args.getString("path"),
+                            image.bytes,image.contentType,"web:"+image.url,
+                            args.getBooleanValue("overwrite"));
+                    RoleplayToolResult result = RoleplayToolResult.ok("网页图片已保存到工作区");
+                    result.data = saved;
+                    return result;
+                }
+                JSONObject image = service.currentOrRecentImage(context.groupID,context.userID,
+                        context.eventRaw,context.message);
+                if (image == null) return RoleplayToolResult.failed("当前没有可导入的图片");
+                PluginService vision = service.plugin().getServer().getPluginManager()
+                        .getService("MBB-Vision");
+                if (vision == null) return RoleplayToolResult.failed("MBB-Vision 未启用，无法读取当前图片");
+                JSONObject params = new JSONObject(true);
+                String unique = service.safe(image.getString("file_unique"));
+                if (unique.isEmpty()) unique = service.safe(image.getString("file_id"));
+                params.put("fileUnique",unique);
+                params.put("url",service.safe(image.getString("url")));
+                params.put("file",service.safe(image.getString("file")));
+                JSONObject response = vision.call("dataUri",params);
+                if (response == null || !response.getBooleanValue("status")) {
+                    return RoleplayToolResult.failed(response == null
+                            ? "识图服务没有返回图片" : response.getString("message"));
+                }
+                String dataUri = service.safe(response.getString("dataUri"));
+                int comma = dataUri.indexOf(',');
+                if (comma <= 0) return RoleplayToolResult.failed("识图服务返回了无效图片数据");
+                String mime = dataUri.substring(0,comma);
+                int semicolon = mime.indexOf(';');
+                if (semicolon >= 0) mime = mime.substring(0,semicolon);
+                if (mime.startsWith("data:")) mime = mime.substring(5);
+                byte[] bytes = Base64.getDecoder().decode(dataUri.substring(comma + 1));
+                JSONObject saved = workspace.importImage(args.getString("path"),bytes,mime,
+                        "message:"+context.messageID,args.getBooleanValue("overwrite"));
+                RoleplayToolResult result = RoleplayToolResult.ok("当前图片已保存到工作区");
+                result.data = saved;
+                return result;
+            } catch (Exception e) {
+                return RoleplayToolResult.failed("图片导入失败："+service.safe(e.getMessage()));
+            }
+        }
+    }
+
+    private class WorkspaceMediaListTool extends BaseTool {
+        @Override
+        public String name() { return "workspace_media_list"; }
+
+        @Override
+        public String description() { return "递归列出工作区中的图片、语音和视频文件"; }
+
+        @Override
+        public String category() { return "workspace"; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("path",property("string","相对 data/ 的目录，省略为根目录"));
+            properties.put("kind",property("string","all / image / audio / video，默认 all"));
+            properties.put("limit",property("integer","最多返回多少条，1 到 200"));
+            return functionSchema(name(),description(),properties,new String[0]);
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            try {
+                JSONObject data = workspace.mediaList(args.getString("path"),
+                        args.getString("kind"),args.getIntValue("limit"));
+                JSONArray items = data.getJSONArray("items");
+                RoleplayToolResult result = RoleplayToolResult.ok("已列出 "
+                        +(items == null ? 0 : items.size())+" 个媒体文件");
+                result.data = data;
+                return result;
+            } catch (Exception e) {
+                return RoleplayToolResult.failed(e.getMessage());
+            }
+        }
+    }
+
+    private class WorkspaceNoteAppendTool extends BaseTool {
+        @Override
+        public String name() { return "workspace_note_append"; }
+
+        @Override
+        public String description() {
+            return "向结构化笔记追加一条日记、人物观察、灵感、资料或普通笔记";
+        }
+
+        @Override
+        public String category() { return "workspace"; }
+
+        @Override
+        public boolean sideEffect() { return true; }
+
+        @Override
+        public int maxCallsPerTurn() { return 3; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("kind",property("string","journal / person / idea / reference / general，默认 journal"));
+            properties.put("title",property("string","标题；person 和 reference 必填"));
+            properties.put("content",property("string","要追加的笔记正文"));
+            properties.put("tags",property("array","可选标签数组"));
+            return functionSchema(name(),description(),properties,new String[]{"content"});
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            try {
+                JSONObject data = workspace.appendNote(args.getString("kind"),
+                        args.getString("title"),args.getString("content"),args.getJSONArray("tags"));
+                RoleplayToolResult result = RoleplayToolResult.ok("笔记已追加");
+                result.data = data;
+                return result;
+            } catch (Exception e) {
+                return RoleplayToolResult.failed(e.getMessage());
+            }
+        }
+    }
+
+    private class WorkspaceDraftSaveTool extends BaseTool {
+        @Override
+        public String name() { return "workspace_draft_save"; }
+
+        @Override
+        public String description() {
+            return "把回复、Qzone、生图或剧情草稿归档到工作区，保留标题、标签和创建时间";
+        }
+
+        @Override
+        public String category() { return "workspace"; }
+
+        @Override
+        public boolean sideEffect() { return true; }
+
+        @Override
+        public int maxCallsPerTurn() { return 3; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("kind",property("string","reply / qzone / draw / story / other"));
+            properties.put("title",property("string","草稿标题"));
+            properties.put("content",property("string","草稿正文"));
+            properties.put("tags",property("array","可选标签数组"));
+            return functionSchema(name(),description(),properties,new String[]{"content"});
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            try {
+                JSONObject data = workspace.saveDraft(args.getString("kind"),
+                        args.getString("title"),args.getString("content"),args.getJSONArray("tags"));
+                RoleplayToolResult result = RoleplayToolResult.ok("草稿已归档");
+                result.data = data;
                 return result;
             } catch (Exception e) {
                 return RoleplayToolResult.failed(e.getMessage());

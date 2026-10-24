@@ -219,6 +219,7 @@ public class RoleplayConfig {
     public int workspaceMaxWriteChars = 64000;
     public int workspaceMaxFilesPerList = 200;
     public long workspaceMaxTotalBytes = 64L * 1024L * 1024L;
+    public int workspaceMaxMediaBytes = 8 * 1024 * 1024;
     public boolean workspaceHistoryEnable = true;
     public int workspaceHistoryMaxVersions = 10;
     public int workspaceTrashKeepDays = 30;
@@ -634,6 +635,8 @@ public class RoleplayConfig {
         config.workspaceMaxFilesPerList = plugin.getConfig().getInt("workspaceMaxFilesPerList",200);
         config.workspaceMaxTotalBytes = plugin.getConfig().getInt("workspaceMaxTotalBytes",
                 64 * 1024 * 1024);
+        config.workspaceMaxMediaBytes = plugin.getConfig().getInt(
+                "workspaceMaxMediaBytes",8 * 1024 * 1024);
         config.workspaceHistoryEnable =
                 plugin.getConfig().getBoolean("workspaceHistoryEnable",true);
         config.workspaceHistoryMaxVersions =
@@ -1063,6 +1066,10 @@ public class RoleplayConfig {
         }
         if (config.workspaceMaxTotalBytes > 1024L * 1024L * 1024L) {
             config.workspaceMaxTotalBytes = 1024L * 1024L * 1024L;
+        }
+        if (config.workspaceMaxMediaBytes < 1024) config.workspaceMaxMediaBytes = 1024;
+        if (config.workspaceMaxMediaBytes > 64 * 1024 * 1024) {
+            config.workspaceMaxMediaBytes = 64 * 1024 * 1024;
         }
         if (config.workspaceHistoryMaxVersions < 0) config.workspaceHistoryMaxVersions = 0;
         if (config.workspaceHistoryMaxVersions > 50) config.workspaceHistoryMaxVersions = 50;

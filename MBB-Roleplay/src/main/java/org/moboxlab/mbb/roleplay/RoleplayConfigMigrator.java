@@ -15,7 +15,7 @@ import java.util.List;
  * Roleplay 配置迁移与缺失项补全
  */
 public class RoleplayConfigMigrator {
-    private static final String CURRENT_VERSION = "45";
+    private static final String CURRENT_VERSION = "46";
     private static final String LEGACY_WEB_WHITELIST =
             "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,"
                     +"kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,"
@@ -235,6 +235,7 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("workspaceMaxWriteChars","64000","工作区单次写入最大字符数"),
             new ConfigEntry("workspaceMaxFilesPerList","200","工作区列表最多返回多少个文件"),
             new ConfigEntry("workspaceMaxTotalBytes","67108864","角色工作区总大小上限，默认 64MB"),
+            new ConfigEntry("workspaceMaxMediaBytes","8388608","工作区单张导入图片最大字节数"),
             new ConfigEntry("workspaceHistoryEnable","true","覆盖写入前是否保留历史版本"),
             new ConfigEntry("workspaceHistoryMaxVersions","10","每个文件最多保留多少个历史版本"),
             new ConfigEntry("workspaceTrashKeepDays","30","工作区回收站保留天数"),
@@ -460,7 +461,7 @@ public class RoleplayConfigMigrator {
                 plugin.getLogger().sendWarn("自动补全 Roleplay 配置失败，请检查 config.yml 权限！");
             }
         }
-        if (version < 45) {
+        if (version < 46) {
             config.set("configVersion",CURRENT_VERSION);
             if (!versionMissing) changed++;
         }

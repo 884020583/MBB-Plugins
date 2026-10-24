@@ -48,6 +48,10 @@ tool_search
 | `profile_get` | 查询群员个人印象 |
 | `workspace_list` / `workspace_read` / `workspace_search` | 查询角色私有工作区 |
 | `workspace_write` | 创建、覆盖或追加 UTF-8 文本文件 |
+| `workspace_import_image` | 把当前/最近图片或白名单网页图片保存到工作区 |
+| `workspace_media_list` | 列出图片、语音和视频文件及大小、更新时间 |
+| `workspace_note_append` | 追加结构化日记、人物、灵感、资料或普通笔记 |
+| `workspace_draft_save` | 归档回复、Qzone、生图或剧情草稿 |
 | `workspace_rename` / `workspace_copy` | 重命名、移动或复制文件与目录 |
 | `workspace_delete` / `workspace_restore` | 移入回收站或从回收站恢复 |
 | `message_send` | 工具处理期间追加发送一条短消息 |
@@ -195,6 +199,24 @@ promptTotalChars: 120000
 删除默认移动到 `.trash/`，只有显式 `permanent=true` 才彻底删除。回收站按
 `workspaceTrashKeepDays` 自动清理。
 
+`workspace_import_image` 只接受当前消息图片、最近图片或网页白名单中的图片，按文件头验证
+JPEG、PNG、GIF、WebP，不允许模型直接传本地绝对路径。默认写入 `media/images/`，单张受
+`workspaceMaxMediaBytes` 限制。`workspace_media_list` 递归列出媒体文件，不读取二进制正文。
+
+`workspace_note_append` 会自动选择结构：
+
+| kind | 默认路径 |
+|---|---|
+| `journal` | `notes/journal/YYYY-MM-DD.md` |
+| `person` | `notes/people/<标题>.md` |
+| `idea` | `notes/ideas/<标题或日期>.md` |
+| `reference` | `notes/references/<标题>.md` |
+| `general` | `notes/general/<标题或日期>.md` |
+
+`workspace_draft_save` 写入 `drafts/<reply|qzone|draw|story|other>/`，文件名带时间戳和短随机后缀，
+正文保留标题、类型、创建时间和标签。MBB-ComfyUI 完成生图时会通过受信任回调把图片自动归档到
+`media/generated/comfyui/`。
+
 适合放进工作区的内容：
 
 | 目录示例 | 用途 |
@@ -205,6 +227,10 @@ promptTotalChars: 120000
 | `plans/todo.md` | 角色自己的计划和待办，需要到点提醒时仍创建正式 reminder |
 | `references/` | 允许公开引用的资料链接、知识库条目索引和作品笔记 |
 | `sticker-ideas/` | 想收录的表情标签、来源消息和画面描述 |
+| `media/images/` | 手工导入的角色图片和聊天图片 |
+| `media/generated/comfyui/` | 生图完成后自动归档的图片 |
+| `notes/` | 日记、人物观察、灵感、资料和普通笔记 |
+| `drafts/` | 待发布的回复、Qzone、生图和剧情草稿 |
 
 不建议把密钥、真实地址、其他用户的私聊原文、可执行文件或需要长期运行的程序放进工作区。
 当前工作区只处理角色自己的文本与少量媒体文件，不提供代码执行、联网下载目录或系统文件访问。

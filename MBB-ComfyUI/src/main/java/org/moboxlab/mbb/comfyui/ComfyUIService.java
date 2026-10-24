@@ -280,7 +280,7 @@ public class ComfyUIService implements PluginService {
         String type = image.getString("type");
         File file = downloadImage(job,promptId,filename,subfolder,type);
         checkIdentity(job,file);
-        String notifyText = prepareDrawNotify(job);
+        String notifyText = prepareDrawNotify(job,file);
         sendImage(job.groupID,file);
         sendDrawNotify(job,notifyText);
         markCooldown(job.groupID);
@@ -688,7 +688,7 @@ public class ComfyUIService implements PluginService {
                 String.valueOf(System.currentTimeMillis()));
     }
 
-    private String prepareDrawNotify(ComfyUIJob job) {
+    private String prepareDrawNotify(ComfyUIJob job,File imageFile) {
         PluginService roleplay = plugin.getServer().getPluginManager().getService("MBB-Roleplay");
         if (roleplay == null) return "画好啦，快看看。";
         JSONObject params = new JSONObject(true);
@@ -697,6 +697,7 @@ public class ComfyUIService implements PluginService {
         params.put("messageID",job.messageID);
         params.put("prompt",job.prompt);
         params.put("model",config.checkpoint);
+        if (imageFile != null) params.put("imageFile",imageFile.getAbsolutePath());
         JSONObject result = roleplay.call("prepare-draw-complete",params);
         if (result == null || !result.getBooleanValue("status")) return "画好啦，快看看。";
         String text = result.getString("text");
