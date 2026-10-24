@@ -300,6 +300,8 @@ quietReplyEnable: true
 
 `replyLinkFilterEnable` 默认 `true`。开启后，角色最终发送的文本会在发送前过滤掉 `http(s)://`、`www.` 和常见裸域名链接，避免模型凭空编造网址。过滤只作用于角色文本回复，不影响图片、文件和其他技能消息。
 
+`turnThreads` 默认 `4`，控制角色回合线程池的线程数：路由判断、回复生成等回合步骤都在这个池里执行（线程池尚未建立或提交被拒绝时会回退到调用线程）。可设置范围是 `1` 到 `16`，小于 `1` 按 `1` 处理，大于 `16` 按 `16` 处理，不会因此报错。改完执行 `/role reload` 或重启主程序后生效；线程数变化时在加载或重载配置时重建线程池，旧池优雅关闭，已提交的回合继续跑完。
+
 `cameraEnable` 默认 `true`。设为 `false` 后只关闭 `draw` 技能里的手机自拍和拍照模式，角色会忽略 `camera=selfie/photo`，普通生图仍可继续使用。改完执行 `/role reload` 或重启主程序后生效。
 
 `drawPromptCompilerEnable` 默认 `true`。开启后角色层只生成画面 brief，`RoleplayDrawPromptService` 用独立上下文按 `brief.characters/subject` 解析目标角色，注入对应角色的 `imageTags`、`imageNegativeTags`、外貌和知识库条目，再交给 `MBB-ComfyUI`。画别人时不会自动把当前角色加入画面。`drawPromptProfile` 留空时使用 `aiProfile`；编译默认使用 `reasoningEffort: none`，避免把预算耗在思考上。`drawPromptMaxChars` 和 `drawPromptNegativeMaxChars` 分别限制最终正向、角色专属负向 prompt；`drawPromptKnowledgeMaxChars` 只注入目标角色自己的学生条目，不会把凯伊等其他角色外貌带进生图上下文。

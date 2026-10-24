@@ -166,7 +166,7 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("trainIncludeBotMessages","false","是否把机器人自己的消息也算进训练语料"),
             new ConfigEntry("trainAutoStart","true","提交数据后是否自动开始训练"),
             new ConfigEntry("batchMaxSegments","4","合批回合最多回复几段，每段可以回应批内不同的消息"),
-            new ConfigEntry("turnThreads","4","角色回合的执行线程数，路由与生成都在这个线程池里跑"),
+            new ConfigEntry("turnThreads","4","角色回合的执行线程数，范围 1 到 16，超出会被钳位，路由与生成都在这个线程池里跑"),
             new ConfigEntry("pokeReplyEnable","true","是否响应戳一戳；MBB-Poke 启用时本插件自动跳过"),
             new ConfigEntry("pokeBackEnable","true","被戳时是否允许角色戳回去"),
             new ConfigEntry("pokeReplyMaxChars","20","戳一戳回复单条短消息的最大字符数"),
