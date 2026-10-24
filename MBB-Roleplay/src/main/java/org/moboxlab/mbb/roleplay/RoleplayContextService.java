@@ -135,15 +135,40 @@ public class RoleplayContextService {
     }
 
     public String recentContext(long groupID) {
-        List<JSONObject> rows = service.storage().query(
-                "SELECT `userID`,`userName`,`content`,`isBot` FROM `"+RoleplayService.MSG_TABLE+"` WHERE `groupID`=? "
-                        + "AND `userID` NOT IN (SELECT `userID` FROM `plugin_mbb_roleplay_blacklist` "
-                        + "WHERE `groupID`=?) ORDER BY `messageTime` DESC LIMIT ?",
-                groupID,groupID,service.config().shortContextMessages);
+        return recentContext(groupID,0L);
+    }
+
+    public String recentContext(long groupID,long excludeMessageID) {
+        List<JSONObject> rows;
+        if (excludeMessageID > 0) {
+            rows = service.storage().query(
+                    "SELECT `messageID`,`userID`,`userName`,`content`,`isBot`,`messageTime` FROM `"
+                            +RoleplayService.MSG_TABLE+"` WHERE `groupID`=? "
+                            +"AND `messageID`<>? AND `userID` NOT IN "
+                            +"(SELECT `userID` FROM `plugin_mbb_roleplay_blacklist` WHERE `groupID`=?) "
+                            +"ORDER BY `messageTime` DESC LIMIT ?",
+                    groupID,excludeMessageID,groupID,service.config().shortContextMessages);
+        } else {
+            rows = service.storage().query(
+                    "SELECT `messageID`,`userID`,`userName`,`content`,`isBot`,`messageTime` FROM `"
+                            +RoleplayService.MSG_TABLE+"` WHERE `groupID`=? "
+                            +"AND `userID` NOT IN (SELECT `userID` FROM `plugin_mbb_roleplay_blacklist` "
+                            +"WHERE `groupID`=?) ORDER BY `messageTime` DESC LIMIT ?",
+                    groupID,groupID,service.config().shortContextMessages);
+        }
         if (rows == null || rows.isEmpty()) return "无";
+        List<JSONObject> selected = new ArrayList<>();
+        int maxChars = Math.max(2000,service.config().shortContextMaxChars);
+        int used = 0;
+        for (JSONObject row : rows) {
+            int length = service.safe(row.getString("content")).length()+80;
+            if (!selected.isEmpty() && used + length > maxChars) break;
+            selected.add(row);
+            used += length;
+        }
         StringBuilder builder = new StringBuilder();
-        for (int i = rows.size() - 1; i >= 0; i--) {
-            JSONObject row = rows.get(i);
+        for (int i = selected.size() - 1; i >= 0; i--) {
+            JSONObject row = selected.get(i);
             builder.append(contextIdentity(row))
                     .append(" ").append(service.safe(row.getString("userName")))
                     .append("（QQ：").append(row.getLongValue("userID")).append("）：")

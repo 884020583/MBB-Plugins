@@ -1,6 +1,6 @@
 {
   "name": "MBB-ComfyUI",
-  "version": "V0.1.9.0.0132",
+  "version": "V0.1.10.0.0757",
   "apiVersion": "0.3",
   "main": "org.moboxlab.mbb.comfyui.ComfyUIPlugin",
   "author": "MoBoxLab",

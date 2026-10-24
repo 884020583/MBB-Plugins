@@ -82,6 +82,49 @@ public class RoleplayMessageContentService {
         return owners != null && owners.contains(userID);
     }
 
+    /**
+     * 内网网页需要 owner 在当前上下文里明确发起。普通群员复述链接不算授权。
+     */
+    boolean ownerAuthorizedInternalWeb(long groupID,long userID,String rawUrl) {
+        if (isOwner(userID)) return true;
+        List<Long> owners = service.plugin().getServer().getOwnerList();
+        if (owners == null || owners.isEmpty()) return false;
+        String host = "";
+        try {
+            host = new java.net.URL(rawUrl).getHost();
+        } catch (Exception e) {
+            return false;
+        }
+        if (host == null || host.trim().isEmpty()) return false;
+        long cutoff = System.currentTimeMillis()
+                -Math.max(30,service.config().webOwnerAuthWindowSecond) * 1000L;
+        List<JSONObject> rows = service.storage().query(
+                "SELECT `userID`,`content` FROM `"+RoleplayService.MSG_TABLE+"` "
+                        +"WHERE `groupID`=? AND `messageTime`>=? AND `isBot`=0 "
+                        +"ORDER BY `messageTime` DESC LIMIT 200",
+                groupID,cutoff);
+        if (rows == null) return false;
+        String normalizedHost = host.trim().toLowerCase(java.util.Locale.ROOT);
+        for (JSONObject row : rows) {
+            if (!owners.contains(row.getLongValue("userID"))) continue;
+            String content = service.safe(row.getString("content")).toLowerCase(java.util.Locale.ROOT);
+            if (!content.contains(normalizedHost)
+                    && !content.contains("内网")
+                    && !content.contains("本机")
+                    && !content.contains("localhost")
+                    && !content.contains("127.0.0.1")) {
+                continue;
+            }
+            if (content.contains("访问") || content.contains("打开")
+                    || content.contains("请求") || content.contains("调用")
+                    || content.contains("看看") || content.contains("查询")
+                    || content.contains("查一下") || content.contains("抓取")) {
+                return true;
+            }
+        }
+        return false;
+    }
+
     boolean isInducedMemoryRequest(String content) {
         String text = service.safe(content);
         return text.contains("调用全局记忆") || text.contains("全局记忆功能")

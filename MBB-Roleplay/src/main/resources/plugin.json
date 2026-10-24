@@ -1,13 +1,13 @@
 {
   "name": "MBB-Roleplay",
-  "version": "V0.5.1.0.1900",
+  "version": "V0.10.0.0.0831",
   "apiVersion": "0.3",
   "main": "org.moboxlab.mbb.roleplay.RoleplayPlugin",
   "author": "MoBoxLab",
-  "description": "MoBoxBot 角色扮演插件：情绪、用户关系与长期短期记忆",
+  "description": "MoBoxBot 角色扮演插件：群聊与私聊、跨群记忆、情绪、随机刻主动互动与工具调用",
   "website": "",
   "depend": [],
-  "softDepend": ["MBB-AI", "MBB-Sticker", "MBB-Vision", "MBB-BotHub"],
+  "softDepend": ["MBB-AI", "MBB-Sticker", "MBB-Vision", "MBB-BotHub", "MBB-QQ"],
   "loadBefore": [],
   "provides": ["roleplay"]
 }

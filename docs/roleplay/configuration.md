@@ -84,7 +84,8 @@ continuationReplyChance: 0.80
 otherParticipantReplyChance: 0.45
 otherRoleBotReplyChance: 0.50
 maxConsecutiveOtherRoleMessages: 2
-shortContextMessages: 120
+shortContextMessages: 200
+shortContextMaxChars: 12000
 memoryUpdateMessages: 50
 memoryExtractMessages: 300
 memoryExtractMaxChars: 16000
@@ -102,6 +103,23 @@ memoryMergeConcurrency: 4
 memoryMergeCooldownMinute: 60
 globalMemoryMergeCooldownMinute: 60
 memoryTimeoutSecond: 300
+privateChatEnable: true
+privateChatWhitelist: ""
+privateChatFriendCacheSecond: 300
+privateChatContextMessages: 40
+privateChatMaxReplyChars: 160
+randomTickEnable: true
+randomTickMinMinute: 10
+randomTickMaxMinute: 30
+randomTickQuietStartHour: 0
+randomTickQuietEndHour: 8
+randomTickGroupWindowMinute: 360
+randomTickGroupMaxActions: 2
+randomTickQzoneDailyMax: 2
+randomTickDedupeHours: 24
+randomTickMaxTokens: 1200
+randomTickTimeoutSecond: 90
+randomTickReasoningEffort: "low"
 activeMemory: true
 imageUnderstandingEnable: true
 imageUnderstandingMode: "addressed"
@@ -115,6 +133,7 @@ stickerAttachEnable: true
 stickerAttachWindowSecond: 5
 stickerAttachMaxWaitSecond: 15
 stickerAttachWaitUntilNextMessage: true
+stickerSendChance: 0.35
 messageBatchEnable: true
 messageBatchWindowSecond: 2
 messageBatchMaxMessages: 10
@@ -171,12 +190,22 @@ replyReviewReasoningEffort: "none"
 replyReviewTimeoutSecond: 60
 replyReviewMinScore: 70
 toolEnable: true
-toolMaxSteps: 8
-toolMaxCalls: 16
+toolCoreTools: "tool_search,end_turn,message_send,sticker"
+toolLoadedMaxTools: 8
+toolSearchMaxResults: 4
+toolMaxSteps: 16
+toolMaxCalls: 12
 toolResultMaxChars: 16000
+toolResultTotalMaxChars: 48000
 toolLiveMessageMax: 10
-toolLoopMaxMillis: 90000
+toolLoopMaxMillis: 75000
 toolCallMaxMillis: 20000
+toolParallelReadOnlyEnable: true
+toolParallelMax: 4
+toolAiRetryCount: 0
+toolTurnPersistEnable: true
+toolTurnKeepHours: 24
+toolRecoverMaxMinutes: 60
 toolMemoryInjectItems: 8
 toolMemoryInjectMaxChars: 6000
 toolMemoryKeepHours: 72
@@ -186,11 +215,21 @@ workspaceMaxReadChars: 32000
 workspaceMaxWriteChars: 64000
 workspaceMaxFilesPerList: 200
 workspaceMaxTotalBytes: 67108864
+workspaceMaxMediaBytes: 8388608
+workspaceHistoryEnable: true
+workspaceHistoryMaxVersions: 10
+workspaceTrashKeepDays: 30
 webEnable: true
-webWhitelist: "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com"
+webWhitelist: "wikipedia.org,baike.baidu.com,bilibili.com,biligame.com,wiki.biligame.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,bangumi.tv,bgm.tv,huijiwiki.com,prts.wiki,wiki.gg,game8.jp,appmedia.jp,kamigame.jp,ani.gamer.com.tw,fandom.com,namu.wiki,arca.live,github.com,raw.githubusercontent.com,deepwiki.com,duckduckgo.com,bing.com"
+webSearchUrl: "https://www.bing.com/search?q={query}"
+webSearchFallbackUrl: ""
+webSearchMaxResults: 10
+webOwnerAuthWindowSecond: 300
 webTimeoutSecond: 15
 webMaxBytes: 262144
 webMaxChars: 12000
+webImageMaxBytes: 8388608
+webCacheSecond: 300
 contextHardLimitEnable: false
 promptTotalChars: 120000
 pacingEnable: true
@@ -267,17 +306,43 @@ quietReplyEnable: true
 
 `replyReviewEnable` 默认 `true`。角色回复在发送前会经过 `RoleplayReplyReviewService` 复核：检查是否像角色、是否有 AI 味、总结腔、说教、重复或过长；分数低于 `replyReviewMinScore` 且模型给出 `rewrite` 时使用改写文本。`replyReviewProfile` 留空时使用 `aiProfile`。
 
-`toolEnable` 默认 `true`，通过 `MBB-AI` 的 OpenAI `tools/tool_calls` 执行有限工具循环。
-`toolMaxSteps` 和 `toolMaxCalls` 限制单轮循环次数；工具期间新消息并入上下文受
-`toolLiveMessageMax` 限制。`toolLoopMaxMillis` 与 `toolCallMaxMillis` 分别限制整轮和单工具耗时，
-`toolMemoryInject*` 控制下一轮按相关性注入的工具结果上下文。`workspaceEnable` 开放角色的私有工作区
-`plugins/MBB-Roleplay/data/`，读写大小和列表数量分别由 `workspaceMaxReadChars`、
-`workspaceMaxWriteChars`、`workspaceMaxFilesPerList` 控制。具体工具见
-[工具调用、工作区与交流节拍](tools.md)。
+`privateChatEnable` 控制私聊入口。准入规则是 owner 或机器人 QQ 好友，好友列表按
+`privateChatFriendCacheSecond` 缓存；查询失败时拒绝非 owner 私聊。`privateChatWhitelist`
+只保留旧配置兼容，不再放行非好友。私聊使用独立上下文，图片会交给 `MBB-Vision`，
+长期结论以 `visibility=private` 写入记忆表。
 
-`webEnable` 开放受限网页读取工具，只允许 `webWhitelist` 中的域名及其子域名。
+`toolEnable` 默认 `true`，通过 `MBB-AI` 的 OpenAI `tools/tool_calls` 执行有限工具循环。
+首轮只开放 `toolCoreTools`，其他工具由 `tool_search` 按需加载，最多同时加载
+`toolLoadedMaxTools` 个 schema。`toolMaxSteps` 和 `toolMaxCalls` 限制单轮循环次数；
+`toolResultTotalMaxChars` 限制整轮所有工具结果合计字符数，`toolResultMaxChars` 限制单个结果。
+`toolParallelReadOnlyEnable` 允许只读工具并行，`toolParallelMax` 指定线程数；
+`toolAiRetryCount` 默认 0，以控制整轮时间成本。
+
+`toolLoopMaxMillis` 与 `toolCallMaxMillis` 分别限制整轮和单工具耗时，
+`toolMemoryInject*` 控制下一轮按相关性注入的工具结果上下文。工具期间新消息并入上下文受
+`toolLiveMessageMax` 限制。未完成工具回合默认持久化，启动后最近 `toolRecoverMaxMinutes`
+内可恢复，记录保留 `toolTurnKeepHours`。
+
+`workspaceEnable` 开放角色的私有工作区
+`plugins/MBB-Roleplay/data/`，读写大小和列表数量分别由 `workspaceMaxReadChars`、
+`workspaceMaxWriteChars`、`workspaceMaxFilesPerList` 控制。覆盖写入默认保留历史版本，
+删除默认进入回收站，分别由 `workspaceHistory*` 和 `workspaceTrashKeepDays` 控制。具体工具见
+[工具调用、工作区与交流节拍](tools.md)。单张导入图片受 `workspaceMaxMediaBytes` 限制，
+默认 8MB；生图完成图会自动归档到 `media/generated/comfyui/`。
+
+`knowledgeSpoilerLevel` 控制知识库剧透等级。明确点名某个角色时会锁定该角色条目，
+避免角色因条目整体标记为高剧透而查不到；但 `剧情`、`剧透`、`主线`、`结局` 小节仍不会超过配置等级。
+
+`webEnable` 开放网页读取和搜索工具。公网域名只允许 `webWhitelist` 中的域名及其子域名；
+内网地址必须由 owner 当前发言或 `webOwnerAuthWindowSecond` 内的明确请求授权。
+默认白名单以二次元百科、游戏资料站和公开技术资料为主，不包含 X、Pixiv、YouTube、微博、
+知乎、Reddit 等社交或图片站；需要时可自行加入 `webWhitelist`。旧默认列表会自动迁移，
+自定义列表不会被覆盖。
+`webSearchUrl` 使用 `{query}` 占位符。默认备用源留空，只使用 Bing；填写 `webSearchFallbackUrl`
+后才作为连接兜底，不参与结果合并。搜索词由模型在调用前自行改写，工具不会自动改词。
+单次最多返回 `webSearchMaxResults` 条结果，默认 10。`webCacheSecond` 缓存网页和搜索结果。
 `contextHardLimitEnable` 默认关闭，关闭时不按 `promptTotalChars` 截断动态资料；
-只有显式打开本地硬预算时才使用该上限。
+只有显式打开本地硬预算时才使用该上限。即使关闭总硬预算，各类资料仍有单项预算。
 
 超长回复默认不再交给小模型风格层，而是由大模型回复复核处理。只有显式设置
 `styleLongReplyEnable: true` 时，超过 `styleMaxChars` 的回复才会先触发风格层。
@@ -321,12 +386,19 @@ quietReplyEnable: true
 
 `timeZone` 决定角色理解的当前时间，默认 `Asia/Shanghai`。服务器使用 UTC 时也不会影响角色看到的本地日期和星期。
 
-`shortContextMessages` 控制注入的即时群聊条数，默认 `120`，上限 `300`。学生图鉴只在消息里出现具体学生名或别名时才追加「被提到的学生详细设定」，所以扩大这个窗口不会把整份图鉴重复带进每条请求。
+`shortContextMessages` 控制即时群聊候选条数，默认 `200`，上限 `500`；
+`shortContextMaxChars` 再按字符预算从新到旧保留，默认 `12000`。
+学生图鉴只在消息里出现具体学生名或别名时才追加「被提到的学生详细设定」，
+所以扩大窗口不会把整份图鉴重复带进每条请求。
 
 
 ## 配置补全
 
-插件启动和重载时会检查 `config.yml`。缺失的配置项会自动追加到文件末尾，并附带中文注释。旧版本默认的 `otherRoleBotReplyChance: 0.10` 会一次性迁移为 `0.50`。
+插件启动和重载时会检查 `config.yml`。缺失的配置项会自动追加到文件末尾，并附带中文注释。
+已知旧默认值会按配置结构版本迁移，包括 `otherRoleBotReplyChance: 0.10 -> 0.50`、
+旧 `toolCoreTools` 补入 `sticker`、旧社交网页白名单替换为二次元资料站默认值、
+旧 DuckDuckGo 备用源默认清空、`webSearchMaxResults: 5 -> 10`。
+迁移只在值仍等于旧默认值时执行，不会覆盖用户自定义内容。
 
 如需手动触发：
 

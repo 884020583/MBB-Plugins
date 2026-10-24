@@ -53,6 +53,8 @@ public class RoleplayService {
 
     private final Plugin plugin;
     private final RoleplayReminderService reminderService;
+    private final RoleplayTimeService timeService;
+    private final RoleplayTodoService todoService;
     private final RoleplayGlobalMemoryService globalMemoryService;
     private final RoleplaySpeechCorpusService speechCorpusService;
     private final RoleplayKnowledgeService knowledgeService;
@@ -70,6 +72,8 @@ public class RoleplayService {
     private final RoleplayPromptAssembler promptAssembler;
     private final RoleplayMemoryBackupService memoryBackupService;
     private final RoleplayMemoryUpdateService memoryUpdateService;
+    private final RoleplayPrivateChatService privateChatService;
+    private final RoleplayRandomTickService randomTickService;
     private final RoleplayBatchScheduler batchScheduler;
     private final RoleplayPokeService pokeService;
     private final RoleplayReplyExecutor replyExecutor;
@@ -104,6 +108,7 @@ public class RoleplayService {
     private final RoleplaySkillRegistry skillRegistry;
     private final RoleplayToolLoopService toolLoopService;
     private final RoleplayToolMemoryService toolMemoryService;
+    private final RoleplayToolTurnService toolTurnService;
     private final RoleplayRouter router;
     private final RoleplayStyler styler;
     private volatile RoleplayConfig config;
@@ -276,6 +281,8 @@ public class RoleplayService {
         this.config = config;
         this.persona = persona;
         this.reminderService = new RoleplayReminderService(plugin,config,persona,this);
+        this.timeService = new RoleplayTimeService(config);
+        this.todoService = new RoleplayTodoService(plugin,this,reminderService,timeService);
         this.globalMemoryService = new RoleplayGlobalMemoryService(plugin,config,this);
         this.speechCorpusService = new RoleplaySpeechCorpusService(plugin,config);
         this.knowledgeService = new RoleplayKnowledgeService(plugin,config);
@@ -293,6 +300,8 @@ public class RoleplayService {
         this.promptAssembler = new RoleplayPromptAssembler(this);
         this.memoryBackupService = new RoleplayMemoryBackupService(this);
         this.memoryUpdateService = new RoleplayMemoryUpdateService(this);
+        this.privateChatService = new RoleplayPrivateChatService(plugin,config,this);
+        this.randomTickService = new RoleplayRandomTickService(plugin,config,this);
         this.batchScheduler = new RoleplayBatchScheduler(this);
         this.pokeService = new RoleplayPokeService(this);
         this.replyExecutor = new RoleplayReplyExecutor(this);
@@ -326,6 +335,7 @@ public class RoleplayService {
         this.trainService = new RoleplayTrainService(this);
         this.skillRegistry = new RoleplaySkillRegistry(this);
         this.toolMemoryService = new RoleplayToolMemoryService(plugin,config);
+        this.toolTurnService = new RoleplayToolTurnService(plugin,config);
         this.toolLoopService = new RoleplayToolLoopService(this,config);
         this.router = new RoleplayRouter(plugin,this);
         this.styler = new RoleplayStyler(plugin);
@@ -334,6 +344,7 @@ public class RoleplayService {
     public void init() {
         schemaService.initSchema();
         reminderService.init();
+        todoService.init();
         globalMemoryService.init();
         speechCorpusService.init();
         knowledgeService.init();
@@ -345,22 +356,29 @@ public class RoleplayService {
         expressionService.init();
         traceService.init();
         toolMemoryService.init();
+        toolTurnService.init();
         threadService.init();
+        privateChatService.init();
+        randomTickService.init();
         attentionService.reload(config);
         executorService.ensureTurnExecutor();
         executorService.ensureBackgroundExecutor();
         dailyReviewService.ensureTask();
+        randomTickService.ensureTask();
     }
 
     public void reload(RoleplayConfig config,RoleplayPersona persona) {
         this.config = config;
         this.persona = persona;
         reminderService.reload(config,persona);
+        timeService.reload(config);
         globalMemoryService.reload(config);
         speechCorpusService.reload(config);
         knowledgeService.reload(config);
         emotionService.reload(config,persona);
         memberService.reload(config);
+        privateChatService.reload(config);
+        randomTickService.reload(config);
         quietService.reload(config);
         replyFeedbackService.reload(config);
         expressionService.reload(config);
@@ -370,9 +388,11 @@ public class RoleplayService {
         dailyReviewService.reload(config);
         toolLoopService.reload(config);
         toolMemoryService.reload(config);
+        toolTurnService.reload(config);
         executorService.ensureTurnExecutor();
         executorService.ensureBackgroundExecutor();
         dailyReviewService.ensureTask();
+        randomTickService.ensureTask();
     }
 
     /**
@@ -455,6 +475,47 @@ public class RoleplayService {
      */
     public void handlePoke(NoticeEvent event) {
         pokeService.handlePoke(event);
+    }
+
+    /**
+     * 私聊消息入口。私聊使用独立上下文，不进入群合批和群话题疲劳。
+     */
+    public void handlePrivate(org.moboxlab.moboxbot.API.Event.PrivateMessageEvent event) {
+        privateChatService.handle(event);
+    }
+
+    String enrichPrivateImageContent(org.moboxlab.moboxbot.API.Event.PrivateMessageEvent event,
+                                     String content) {
+        return imageContextService.enrichPrivateImageContent(event,content);
+    }
+
+    JSONObject recentImageForSave(long groupID,long userID,String content) {
+        RoleplayService.RecentImage recent = imageContextService.findRecentImageContext(
+                groupID,userID,content);
+        return recent == null ? null : recent.data;
+    }
+
+    JSONObject currentOrRecentImage(long groupID,long userID,String eventRaw,String content) {
+        try {
+            JSONObject raw = JSONObject.parseObject(eventRaw);
+            JSONArray message = raw == null ? null : raw.getJSONArray("message");
+            if (message != null) {
+                for (int i = 0; i < message.size(); i++) {
+                    JSONObject segment = message.getJSONObject(i);
+                    if (segment == null) continue;
+                    String type = segment.getString("type");
+                    if ("image".equals(type) || "mface".equals(type)) {
+                        return segment.getJSONObject("data");
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return recentImageForSave(groupID,userID,content);
+    }
+
+    RoleplayWorkspaceService workspaceService() {
+        return toolLoopService.registry().workspace();
     }
 
 
@@ -599,6 +660,14 @@ public class RoleplayService {
         return memoryQueryService;
     }
 
+    RoleplayPrivateChatService privateChatService() {
+        return privateChatService;
+    }
+
+    RoleplayRandomTickService randomTickService() {
+        return randomTickService;
+    }
+
     RoleplayBatchScheduler batchScheduler() {
         return batchScheduler;
     }
@@ -621,6 +690,10 @@ public class RoleplayService {
 
     RoleplayToolMemoryService toolMemoryService() {
         return toolMemoryService;
+    }
+
+    RoleplayToolTurnService toolTurnService() {
+        return toolTurnService;
     }
 
     RoleplayRouter router() {
@@ -680,12 +753,16 @@ public class RoleplayService {
         triggerMemory(groupID,"主动记忆",content);
     }
 
-    void sendStickerMessage(long groupID,long userID,String tags) {
-        stickerService.sendSticker(groupID,userID,tags);
+    boolean sendStickerMessage(long groupID,long userID,String tags) {
+        return stickerService.sendSticker(groupID,userID,tags);
     }
 
     boolean isOwnerUser(long userID) {
         return contentService.isOwner(userID);
+    }
+
+    boolean ownerAuthorizedInternalWeb(long groupID,long userID,String rawUrl) {
+        return contentService.ownerAuthorizedInternalWeb(groupID,userID,rawUrl);
     }
 
     boolean isInducedMemory(String content) {
@@ -698,6 +775,14 @@ public class RoleplayService {
 
     public RoleplayMemberService getMemberService() {
         return memberService;
+    }
+
+    RoleplayTodoService todoService() {
+        return todoService;
+    }
+
+    RoleplayTimeService timeService() {
+        return timeService;
     }
 
     public RoleplayDrawPromptService getDrawPromptService() {
@@ -1290,6 +1375,10 @@ public class RoleplayService {
         return memoryQueryService.longMemoryText(groupID,userID,query);
     }
 
+    String privateMemoryText(long userID,String query,int maxChars) {
+        return memoryQueryService.privateMemoryText(userID,query,maxChars);
+    }
+
     JSONArray longMemories(long groupID) {
         return memoryQueryService.longMemories(groupID);
     }
@@ -1379,20 +1468,58 @@ public class RoleplayService {
         executorService.shutdown();
     }
 
+    void recoverToolTurns() {
+        toolLoopService.recoverInterruptedTurns();
+    }
+
+    void completeRecoveredToolTurn(RoleplayToolTurnService.RecoveredTurn turn,JSONObject result) {
+        if (turn == null || turn.context == null || result == null) return;
+        try {
+            JSONObject raw = JSONObject.parseObject(turn.context.eventRaw);
+            if (raw == null) {
+                plugin.getLogger().sendWarn("[工具] 群"+turn.context.groupID
+                        +" 工具回合缺少原始事件，无法恢复发送");
+                return;
+            }
+            GroupMessageEvent event = new GroupMessageEvent();
+            event.setGroupID(turn.context.groupID);
+            event.setMessageID(turn.context.messageID);
+            event.setUserID(turn.context.userID);
+            event.setRawMessage(raw.getString("raw_message"));
+            event.setMessage(raw.getJSONArray("message"));
+            event.setSender(raw.getJSONObject("sender"));
+            event.setRaw(raw);
+            RoleplayRouteDecision decision = new RoleplayRouteDecision();
+            decision.reply = true;
+            decision.addressed = "thread";
+            decision.confidence = 1.0;
+            decision.chance = 1.0;
+            plugin.getLogger().sendWarn("[工具] 群"+turn.context.groupID
+                    +" 正在恢复进程中断前的工具回合；可能产生一次补偿回复");
+            replyExecutor.processReplyResult(event,turn.context.groupID,turn.context.selfID,
+                    turn.context.userName,turn.context.relationship,turn.context.message,
+                    result,decision,null);
+        } catch (Exception e) {
+            plugin.getLogger().sendException(e);
+        }
+    }
+
 
     JSONObject reply(long groupID,long userID,String userName,String content,
                      boolean otherRoleBot,String relationship,RecentImage imageContext,
-                     RoleplayRouteDecision decision,long messageID,long selfID) {
+                     RoleplayRouteDecision decision,long messageID,long selfID,
+                     String eventRaw,boolean ownerUser) {
         return replyGenerationService.reply(groupID,userID,userName,content,otherRoleBot,
-                relationship,imageContext,decision,messageID,selfID);
+                relationship,imageContext,decision,messageID,selfID,eventRaw,ownerUser);
     }
 
     JSONObject reply(long groupID,long userID,String userName,String content,
                      boolean otherRoleBot,String relationship,RecentImage imageContext,
                      RoleplayRouteDecision decision,String batchText,int batchCount,
-                     long messageID,long selfID) {
+                     long messageID,long selfID,String eventRaw,boolean ownerUser) {
         return replyGenerationService.reply(groupID,userID,userName,content,otherRoleBot,
-                relationship,imageContext,decision,batchText,batchCount,messageID,selfID);
+                relationship,imageContext,decision,batchText,batchCount,messageID,selfID,
+                eventRaw,ownerUser);
     }
 
 

@@ -5,6 +5,7 @@ import org.moboxlab.moboxbot.API.Event.EventPriority;
 import org.moboxlab.moboxbot.API.Event.GroupMessageEvent;
 import org.moboxlab.moboxbot.API.Event.Listener;
 import org.moboxlab.moboxbot.API.Event.NoticeEvent;
+import org.moboxlab.moboxbot.API.Event.PrivateMessageEvent;
 
 /**
  * 群消息监听
@@ -22,6 +23,12 @@ public class RoleplayListener implements Listener {
     public void onGroupMessage(GroupMessageEvent event) {
         if (!plugin.getRoleplayConfig().enable) return;
         plugin.getServer().getPluginManager().runTask(plugin,() -> service.handle(event));
+    }
+
+    @EventHandler(priority = EventPriority.MONITOR,ignoreCancelled = false)
+    public void onPrivateMessage(PrivateMessageEvent event) {
+        if (!plugin.getRoleplayConfig().enable) return;
+        plugin.getServer().getPluginManager().runTask(plugin,() -> service.handlePrivate(event));
     }
 
     @EventHandler(priority = EventPriority.NORMAL,ignoreCancelled = false)

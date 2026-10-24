@@ -284,6 +284,29 @@ public class RoleplayMemoryUpdateService {
             service.storage().update("UPDATE `"+RoleplayService.STATE_TABLE+"` SET `shortSummary`=?,`lastMemoryTime`=?,`lastMemoryID`=?,`updateTime`=? WHERE `groupID`=?",
                     summary,lastTime,lastID,now,groupID);
         }
+        saveGlobalMemoryState(groupID,summary,lastTime,lastID,now);
+    }
+
+    /**
+     * 跨群短期记忆保存在 groupID=0 的全局状态行。
+     * 原群状态行继续保留，既方便回看来源，也保证旧命令和旧数据仍能读取。
+     */
+    private void saveGlobalMemoryState(long sourceGroupID,String summary,long lastTime,long lastID,long now) {
+        if (summary.isEmpty()) return;
+        JSONObject row = service.storage().queryOne(
+                "SELECT `ID` FROM `"+RoleplayService.STATE_TABLE+"` WHERE `groupID`=0");
+        if (row == null) {
+            service.storage().insert("INSERT INTO `"+RoleplayService.STATE_TABLE+"` "
+                            + "(`groupID`,`shortSummary`,`lastMemoryTime`,`lastMemoryID`,`updateTime`) VALUES (?,?,?,?,?)",
+                    0L,summary,lastTime,lastID,now);
+        } else {
+            service.storage().update("UPDATE `"+RoleplayService.STATE_TABLE+"` SET "
+                            + "`shortSummary`=?,`lastMemoryTime`=?,`lastMemoryID`=?,`updateTime`=? WHERE `groupID`=0",
+                    summary,lastTime,lastID,now);
+        }
+        if (sourceGroupID > 0) {
+            service.plugin().getLogger().sendInfo("[记忆] 群"+sourceGroupID+" 短期记忆已同步到跨群记忆");
+        }
     }
 
     private boolean saveLongMemory(long groupID,JSONObject json) {
@@ -302,16 +325,21 @@ public class RoleplayMemoryUpdateService {
         if (importance < 1) importance = 1;
         if (importance > 5) importance = 5;
         JSONObject exists = service.storage().queryOne(
-                "SELECT `ID` FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=? AND `memoryType`=? AND `subjectID`=? AND `content`=?",
-                groupID,type,subjectID,content);
+                "SELECT `ID` FROM `"+RoleplayService.MEMORY_TABLE+"` "
+                        + "WHERE `memoryType`=? AND `subjectID`=? AND `content`=? AND `memoryStatus`='active'",
+                type,subjectID,content);
         if (exists != null) {
             service.storage().update("UPDATE `"+RoleplayService.MEMORY_TABLE+"` SET `importance`=MAX(`importance`,?),`eventTime`=?,`updateTime`=? WHERE `ID`=?",
                     importance,eventTime,System.currentTimeMillis(),exists.getLongValue("ID"));
             mergeLongMemoryIfNeeded(groupID);
             return true;
         }
-        service.storage().insert("INSERT INTO `"+RoleplayService.MEMORY_TABLE+"` (`groupID`,`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime`) VALUES (?,?,?,?,?,?,?)",
-                groupID,type,subjectID,content,importance,eventTime,System.currentTimeMillis());
+        service.storage().insert("INSERT INTO `"+RoleplayService.MEMORY_TABLE+"` "
+                        + "(`groupID`,`scopeType`,`scopeID`,`sourceGroupID`,`sourceChannel`,`visibility`,"
+                        + "`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime`) "
+                        + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                groupID,"global",0L,groupID,"group","shared",type,subjectID,content,
+                importance,eventTime,System.currentTimeMillis());
         resolveConflicts(groupID,type,subjectID,content,eventTime);
         mergeLongMemoryIfNeeded(groupID);
         return true;
@@ -321,13 +349,13 @@ public class RoleplayMemoryUpdateService {
         if (!service.config().memoryConflictResolveEnable) return;
         List<JSONObject> rows = service.storage().query(
                 "SELECT `ID`,`content`,`eventTime` FROM `"+RoleplayService.MEMORY_TABLE+"` "
-                        + "WHERE `groupID`=? AND `memoryType`=? AND `subjectID`=? "
+                        + "WHERE `memoryType`=? AND `subjectID`=? "
                         + "AND `memoryStatus`='active' ORDER BY `ID` DESC LIMIT 20",
-                groupID,type,subjectID);
+                type,subjectID);
         if (rows == null || rows.isEmpty()) return;
         JSONObject newest = service.storage().queryOne(
-                "SELECT MAX(`ID`) AS `id` FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=?",
-                groupID);
+                "SELECT MAX(`ID`) AS `id` FROM `"+RoleplayService.MEMORY_TABLE+"` "
+                        + "WHERE `memoryStatus`='active'");
         long newId = newest == null ? 0L : newest.getLongValue("id");
         for (JSONObject row : rows) {
             long oldId = row.getLongValue("ID");
@@ -402,12 +430,12 @@ public class RoleplayMemoryUpdateService {
     void mergeLongMemoryIfNeeded(long groupID) {
         if (service.memoryCount(groupID) <= service.config().maxLongMemories) return;
         long cooldownMs = Math.max(0,service.config().memoryMergeCooldownMinute) * 60000L;
-        long lastMerge = memoryMergeLastTime(groupID);
+        long lastMerge = memoryMergeLastTime(0L);
         if (cooldownMs > 0 && lastMerge > 0
                 && System.currentTimeMillis() - lastMerge < cooldownMs) {
             return;
         }
-        mergeLongMemoryNow(groupID);
+        mergeLongMemoryNow(0L);
     }
 
     private long memoryMergeLastTime(long groupID) {
@@ -441,11 +469,12 @@ public class RoleplayMemoryUpdateService {
 
     public boolean mergeLongMemoryNow(long groupID,boolean force,Consumer<String> callback) {
         synchronized (service.memoryMergingMap) {
-            Boolean merging = service.memoryMergingMap.get(groupID);
+            //长期记忆已经跨群共享，所有来源群共用一把合并锁。
+            Boolean merging = service.memoryMergingMap.get(0L);
             if (merging != null && merging) return false;
-            service.memoryMergingMap.put(groupID,true);
+            service.memoryMergingMap.put(0L,true);
         }
-        markMemoryMergeTriggered(groupID);
+        markMemoryMergeTriggered(0L);
         service.submitBackground(() -> {
             String result;
             try {
@@ -455,7 +484,7 @@ public class RoleplayMemoryUpdateService {
                 service.plugin().getLogger().sendWarn("[记忆] 群"+groupID+" 长期记忆合并异常："
                         +service.safe(e.getMessage()));
             } finally {
-                service.memoryMergingMap.put(groupID,false);
+                service.memoryMergingMap.put(0L,false);
             }
             if (callback != null) callback.accept(result);
         });
@@ -572,16 +601,20 @@ public class RoleplayMemoryUpdateService {
 
     private long maxLongMemoryId(long groupID) {
         JSONObject row = service.storage().queryOne(
-                "SELECT MAX(`ID`) AS `maxID` FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=? AND `memoryStatus`='active'",groupID);
+                "SELECT MAX(`ID`) AS `maxID` FROM `"+RoleplayService.MEMORY_TABLE+"` "
+                        + "WHERE `memoryStatus`='active' AND `visibility`='shared'");
         return row == null ? 0L : row.getLongValue("maxID");
     }
 
     private List<JSONObject> exportLongMemoriesUpTo(long groupID,long maxId) {
         List<JSONObject> result = new ArrayList<>();
         List<JSONObject> rows = service.storage().query(
-                "SELECT `ID`,`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime` "
-                        + "FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=? AND `ID`<=? AND `memoryStatus`='active' ORDER BY `ID` ASC",
-                groupID,maxId);
+                "SELECT `ID`,`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,"
+                        + "`sourceGroupID`,`updateTime` "
+                        + "FROM `"+RoleplayService.MEMORY_TABLE+"` "
+                        + "WHERE `ID`<=? AND `memoryStatus`='active' AND `visibility`='shared' "
+                        + "ORDER BY `ID` ASC",
+                maxId);
         if (rows == null) return result;
         for (JSONObject row : rows) {
             JSONObject item = new JSONObject(true);
@@ -591,6 +624,7 @@ public class RoleplayMemoryUpdateService {
             item.put("content",row.getString("content"));
             item.put("importance",row.getIntValue("importance"));
             item.put("eventTime",row.getLongValue("eventTime"));
+            item.put("sourceGroupID",row.getLongValue("sourceGroupID"));
             item.put("updateTime",row.getLongValue("updateTime"));
             result.add(item);
         }
@@ -598,8 +632,8 @@ public class RoleplayMemoryUpdateService {
     }
 
     private void deleteLongMemoriesUpTo(long groupID,long maxId) {
-        service.storage().update("DELETE FROM `"+RoleplayService.MEMORY_TABLE+"` WHERE `groupID`=? AND `ID`<=?",
-                groupID,maxId);
+        service.storage().update("DELETE FROM `"+RoleplayService.MEMORY_TABLE+"` "
+                + "WHERE `ID`<=? AND `visibility`='shared'",maxId);
     }
 
     private int insertLongMemories(long groupID,List<JSONObject> memories) {
@@ -618,10 +652,14 @@ public class RoleplayMemoryUpdateService {
             long updateTime = item.getLongValue("updateTime");
             if (updateTime <= 0) updateTime = now;
             long eventTime = eventTime(item.getLongValue("eventTime"),content,updateTime);
+            long sourceGroupID = item.getLongValue("sourceGroupID");
+            if (sourceGroupID <= 0) sourceGroupID = groupID;
             service.storage().insert("INSERT INTO `"+RoleplayService.MEMORY_TABLE+"` "
-                            + "(`groupID`,`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime`) "
-                            + "VALUES (?,?,?,?,?,?,?)",
-                    groupID,type,item.getLongValue("subjectID"),content,importance,eventTime,updateTime);
+                            + "(`groupID`,`scopeType`,`scopeID`,`sourceGroupID`,`sourceChannel`,`visibility`,"
+                            + "`memoryType`,`subjectID`,`content`,`importance`,`eventTime`,`updateTime`) "
+                            + "VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
+                    groupID,"global",0L,sourceGroupID,"group","shared",type,
+                    item.getLongValue("subjectID"),content,importance,eventTime,updateTime);
             saved++;
         }
         return saved;
@@ -694,6 +732,13 @@ public class RoleplayMemoryUpdateService {
         }
         List<JSONObject> resultList = new ArrayList<>();
         long now = System.currentTimeMillis();
+        long sourceGroupID = 0L;
+        for (JSONObject sourceItem : batch) {
+            if (sourceItem != null && sourceItem.getLongValue("sourceGroupID") > 0) {
+                sourceGroupID = sourceItem.getLongValue("sourceGroupID");
+                break;
+            }
+        }
         for (Object object : merged) {
             if (!(object instanceof JSONObject)) continue;
             JSONObject item = (JSONObject) object;
@@ -709,6 +754,7 @@ public class RoleplayMemoryUpdateService {
             memory.put("subjectID",item.getLongValue("subjectID"));
             memory.put("content",content);
             memory.put("importance",importance);
+            memory.put("sourceGroupID",sourceGroupID);
             memory.put("updateTime",item.getLongValue("updateTime") <= 0
                     ? now : item.getLongValue("updateTime"));
             resultList.add(memory);

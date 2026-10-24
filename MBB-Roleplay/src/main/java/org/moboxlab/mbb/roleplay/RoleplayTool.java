@@ -8,6 +8,8 @@ import com.alibaba.fastjson.JSONObject;
 public interface RoleplayTool {
     String name();
 
+    String category();
+
     String description();
 
     JSONObject schema();

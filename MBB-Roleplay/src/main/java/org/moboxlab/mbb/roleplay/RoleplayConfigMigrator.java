@@ -15,7 +15,12 @@ import java.util.List;
  * Roleplay 配置迁移与缺失项补全
  */
 public class RoleplayConfigMigrator {
-    private static final String CURRENT_VERSION = "37";
+    private static final String CURRENT_VERSION = "46";
+    private static final String LEGACY_WEB_WHITELIST =
+            "wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,"
+                    +"kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,"
+                    +"reddit.com,duckduckgo.com,bing.com,zhihu.com,weibo.com,fandom.com,namu.wiki,"
+                    +"arca.live,pixiv.net,x.com,youtube.com,b23.tv";
 
     private static class ConfigEntry {
         private final String key;
@@ -85,6 +90,7 @@ public class RoleplayConfigMigrator {
                     "同一用户刚被回复后，多少秒内的短句视为补充不再回复，0 表示关闭"),
             new ConfigEntry("splitMessageSuppressMaxChars","20","触发补充抑制的最大字数"),
             new ConfigEntry("shortContextMessages","200","即时上下文消息条数"),
+            new ConfigEntry("shortContextMaxChars","12000","即时上下文最多注入字符数"),
             new ConfigEntry("shortTermDays","3","短期记忆覆盖天数"),
             new ConfigEntry("memoryUpdateMessages","50","每累计多少条消息更新一次记忆"),
             new ConfigEntry("memoryExtractMessages","300","每次记忆整理最多读取的消息条数"),
@@ -141,6 +147,7 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("stickerAttachMaxWaitSecond","15","表情包已开始识别时，最多额外等待多少秒"),
             new ConfigEntry("stickerAttachWaitUntilNextMessage","true",
                     "同一用户又发言或表情包已附带时立刻结束等待，不再干等到窗口结束"),
+            new ConfigEntry("stickerSendChance","0.35","提示词中的表情包参考使用率，0 到 1"),
             new ConfigEntry("messageBatchEnable","true","是否启用群消息合批：连续快速发言会合并成一个回合处理"),
             new ConfigEntry("messageBatchWindowSecond","2","合批窗口秒数，窗口内到达的新消息会并入同一批"),
             new ConfigEntry("messageBatchMaxMessages","10","单个批次最多合并多少条消息，超出时丢弃最旧的非直接点名消息"),
@@ -203,12 +210,22 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("replyReviewTimeoutSecond","60","回复复核请求超时秒数"),
             new ConfigEntry("replyReviewMinScore","70","回复复核最低通过分"),
             new ConfigEntry("toolEnable","true","是否允许角色通过原生工具调用查询信息或维护私有工作区"),
-            new ConfigEntry("toolMaxSteps","8","单轮最多进行多少次模型-工具循环"),
-            new ConfigEntry("toolMaxCalls","16","单轮最多执行多少个工具调用"),
+            new ConfigEntry("toolCoreTools","tool_search,end_turn,message_send,sticker","首轮直接开放的工具"),
+            new ConfigEntry("toolLoadedMaxTools","8","单轮最多同时加载多少个工具 schema"),
+            new ConfigEntry("toolSearchMaxResults","4","tool_search 单次最多返回多少个工具"),
+            new ConfigEntry("toolMaxSteps","16","单轮最多进行多少次模型-工具循环"),
+            new ConfigEntry("toolMaxCalls","12","单轮最多执行多少个工具调用"),
             new ConfigEntry("toolResultMaxChars","16000","单个工具结果注入上下文的最大字符数"),
+            new ConfigEntry("toolResultTotalMaxChars","48000","单轮所有工具结果合计最大字符数"),
             new ConfigEntry("toolLiveMessageMax","10","工具执行期间最多并入多少条新群消息"),
-            new ConfigEntry("toolLoopMaxMillis","90000","单轮工具循环总时间上限毫秒"),
+            new ConfigEntry("toolLoopMaxMillis","75000","单轮工具循环总时间上限毫秒"),
             new ConfigEntry("toolCallMaxMillis","20000","单个工具调用时间上限毫秒"),
+            new ConfigEntry("toolParallelReadOnlyEnable","true","只读工具是否允许并行执行"),
+            new ConfigEntry("toolParallelMax","4","工具执行线程数上限"),
+            new ConfigEntry("toolAiRetryCount","0","工具循环中的 AI 请求重试次数"),
+            new ConfigEntry("toolTurnPersistEnable","true","是否持久化工具回合"),
+            new ConfigEntry("toolTurnKeepHours","24","工具回合记录保留小时数"),
+            new ConfigEntry("toolRecoverMaxMinutes","60","未完成工具回合允许恢复的最大分钟数"),
             new ConfigEntry("toolMemoryInjectItems","8","下一轮注入最近多少次工具调用结果"),
             new ConfigEntry("toolMemoryInjectMaxChars","6000","工具调用结果注入字符上限"),
             new ConfigEntry("toolMemoryKeepHours","72","工具调用记录保留小时数"),
@@ -218,11 +235,22 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("workspaceMaxWriteChars","64000","工作区单次写入最大字符数"),
             new ConfigEntry("workspaceMaxFilesPerList","200","工作区列表最多返回多少个文件"),
             new ConfigEntry("workspaceMaxTotalBytes","67108864","角色工作区总大小上限，默认 64MB"),
+            new ConfigEntry("workspaceMaxMediaBytes","8388608","工作区单张导入图片最大字节数"),
+            new ConfigEntry("workspaceHistoryEnable","true","覆盖写入前是否保留历史版本"),
+            new ConfigEntry("workspaceHistoryMaxVersions","10","每个文件最多保留多少个历史版本"),
+            new ConfigEntry("workspaceTrashKeepDays","30","工作区回收站保留天数"),
             new ConfigEntry("webEnable","true","是否开放受限网页浏览工具"),
-            new ConfigEntry("webWhitelist","wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com","网页允许域名，多个用英文逗号分隔"),
+            new ConfigEntry("webWhitelist",RoleplayConfig.DEFAULT_WEB_WHITELIST,
+                    "网页允许域名，多个用英文逗号分隔"),
+            new ConfigEntry("webSearchUrl","https://www.bing.com/search?q={query}","联网搜索地址模板"),
+            new ConfigEntry("webSearchFallbackUrl","","可选联网搜索备用地址模板；默认留空，不启用第二搜索源"),
+            new ConfigEntry("webSearchMaxResults","10","单次联网搜索最多返回多少条结果"),
+            new ConfigEntry("webOwnerAuthWindowSecond","300","owner 内网访问授权窗口秒数"),
             new ConfigEntry("webTimeoutSecond","15","网页连接超时秒数"),
             new ConfigEntry("webMaxBytes","262144","网页最多读取字节数"),
             new ConfigEntry("webMaxChars","12000","网页净化后最多注入字符数"),
+            new ConfigEntry("webImageMaxBytes","8388608","网页图片发送单张最多读取的字节数"),
+            new ConfigEntry("webCacheSecond","300","网页和搜索结果缓存秒数"),
             new ConfigEntry("pacingEnable","true","是否在发送前加入拟人打字延迟"),
             new ConfigEntry("pacingBaseMs","350","拟人延迟基础毫秒"),
             new ConfigEntry("pacingPerCharMs","25","每个字符增加的延迟毫秒"),
@@ -293,7 +321,24 @@ public class RoleplayConfigMigrator {
             new ConfigEntry("commandPrefixes","/,!,＃,#","忽略以这些前缀开头的指令消息，英文逗号分隔"),
             new ConfigEntry("personaFile","persona-aris.json","角色设定文件；内置示例可用 /role persona 查看"),
             new ConfigEntry("quietReplyEnable","true","是否启用免打扰名单：名单内群员只在主动叫到角色时才回复"),
-            new ConfigEntry("minMessageLength","2","忽略少于多少字的纯文本消息"));
+            new ConfigEntry("minMessageLength","2","忽略少于多少字的纯文本消息"),
+            new ConfigEntry("privateChatEnable","true","是否允许私聊；默认只响应 owner 和机器人 QQ 好友"),
+            new ConfigEntry("privateChatWhitelist","","旧版私聊白名单，仅保留配置兼容；好友制启用后不再放行非好友"),
+            new ConfigEntry("privateChatFriendCacheSecond","300","QQ 好友列表缓存秒数"),
+            new ConfigEntry("privateChatContextMessages","40","私聊上下文保留条数"),
+            new ConfigEntry("privateChatMaxReplyChars","160","私聊单条回复最大字符数"),
+            new ConfigEntry("randomTickEnable","true","是否启用随机刻主动互动"),
+            new ConfigEntry("randomTickMinMinute","10","随机刻最短间隔分钟数"),
+            new ConfigEntry("randomTickMaxMinute","30","随机刻最长间隔分钟数"),
+            new ConfigEntry("randomTickQuietStartHour","0","随机刻静默开始小时"),
+            new ConfigEntry("randomTickQuietEndHour","8","随机刻静默结束小时"),
+            new ConfigEntry("randomTickGroupWindowMinute","360","群主动话题统计窗口分钟数"),
+            new ConfigEntry("randomTickGroupMaxActions","2","窗口内最多执行多少次群主动话题"),
+            new ConfigEntry("randomTickQzoneDailyMax","2","每天最多发布多少条 Qzone 说说"),
+            new ConfigEntry("randomTickDedupeHours","24","相同主动行为指纹的去重小时数"),
+            new ConfigEntry("randomTickMaxTokens","1200","随机刻决策输出 Token 上限"),
+            new ConfigEntry("randomTickTimeoutSecond","90","随机刻请求超时秒数"),
+            new ConfigEntry("randomTickReasoningEffort","low","随机刻思考强度：none / low / medium / high"));
 
     public static int ensure(Plugin plugin) {
         if (plugin == null) return 0;
@@ -376,6 +421,33 @@ public class RoleplayConfigMigrator {
                 && "8".equals(config.getString("toolMaxCalls",""));
         boolean legacyToolResultChars = version < 37
                 && "8000".equals(config.getString("toolResultMaxChars",""));
+        boolean legacyWebWhitelist = version < 38
+                && ("wikipedia.org,baike.baidu.com,bilibili.com,gamekee.com,bluearchive.wiki,"
+                +"kivo.wiki,moegirl.org.cn,github.com,raw.githubusercontent.com,deepwiki.com,reddit.com")
+                .equals(config.getString("webWhitelist",""));
+        boolean legacyWebSearchPrimary = version < 39
+                && "https://html.duckduckgo.com/html/?q={query}"
+                .equals(config.getString("webSearchUrl",""));
+        boolean legacyToolStepBalance = version < 38
+                && "8".equals(config.getString("toolMaxSteps",""));
+        boolean legacyToolStepDefault = version < 41
+                && "6".equals(config.getString("toolMaxSteps",""));
+        boolean legacyRandomTickReasoning = version < 41
+                && "none".equals(config.getString("randomTickReasoningEffort",""));
+        boolean legacyToolCallBalance = version < 38
+                && "16".equals(config.getString("toolMaxCalls",""));
+        boolean legacyToolLoopBalance = version < 38
+                && "90000".equals(config.getString("toolLoopMaxMillis",""));
+        boolean legacyToolCoreSticker = version < 43
+                && "tool_search,end_turn,message_send"
+                .equals(config.getString("toolCoreTools",""));
+        boolean legacySocialWebWhitelist = version < 44
+                && LEGACY_WEB_WHITELIST.equals(config.getString("webWhitelist",""));
+        boolean legacySearchFallback = version < 45
+                && "https://html.duckduckgo.com/html/?q={query}"
+                .equals(config.getString("webSearchFallbackUrl",""));
+        boolean legacySearchMaxResults = version < 45
+                && "5".equals(config.getString("webSearchMaxResults",""));
         int changed = 0;
         List<ConfigEntry> missing = new ArrayList<>();
         for (ConfigEntry entry : DEFAULTS) {
@@ -389,7 +461,7 @@ public class RoleplayConfigMigrator {
                 plugin.getLogger().sendWarn("自动补全 Roleplay 配置失败，请检查 config.yml 权限！");
             }
         }
-        if (version < 37) {
+        if (version < 46) {
             config.set("configVersion",CURRENT_VERSION);
             if (!versionMissing) changed++;
         }
@@ -426,15 +498,60 @@ public class RoleplayConfigMigrator {
             changed++;
         }
         if (legacyToolSteps) {
-            config.set("toolMaxSteps","8");
+            config.set("toolMaxSteps","16");
             changed++;
         }
         if (legacyToolCalls) {
-            config.set("toolMaxCalls","16");
+            config.set("toolMaxCalls","12");
             changed++;
         }
         if (legacyToolResultChars) {
             config.set("toolResultMaxChars","16000");
+            changed++;
+        }
+        if (legacyWebWhitelist) {
+            config.set("webWhitelist",RoleplayConfig.DEFAULT_WEB_WHITELIST);
+            changed++;
+        }
+        if (legacyWebSearchPrimary) {
+            config.set("webSearchUrl","https://www.bing.com/search?q={query}");
+            config.set("webSearchFallbackUrl","");
+            changed += 2;
+        }
+        if (legacyToolStepBalance) {
+            config.set("toolMaxSteps","16");
+            changed++;
+        }
+        if (legacyToolStepDefault) {
+            config.set("toolMaxSteps","16");
+            changed++;
+        }
+        if (legacyRandomTickReasoning) {
+            config.set("randomTickReasoningEffort","low");
+            changed++;
+        }
+        if (legacyToolCallBalance) {
+            config.set("toolMaxCalls","12");
+            changed++;
+        }
+        if (legacyToolLoopBalance) {
+            config.set("toolLoopMaxMillis","75000");
+            changed++;
+        }
+        if (legacyToolCoreSticker) {
+            config.set("toolCoreTools","tool_search,end_turn,message_send,sticker");
+            changed++;
+        }
+        if (legacySocialWebWhitelist) {
+            config.set("webWhitelist",RoleplayConfig.DEFAULT_WEB_WHITELIST);
+            changed++;
+        }
+        if (legacySearchFallback) {
+            config.set("webSearchFallbackUrl","");
+            changed++;
+        }
+        if (legacySearchMaxResults) {
+            config.set("webSearchMaxResults","10");
             changed++;
         }
         if (legacyRoleBotChance) {
@@ -534,7 +651,7 @@ public class RoleplayConfigMigrator {
             config.set("replySegmentMaxChars","30");
             changed++;
         }
-        if (version < 33 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
+        if (version < 45 || legacyRoleBotChance || legacyPersonaFile || legacyStickerWindow
                 || legacyRouterMaxTokens || legacyRouterMaxTokens1200
                 || legacyPromptTotalChars || legacyMemoryRelevanceMaxChars
                 || legacyGlobalMemoryRelevanceMaxChars || legacyRouterReasoningEffort
@@ -544,7 +661,9 @@ public class RoleplayConfigMigrator {
                 || legacyReplySplitPunctuation || legacyInitialAffinity
                 || legacyInitialTrust || legacyIntimacyClose || legacyIntimacyVeryClose
                 || legacyRelationDailyMax || legacyEmotionEventCooldown
-                || legacyEmotionAnalyzeCooldown || legacyEmotionAnalyzeMaxDelta) {
+                || legacyEmotionAnalyzeCooldown || legacyEmotionAnalyzeMaxDelta
+                || legacyToolCoreSticker || legacySocialWebWhitelist
+                || legacySearchFallback || legacySearchMaxResults) {
             if (config.save()) {
                 config.load();
             } else {

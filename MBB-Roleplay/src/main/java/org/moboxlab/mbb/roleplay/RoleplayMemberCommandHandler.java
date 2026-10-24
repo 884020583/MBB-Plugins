@@ -68,6 +68,7 @@ public class RoleplayMemberCommandHandler {
         if ("basic".equals(category)) {
             sender.sendMessage("基础命令："
                     +"\n/role status"
+                    +"\n/role random"
                     +"\n/role enable [群号]"
                     +"\n/role disable [群号]"
                     +"\n/role groups"
@@ -146,6 +147,7 @@ public class RoleplayMemberCommandHandler {
                     +"\n/role tool stats          查看当前群工具调用统计"
                     +"\n/role tool test           检查工具 schema、参数校验、工作区和网页白名单"
                     +"\n/role tool trace [条数]   查看最近工具调用"
+                    +"\n/role tool cancel         取消当前群正在执行的工具回合"
                     +"\n/role tool clear          清空当前群工具结果上下文");
             return;
         }

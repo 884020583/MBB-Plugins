@@ -10,7 +10,7 @@ flowchart LR
 
     RP ==>|"chat"| AI["MBB-AI（必需）"]
     RP ==>|"describe"| VIS["MBB-Vision（可选）"]
-    RP ==>|"搜索标签 / 发送"| ST["MBB-Sticker（可选）"]
+    RP ==>|"tags / random / add"| ST["MBB-Sticker（可选）"]
     RP ==>|"status / generate"| CU["MBB-ComfyUI（可选）"]
     RP ==>|"vision_lookup / turn_claim"| HUB["MBB-BotHub（可选）"]
     RP -.->|"isEnabled 冲突检测"| POKE["MBB-Poke（可选）"]
@@ -23,13 +23,13 @@ flowchart LR
 | 调用方 | 服务名 | 动作 | 用途 | 缺失时的行为 |
 |---|---|---|---|---|
 | 路由层 | `MBB-AI` | `chat` | 判断是否回复、挂哪些技能与资料 | 回退到规则决策 |
-| 生成层 / 风格层 | `MBB-AI` | `chat` | 生成正文与表达动作、改写 AI 味 | 不回复 / 直接用原文 |
+| 生成层 / 风格层 | `MBB-AI` | `chat` + `tools/tool_calls` | 按需加载工具、生成正文、改写 AI 味 | 不回复 / 直接用原文 |
 | 记忆整理 | `MBB-AI` | `chat` | 短期、长期、永久记忆提取与合并 | 整批失败即放弃，保留原数据 |
 | 情绪分析 | `MBB-AI` | `chat` | 心情、好感、信任、厌烦与群员个人记忆 | 跳过本轮情绪更新 |
 | 提醒识别 / 到点提醒 | `MBB-AI` | `chat` | 解析提醒时间、生成提醒正文 | 安静忽略，不创建任务 |
 | 识图 | `MBB-Vision` | `describe` | 图片与表情包描述、标签与本地缓存 | 图片消息不注入描述 |
-| 表情包 | `MBB-Sticker` | 查询标签 / 发送 | 角色按标签选择并发送表情包 | `sticker` 技能不开放 |
-| 生图 | `MBB-ComfyUI` | `status` / `generate` | 生图与群级冷却，完成后回调 | `draw` 技能不开放 |
+| 表情包 | `MBB-Sticker` | 查询标签 / 随机发送 / 导入 | 角色通过首轮开放的 `sticker` 发送，必要时用 `sticker_save` 主动收藏当前或最近图片 | `sticker` 与 `sticker_save` 工具不开放 |
+| 生图 | `MBB-ComfyUI` | `status` / `generate` | 角色通过原生 `draw` 工具生图，包含群级冷却与完成回调 | `draw` 工具不开放 |
 | 多机器人协作 | `MBB-BotHub` | `vision_lookup` / `vision_claim` / `vision_publish` / `vision_wait` / `turn_claim` / `task_claim` / `chat_guard` | 同群多 bot 共享识图、回合权、任务去重与互聊熔断 | 完全退回单机：识图各识别一次，回复不做跨进程去重 |
 | 戳一戳 | `MBB-Poke` | `isEnabled` | 检测冲突，避免同一件事回两次 | Roleplay 自行处理戳一戳 |
 
@@ -92,6 +92,10 @@ Roleplay 还会用 `turn_status` 复核一次，被抢就放弃发送。赢了�
 编译器只取目标角色自己的学生条目，不会把其他角色或同源角色的外貌一起注入。用户让角色画别人时，目标角色就是别人，不会自动把当前角色画进画面。编译完成后 `RoleplayDrawPromptValidator` 会做本地质检：把其他角色和冲突外貌词从正向 prompt 移到负向 prompt，强制目标角色 canonical tag 和人数标签。最终交给 `MBB-ComfyUI` 的是 `prompt + negativePrompt + size + camera`，其中 `negativePrompt` 会追加到 ComfyUI 全局负向词后面。
 
 `MBB-ComfyUI` 生成完成后，如果 `identityCheckEnable` 为 `true`，会调用 `MBB-Vision` 对图片做一次身份/外貌校验：命中 `forbiddenTags` 时在控制台输出“身份校验疑似不符”，校验只记录日志，不阻断图片发送。
+
+draw 工具成功只表示任务已提交。Roleplay 会在本轮最终回复阶段抑制额外正文，由 MBB-ComfyUI 在图片完成时
+发送图片和完成提醒；回调同时携带生成文件路径，Roleplay 工作区启用时会自动归档到
+`media/generated/comfyui/`。
 
 ## 回复复核与隐式反馈
 

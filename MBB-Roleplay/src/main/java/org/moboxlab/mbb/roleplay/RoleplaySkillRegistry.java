@@ -277,7 +277,7 @@ public class RoleplaySkillRegistry {
 
         @Override
         public String description() {
-            return "按当前真实标签集发送一张匹配表情包";
+            return "按当前情绪发送一张匹配表情包；tags 可留空随机选择";
         }
 
         @Override
@@ -292,20 +292,25 @@ public class RoleplaySkillRegistry {
 
         @Override
         public boolean sideEffect() {
-            return false;
+            return true;
         }
 
         @Override
         public String promptFragment(RoleplaySkillContext context) {
-            return service.stickerPrompt();
+            String action = service.config().toolEnable
+                    ? "调用 sticker 工具发送；tags 可选，留空时从全部表情包中随机选择。"
+                    : "适合时输出 {\"type\":\"sticker\",\"args\":{\"tags\":\"tag1,tag2\"}}；"
+                    +"tags 也可以留空，由插件随机选择。";
+            return service.stickerPrompt()+"\n"+action;
         }
 
         @Override
         public RoleplaySkillResult execute(RoleplaySkillContext context) {
             String tags = context.arg("tags");
-            if (tags.isEmpty()) return RoleplaySkillResult.ignored(id());
-            service.sendStickerMessage(context.groupID,context.userID,tags);
-            return RoleplaySkillResult.ok(id(),"已发送表情包");
+            boolean sent = service.sendStickerMessage(context.groupID,context.userID,tags);
+            return sent
+                    ? RoleplaySkillResult.ok(id(),"已发送表情包")
+                    : RoleplaySkillResult.failed(id(),"表情包发送失败或没有可用表情包");
         }
     }
 
@@ -340,7 +345,7 @@ public class RoleplaySkillRegistry {
 
         @Override
         public boolean sideEffect() {
-            return false;
+            return true;
         }
 
         @Override
@@ -442,6 +447,8 @@ public class RoleplaySkillRegistry {
                     +"不要写发色、瞳色、光环、服装和武器的具体 tag，编译层会从角色设定里补全。"
                     +"不要写 masterpiece、best quality、highres、highly detailed 等质量词。"
                     +"不要控制模型、steps、cfg、sampler、seed。"
+                    +"draw 成功只表示任务已经提交，最终正文不要再说“画好了”“生成完成”或类似内容；"
+                    +"图片和完成提醒会由 MBB-ComfyUI 通过独立回调发送。"
                     +"当前群生图冷却剩余 "+remaining+" 秒，"
                     +"当前群任务中："+(busy ? "是" : "否")+"。冷却中或有任务时不要调用 draw，"
                     +"直接用角色语气说明还需要等多久。尺寸上限 "

@@ -27,20 +27,21 @@ public class RoleplayMaterialBudget {
             }
         });
         StringBuilder builder = new StringBuilder();
-        boolean unlimitedAll = totalBudget < 0;
+        boolean unlimitedTotal = totalBudget < 0;
         int remaining = totalBudget <= 0 ? Integer.MAX_VALUE : totalBudget;
         for (RoleplayMaterial material : selected) {
             String text = trim(material.load());
             if (text.isEmpty()) continue;
-            int limit = unlimitedAll || material.charBudget() <= 0
-                    ? text.length() : material.charBudget();
+            int limit = material.charBudget() <= 0 ? text.length() : material.charBudget();
             if (limit > remaining) limit = remaining;
             if (limit <= 0) continue;
             String block = text.length() > limit ? text.substring(0,limit) : text;
             builder.append(block);
             if (!block.endsWith("\n")) builder.append("\n");
-            remaining -= block.length() + 1;
-            if (remaining <= 0) break;
+            if (!unlimitedTotal) {
+                remaining -= block.length() + 1;
+                if (remaining <= 0) break;
+            }
         }
         return builder.toString();
     }

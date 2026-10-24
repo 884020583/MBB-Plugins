@@ -8,13 +8,15 @@ MoBoxBot 角色扮演插件。插件读取 persona 文件，让角色以普通�
 
 | 分区 | 主要能力 | 详细文档 |
 |---|---|---|
-| 会话与回复 | 群级开关、参与概率、冷却、消息合批、路由判断、引用回复、结构化输出 | [回复架构](../docs/roleplay/architecture.md) |
-| 记忆系统 | 短期、长期、永久、群员个人记忆；相关性注入、合并、备份与恢复 | [记忆系统](../docs/roleplay/memory.md) |
+| 会话与回复 | 群聊与 owner/好友制私聊、私聊稳定缓存前缀与识图、参与概率、冷却、消息合批、路由判断、引用回复、结构化输出 | [回复架构](../docs/roleplay/architecture.md) |
+| 记忆系统 | 跨群短期、长期、永久、个人记忆；私聊私有长期记忆、来源保留、相关性注入、合并、备份与恢复 | [记忆系统](../docs/roleplay/memory.md) |
+| 随机刻 | 10 到 30 分钟主动行为，夜间静默、去重、频率限制和 `NO_OP` | [配置与部署](../docs/roleplay/configuration.md) |
 | 情绪与关系 | 群级情绪、好感、信任、厌烦、黑名单、用户关系原因 | [情绪与关系](../docs/roleplay/emotion.md) |
 | 反馈与表达 | 主动发言反馈、注意力漂移、每日复盘、群内表达候选提取与管理员复核 | [回复架构](../docs/roleplay/architecture.md) |
 | 资料与提示词 | persona、台词语料、知识库、提示词缓存前缀 | [回复架构](../docs/roleplay/architecture.md) / [技能与集成](../docs/roleplay/integrations.md) |
 | 技能与外部插件 | 提醒、识图、表情包、ComfyUI 生图、戳回去 | [技能与集成](../docs/roleplay/integrations.md) |
-| 工具与工作区 | 原生 tools/tool_calls、私有文件读写、工具期间新消息并入、连续消息节拍 | [工具与工作区](../docs/roleplay/tools.md) |
+| 工具与工作区 | 原生 tools/tool_calls、QQ 工具、表情包主动收藏、图片导入与媒体索引、结构化笔记、草稿归档、私有文件读写、工具期间新消息并入、连续消息节拍 | [工具与工作区](../docs/roleplay/tools.md) |
+| 待办与时间 | 用户待办、角色自身待办、完成与延后、提醒联动、时区时间计算 | [工具与工作区](../docs/roleplay/tools.md) |
 | 多角色部署 | 其他角色机器人 QQ、接话概率、连续往返限制、名称识别 | [多角色部署](../docs/roleplay/multi-role.md) |
 | 免打扰 | 群员自助加入名单，角色不再主动搭话，只回应主动叫到自己的消息 | [命令](../docs/roleplay/commands.md) |
 | 命令与配置 | 全部管理命令、配置项、默认性能、构建和升级 | [命令](../docs/roleplay/commands.md) / [配置与部署](../docs/roleplay/configuration.md) |
@@ -26,12 +28,14 @@ flowchart TD
     subgraph ENTRY["事件入口 RoleplayListener"]
         E1["群消息 GroupMessageEvent"]
         E2["戳一戳 NoticeEvent notice/poke"]
+        E3["私聊 PrivateMessageEvent"]
     end
 
     E2 --> POKE{"MBB-Poke 已启用？"}
     POKE -->|是| POKE1["交给 MBB-Poke，本插件跳过"]
     POKE -->|否| T0["提交插件任务线程"]
     E1 --> T0
+    E3 --> PCHAT["RoleplayPrivateChatService：稳定前缀 / 识图 / 私聊记忆"]
 
     T0 --> GATE{"插件开关 + 群级开关"}
     GATE -->|关闭| END0["本轮结束"]
@@ -81,11 +85,11 @@ flowchart TD
 ```mermaid
 flowchart TD
     MSG["已过滤的群聊消息"] --> EXTRACT["记忆整理：MBB-AI 分批提取"]
-    EXTRACT --> ST["短期记忆：每群一份，滚动重写"]
-    EXTRACT --> LT["长期记忆：每群按条目，带 subjectID"]
+    EXTRACT --> ST["短期记忆：跨群滚动摘要，原群状态保留"]
+    EXTRACT --> LT["长期记忆：跨群读取，保留来源和 subjectID"]
     EXTRACT --> GM["永久记忆：跨群共享，仅白名单群学习"]
 
-    EMO["情绪分析（异步，MBB-AI）"] --> MM["群员个人记忆：每群每 QQ"]
+    EMO["情绪分析（异步，MBB-AI）"] --> MM["群员个人记忆：每个 QQ 一份全局档案"]
     EMO --> REL["关系状态：好感 / 信任 / 厌烦 + 情绪原因"]
 
     ST --> ASSEMBLE["本轮资料装配"]
@@ -103,7 +107,7 @@ flowchart TD
     EMO --> BACKUP
 ```
 
-记忆只作为背景资料注入，不等于每轮都要复述。短期记忆偏近期事件，长期记忆偏群内结论，永久记忆跨群共享，群员个人记忆按 `(群号, QQ)` 维护。
+记忆只作为背景资料注入，不等于每轮都要复述。短期记忆维护跨群滚动摘要，长期记忆保留来源后跨群读取，永久记忆继续跨群共享，群员个人记忆按 QQ 维护；其他群的原始流水不会直接注入当前群。
 
 ## 分层回复
 
@@ -165,7 +169,7 @@ flowchart LR
 
     RP ==>|"chat：路由 / 回复 / 风格 / 记忆 / 情绪 / 提醒"| AI["MBB-AI（必需）"]
     RP ==>|"describe：图片与表情包识图 + 本地缓存"| VIS["MBB-Vision（可选）"]
-    RP ==>|"search / send：表情包标签检索与发送"| ST["MBB-Sticker（可选）"]
+    RP ==>|"tags / random / add：表情包发送与主动收藏"| ST["MBB-Sticker（可选）"]
     RP ==>|"status / generate：生图与群级冷却"| CU["MBB-ComfyUI（可选）"]
     RP -.->|"isEnabled：避免戳一戳重复响应"| POKE["MBB-Poke（可选）"]
     RP -.->|"复用同一套 AI profile 与并发限制"| CHAT["MBB-Chat（同生态参考）"]
@@ -196,7 +200,7 @@ flowchart LR
 |---|---|---|
 | `MBB-AI` | 必需 | 路由、回复、记忆、情绪、提醒识别等模型调用 |
 | `MBB-Vision` | 可选 | 图片与表情包识图、缓存和原图上下文 |
-| `MBB-Sticker` | 可选 | 表情包标签检索与发送 |
+| `MBB-Sticker` | 可选 | 表情包标签检索、随机发送与主动收藏 |
 | `MBB-ComfyUI` | 可选 | 生图技能与生成完成回调 |
 
 没有可选插件时，Roleplay 仍可使用文本聊天、记忆、情绪和提醒功能。

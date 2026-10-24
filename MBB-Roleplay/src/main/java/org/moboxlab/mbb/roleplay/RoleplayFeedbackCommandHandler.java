@@ -142,6 +142,8 @@ public class RoleplayFeedbackCommandHandler {
                     .append(" 用户=").append(item.getLongValue("userID"))
                     .append(" 指向=").append(data.getString("addressed"))
                     .append(" 技能=").append(data.getString("skills"))
+                    .append(" 字符=").append(data.getIntValue("systemPromptChars"))
+                    .append("/").append(data.getIntValue("userPromptChars"))
                     .append(" 原因=").append(data.getString("reason"));
             String reply = data.getString("reply");
             if (reply != null && !reply.isEmpty()) {
@@ -158,6 +160,13 @@ public class RoleplayFeedbackCommandHandler {
             return;
         }
         String action = args.length > 2 ? args[2].toLowerCase(Locale.ROOT) : "stats";
+        if ("cancel".equals(action)) {
+            boolean cancelled = command.service().toolLoopService().cancelGroup(groupID);
+            sender.sendMessage(cancelled
+                    ? "当前群正在执行的工具回合已请求取消。"
+                    : "当前群没有正在执行的工具回合。");
+            return;
+        }
         if ("test".equals(action)) {
             JSONObject test = command.service().toolLoopService().registry()
                     .selfTest(command.service().config());
@@ -200,7 +209,7 @@ public class RoleplayFeedbackCommandHandler {
             return;
         }
         if (!"stats".equals(action)) {
-            sender.sendMessage("用法：/role tool [stats|test|trace [条数]|clear]");
+            sender.sendMessage("用法：/role tool [stats|test|trace [条数]|cancel|clear]");
             return;
         }
         JSONObject stats = command.service().toolMemoryService().stats(groupID);

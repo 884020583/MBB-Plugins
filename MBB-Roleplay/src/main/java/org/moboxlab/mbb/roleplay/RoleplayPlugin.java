@@ -45,6 +45,7 @@ public class RoleplayPlugin extends Plugin {
         getServer().getPluginManager().registerService(this,new RoleplayPublicService(service));
         logPokeConfigWarning();
         getLogger().sendInfo("MBB-Roleplay 已启用，角色："+persona.name);
+        getServer().getPluginManager().runTaskLater(this,() -> service.recoverToolTurns(),5);
     }
 
     @Override

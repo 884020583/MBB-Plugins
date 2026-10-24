@@ -1,0 +1,50 @@
+#MBB-QQ 插件配置
+enable: true
+#是否允许只读群资料、成员和历史消息
+readToolsEnable: true
+#是否允许戳一戳、点赞、表情回应和撤回自己的消息
+interactionToolsEnable: true
+#是否允许发送工作区图片、语音
+mediaToolsEnable: true
+#是否允许 owner 执行好友、群管理和账号资料操作
+adminToolsEnable: true
+#是否允许 owner 明确要求机器人退出当前群
+groupLeaveEnable: true
+#机器人退群、被移出群或被禁言时是否私聊通知 owner
+notifyOwnerOnGroupEvent: true
+#是否允许管理机器人自己的 QQ 空间
+qzoneEnable: true
+#戳同一用户的最小间隔秒数
+pokeCooldownSecond: 30
+#给同一用户点赞的最小间隔秒数
+likeCooldownSecond: 86400
+#单次点赞上限
+likeMaxTimes: 10
+#同一消息表情回应的最小间隔秒数
+emojiLikeCooldownSecond: 10
+#允许撤回自己消息的时间窗口秒数
+recallWindowSecond: 120
+#修改自己群名片的最小间隔秒数
+groupCardCooldownSecond: 60
+#发表 Qzone 的最小间隔秒数
+qzoneCooldownSecond: 300
+#Qzone 正文最大字符数
+qzoneContentMaxChars: 500
+#Qzone 单次最多图片数
+qzoneMaxImages: 9
+#Qzone 默认可见范围：1 所有人，4 好友，16 部分好友，64 仅自己，128 部分好友不可见
+qzoneDefaultUgcRight: 64
+#单张图片最大字节数
+imageMaxBytes: 8388608
+#单个语音最大字节数
+voiceMaxBytes: 8388608
+#允许发送的图片扩展名
+imageExtensions: "jpg,jpeg,png,gif,webp"
+#允许发送的语音扩展名
+voiceExtensions: "silk,amr,mp3,wav,ogg,m4a,flac"
+#动作审计记录保留天数
+auditKeepDays: 90
+#动作审计最多保留行数
+auditMaxRows: 10000
+#好友和群请求记录保留天数
+requestKeepDays: 30

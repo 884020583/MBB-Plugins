@@ -25,8 +25,8 @@ public class StickerPlugin extends Plugin {
         library = new StickerLibrary(this);
         library.load();
         StickerTagger tagger = new StickerTagger(this,library);
-        service = new StickerService(this,library);
         receiveService = new StickerReceiveService(this,library,tagger);
+        service = new StickerService(this,library,receiveService);
         getServer().getPluginManager().registerListener(this,new StickerListener(receiveService));
         getServer().getPluginManager().registerCommand(this,
                 new StickerCommand(this,library,service,receiveService,tagger));

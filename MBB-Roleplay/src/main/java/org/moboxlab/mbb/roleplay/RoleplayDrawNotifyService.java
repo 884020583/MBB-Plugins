@@ -6,6 +6,9 @@ import org.moboxlab.moboxbot.API.OneBot.MessageUtil;
 import org.moboxlab.moboxbot.API.OneBot.OneBotClient;
 import org.moboxlab.moboxbot.API.PluginService;
 
+import java.io.File;
+import java.nio.file.Files;
+
 /**
  * 生图完成与失败提醒
  *
@@ -32,12 +35,42 @@ public class RoleplayDrawNotifyService {
         long groupID = params == null ? 0L : params.getLongValue("groupID");
         long userID = params == null ? 0L : params.getLongValue("userID");
         String prompt = params == null ? "" : service.safe(params.getString("prompt"));
+        archiveGeneratedImage(params);
         String text = generateDrawNotifyText(groupID,userID,prompt,true,"");
         JSONObject result = new JSONObject(true);
         result.put("status",true);
         result.put("text",text);
         result.put("message",text);
         return result;
+    }
+
+    private void archiveGeneratedImage(JSONObject params) {
+        if (!service.config().workspaceEnable) return;
+        String imageFile = params == null ? "" : service.safe(params.getString("imageFile")).trim();
+        if (imageFile.isEmpty()) return;
+        try {
+            File source = new File(imageFile);
+            if (!source.isFile()) {
+                service.plugin().getLogger().sendWarn("[工作区] 生图归档跳过，文件不存在："
+                        +imageFile);
+                return;
+            }
+            if (source.length() > service.config().workspaceMaxMediaBytes) {
+                service.plugin().getLogger().sendWarn("[工作区] 生图归档跳过，文件超过 "
+                        +service.config().workspaceMaxMediaBytes+" 字节");
+                return;
+            }
+            byte[] bytes = Files.readAllBytes(source.toPath());
+            String mime = service.safe(Files.probeContentType(source.toPath()));
+            String path = "media/generated/comfyui/"+source.getName();
+            JSONObject saved = service.workspaceService().importImage(path,bytes,mime,
+                    "comfyui:"+service.safe(params.getString("messageID")),false);
+            service.plugin().getLogger().sendInfo("[工作区] 生图已归档 "
+                    +saved.getString("path"));
+        } catch (Exception e) {
+            service.plugin().getLogger().sendWarn("[工作区] 生图归档失败："
+                    +service.safe(e.getMessage()));
+        }
     }
 
     public JSONObject sendDrawNotify(JSONObject params) {

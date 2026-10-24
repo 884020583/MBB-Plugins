@@ -363,6 +363,73 @@ public class RoleplayKnowledgeService {
         return result;
     }
 
+    /**
+     * 工具检索结果：保留小节正文，供角色直接回答事实问题时引用。
+     */
+    public JSONArray toolResults(String query,String libraryID,int limit,int maxChars) {
+        JSONArray result = new JSONArray();
+        if (query == null || query.trim().isEmpty()) return result;
+        int used = 0;
+        int max = Math.max(1,Math.min(20,limit));
+        List<ToolMatch> candidates = new ArrayList<>();
+        for (RoleplayKnowledgeLibrary library : enabledLibraries()) {
+            if (libraryID != null && !libraryID.trim().isEmpty()
+                    && !libraryID.trim().equals(library.id)) continue;
+            List<Match> matches = retrieve(library,query,max);
+            for (Match match : matches) {
+                candidates.add(new ToolMatch(library,match));
+            }
+        }
+        Collections.sort(candidates,new Comparator<ToolMatch>() {
+            @Override
+            public int compare(ToolMatch left,ToolMatch right) {
+                if (left.match.locked != right.match.locked) {
+                    return left.match.locked ? -1 : 1;
+                }
+                int score = Double.compare(right.match.score,left.match.score);
+                if (score != 0) return score;
+                return right.library.priority - left.library.priority;
+            }
+        });
+        for (ToolMatch candidate : candidates) {
+            RoleplayKnowledgeLibrary library = candidate.library;
+            Match match = candidate.match;
+            JSONObject item = new JSONObject(true);
+            item.put("library",library.id);
+            item.put("libraryName",library.name);
+            item.put("entry",match.entry.name);
+            item.put("id",match.entry.id);
+            item.put("summary",match.entry.summary);
+            item.put("school",match.entry.school);
+            item.put("club",match.entry.club);
+            item.put("source",match.entry.source);
+            item.put("locked",match.locked);
+            JSONArray sections = new JSONArray();
+            if (match.sections.isEmpty() && !match.entry.summary.isEmpty()) {
+                JSONObject section = new JSONObject(true);
+                section.put("title","摘要");
+                section.put("text",shortText(match.entry.summary,500));
+                sections.add(section);
+            }
+            for (ScoredSection scored : match.sections) {
+                if (used >= maxChars) break;
+                String text = flatten(scored.section.text);
+                if (text.isEmpty()) continue;
+                int remain = maxChars - used;
+                if (remain <= 80) break;
+                JSONObject section = new JSONObject(true);
+                section.put("title",scored.section.title);
+                section.put("text",shortText(text,Math.min(1600,remain)));
+                sections.add(section);
+                used += section.getString("text").length();
+            }
+            if (!sections.isEmpty()) item.put("sections",sections);
+            result.add(item);
+            if (result.size() >= max || used >= maxChars) break;
+        }
+        return result;
+    }
+
     public JSONObject stats() {
         JSONObject result = new JSONObject(true);
         result.put("enabled",config.knowledgeEnable);
@@ -600,13 +667,17 @@ public class RoleplayKnowledgeService {
         if (queryBigrams.isEmpty()) return result;
         int totalSections = Math.max(1,library.sectionCount());
         for (RoleplayKnowledgeEntry entry : library.entries) {
-            if (entry.spoiler > config.knowledgeSpoilerLevel) continue;
             boolean locked = entry.matchesEntity(normalizedQuery);
+            //明确点名角色时可以锁定高剧透条目，但下面仍会过滤剧情类小节
+            if (entry.spoiler > config.knowledgeSpoilerLevel && !locked) continue;
             List<ScoredSection> scoredSections = new ArrayList<>();
             for (RoleplayKnowledgeEntry.Section section : entry.sections) {
+                if (entry.spoiler > config.knowledgeSpoilerLevel && isSpoilerSection(section)) {
+                    continue;
+                }
                 double score = sectionScore(section,queryBigrams,totalSections,library)
                         + entryBoost(entry,section,normalizedQuery);
-                if (score < config.knowledgeMinScore) continue;
+                if (score < config.knowledgeMinScore && !locked) continue;
                 scoredSections.add(new ScoredSection(section,score));
             }
             //命中实体但没有任何小节达标时，只注入摘要，至少让角色知道这是谁
@@ -651,6 +722,12 @@ public class RoleplayKnowledgeService {
         });
         if (result.size() > limit) return new ArrayList<>(result.subList(0,limit));
         return result;
+    }
+
+    private boolean isSpoilerSection(RoleplayKnowledgeEntry.Section section) {
+        String title = section == null ? "" : section.title;
+        return title.contains("剧情") || title.contains("剧透")
+                || title.contains("主线") || title.contains("结局");
     }
 
     private double sectionScore(RoleplayKnowledgeEntry.Section section,Set<String> queryBigrams,
@@ -752,6 +829,16 @@ public class RoleplayKnowledgeService {
             this.sections = sections;
             this.score = score;
             this.locked = locked;
+        }
+    }
+
+    private static class ToolMatch {
+        private final RoleplayKnowledgeLibrary library;
+        private final Match match;
+
+        private ToolMatch(RoleplayKnowledgeLibrary library,Match match) {
+            this.library = library;
+            this.match = match;
         }
     }
 }
