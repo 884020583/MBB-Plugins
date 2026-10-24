@@ -16,6 +16,7 @@ MoBoxBot 角色扮演插件。插件读取 persona 文件，让角色以普通�
 | 资料与提示词 | persona、台词语料、知识库、提示词缓存前缀 | [回复架构](../docs/roleplay/architecture.md) / [技能与集成](../docs/roleplay/integrations.md) |
 | 技能与外部插件 | 提醒、识图、表情包、ComfyUI 生图、戳回去 | [技能与集成](../docs/roleplay/integrations.md) |
 | 工具与工作区 | 原生 tools/tool_calls、QQ 工具、表情包主动收藏、图片导入与媒体索引、结构化笔记、草稿归档、私有文件读写、工具期间新消息并入、连续消息节拍 | [工具与工作区](../docs/roleplay/tools.md) |
+| 待办与时间 | 用户待办、角色自身待办、完成与延后、提醒联动、时区时间计算 | [工具与工作区](../docs/roleplay/tools.md) |
 | 多角色部署 | 其他角色机器人 QQ、接话概率、连续往返限制、名称识别 | [多角色部署](../docs/roleplay/multi-role.md) |
 | 免打扰 | 群员自助加入名单，角色不再主动搭话，只回应主动叫到自己的消息 | [命令](../docs/roleplay/commands.md) |
 | 命令与配置 | 全部管理命令、配置项、默认性能、构建和升级 | [命令](../docs/roleplay/commands.md) / [配置与部署](../docs/roleplay/configuration.md) |

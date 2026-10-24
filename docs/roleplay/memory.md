@@ -18,6 +18,8 @@
 命中的印象作为 `member.profile` 资料常驻注入（优先级 88，字符上限 600），排在长期记忆之前，
 因为它是当前发言者专属的。`/role member [QQ]` 可以查看，`/role member clear <QQ>` 清空。
 这份数据也会一起进 `/role memory backup` 的快照，恢复时一并还原。
+用户明确纠正自己的称呼、喜好或相处边界时，角色可以通过 `profile_update` 修订这份档案；
+普通群员只能修改自己的档案，指定其他 QQ 仅 owner 可用。
 
 群级短期情绪包含心情、精力和耐心，会随时间回落到角色人格基线。每个 persona 可以在 `emotionBaseline` 中配置自己的基线；未配置时使用通用默认值。
 

@@ -53,6 +53,8 @@ public class RoleplayService {
 
     private final Plugin plugin;
     private final RoleplayReminderService reminderService;
+    private final RoleplayTimeService timeService;
+    private final RoleplayTodoService todoService;
     private final RoleplayGlobalMemoryService globalMemoryService;
     private final RoleplaySpeechCorpusService speechCorpusService;
     private final RoleplayKnowledgeService knowledgeService;
@@ -279,6 +281,8 @@ public class RoleplayService {
         this.config = config;
         this.persona = persona;
         this.reminderService = new RoleplayReminderService(plugin,config,persona,this);
+        this.timeService = new RoleplayTimeService(config);
+        this.todoService = new RoleplayTodoService(plugin,this,reminderService,timeService);
         this.globalMemoryService = new RoleplayGlobalMemoryService(plugin,config,this);
         this.speechCorpusService = new RoleplaySpeechCorpusService(plugin,config);
         this.knowledgeService = new RoleplayKnowledgeService(plugin,config);
@@ -340,6 +344,7 @@ public class RoleplayService {
     public void init() {
         schemaService.initSchema();
         reminderService.init();
+        todoService.init();
         globalMemoryService.init();
         speechCorpusService.init();
         knowledgeService.init();
@@ -366,6 +371,7 @@ public class RoleplayService {
         this.config = config;
         this.persona = persona;
         reminderService.reload(config,persona);
+        timeService.reload(config);
         globalMemoryService.reload(config);
         speechCorpusService.reload(config);
         knowledgeService.reload(config);
@@ -769,6 +775,14 @@ public class RoleplayService {
 
     public RoleplayMemberService getMemberService() {
         return memberService;
+    }
+
+    RoleplayTodoService todoService() {
+        return todoService;
+    }
+
+    RoleplayTimeService timeService() {
+        return timeService;
     }
 
     public RoleplayDrawPromptService getDrawPromptService() {

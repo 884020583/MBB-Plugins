@@ -426,6 +426,60 @@ public class RoleplayWorkspaceService {
         return result;
     }
 
+    public JSONObject structuredSearch(String path,String query,String kind,JSONArray tags,
+                                       int maxResults,int days) throws Exception {
+        File start = resolve(path,true);
+        rejectInternalNamespace(start);
+        if (!start.exists()) throw new IllegalArgumentException("路径不存在");
+        int limit = Math.max(1,Math.min(100,maxResults <= 0 ? 20 : maxResults));
+        String filter = normalizeWorkspaceKind(kind);
+        String needle = serviceSafe(query).trim().toLowerCase(Locale.ROOT);
+        List<String> wantedTags = tagList(tags);
+        long cutoff = days > 0 ? System.currentTimeMillis() - days * 86400000L : 0L;
+        List<File> files = new ArrayList<>();
+        collectFiles(start,files,5000);
+        List<JSONObject> items = new ArrayList<>();
+        for (File file : files) {
+            if (isInternalNamespace(file) || !file.isFile()) continue;
+            if (cutoff > 0 && file.lastModified() < cutoff) continue;
+            String fileKind = workspaceKind(file);
+            if (!kindMatches(filter,fileKind)) continue;
+            String text = isTextKind(fileKind) ? readText(file,4000) : "";
+            String title = title(file,text);
+            JSONArray fileTags = tags(text);
+            if (!wantedTags.isEmpty() && !containsAny(fileTags,wantedTags)) continue;
+            if (!needle.isEmpty()
+                    && !file.getName().toLowerCase(Locale.ROOT).contains(needle)
+                    && !title.toLowerCase(Locale.ROOT).contains(needle)
+                    && !text.toLowerCase(Locale.ROOT).contains(needle)) continue;
+            JSONObject item = new JSONObject(true);
+            item.put("path",relative(file));
+            item.put("kind",fileKind);
+            item.put("title",title);
+            item.put("tags",fileTags);
+            item.put("size",file.length());
+            item.put("updateTime",file.lastModified());
+            item.put("snippet",snippet(text,needle));
+            items.add(item);
+        }
+        items.sort((left,right) -> Long.compare(
+                right.getLongValue("updateTime"),left.getLongValue("updateTime")));
+        JSONArray resultItems = new JSONArray();
+        for (int i = 0; i < items.size() && i < limit; i++) resultItems.add(items.get(i));
+        JSONObject result = new JSONObject(true);
+        result.put("path",relative(start));
+        result.put("query",serviceSafe(query));
+        result.put("kind",filter);
+        result.put("tags",tags == null ? new JSONArray() : tags);
+        result.put("items",resultItems);
+        result.put("truncated",items.size() > resultItems.size());
+        return result;
+    }
+
+    public JSONObject recent(String path,String kind,int maxResults,int days) throws Exception {
+        return structuredSearch(path,"",kind,null,maxResults,days);
+    }
+
     private void writeBytes(File target,byte[] bytes,boolean overwrite) throws Exception {
         File parent = target.getParentFile();
         if (parent == null) throw new IllegalArgumentException("目标路径无效");
@@ -452,6 +506,125 @@ public class RoleplayWorkspaceService {
         } finally {
             Files.deleteIfExists(temp);
         }
+    }
+
+    private String normalizeWorkspaceKind(String kind) {
+        String value = serviceSafe(kind).trim().toLowerCase(Locale.ROOT);
+        if ("text".equals(value) || "note".equals(value) || "journal".equals(value)
+                || "person".equals(value) || "idea".equals(value)
+                || "reference".equals(value) || "draft".equals(value)
+                || "image".equals(value) || "audio".equals(value)
+                || "video".equals(value)) return value;
+        return "all";
+    }
+
+    private boolean kindMatches(String filter,String kind) {
+        if ("all".equals(filter) || filter.equals(kind)) return true;
+        if ("text".equals(filter)) return isTextKind(kind);
+        if ("note".equals(filter)) {
+            return "journal".equals(kind) || "person".equals(kind)
+                    || "idea".equals(kind) || "reference".equals(kind)
+                    || "note".equals(kind);
+        }
+        return false;
+    }
+
+    private String workspaceKind(File file) throws Exception {
+        String path = relative(file);
+        if (path.startsWith("notes/journal/")) return "journal";
+        if (path.startsWith("notes/people/")) return "person";
+        if (path.startsWith("notes/ideas/")) return "idea";
+        if (path.startsWith("notes/references/")) return "reference";
+        if (path.startsWith("drafts/")) return "draft";
+        String media = mediaType(extension(file.getName()));
+        if (!media.isEmpty()) return media;
+        if (isTextExtension(extension(file.getName()))) return "note";
+        return "other";
+    }
+
+    private boolean isTextKind(String kind) {
+        return "note".equals(kind) || "journal".equals(kind)
+                || "person".equals(kind) || "idea".equals(kind)
+                || "reference".equals(kind) || "draft".equals(kind);
+    }
+
+    private boolean isTextExtension(String extension) {
+        String value = serviceSafe(extension).toLowerCase(Locale.ROOT);
+        return "md".equals(value) || "txt".equals(value) || "json".equals(value)
+                || "yml".equals(value) || "yaml".equals(value) || "log".equals(value);
+    }
+
+    private String readText(File file,int maxChars) {
+        try {
+            if (file.length() > Math.max(maxChars * 4L,config.workspaceMaxReadChars * 4L)) return "";
+            String text = new String(Files.readAllBytes(file.toPath()),StandardCharsets.UTF_8);
+            return text.length() > maxChars ? text.substring(0,maxChars) : text;
+        } catch (Exception e) {
+            return "";
+        }
+    }
+
+    private String title(File file,String text) {
+        String[] lines = serviceSafe(text).split("\\n",-1);
+        for (String line : lines) {
+            String value = line.trim();
+            if (value.startsWith("# ")) {
+                return value.substring(2).trim();
+            }
+            if (value.startsWith("## ")) {
+                return value.substring(3).trim();
+            }
+        }
+        String name = file.getName();
+        int dot = name.lastIndexOf('.');
+        return dot > 0 ? name.substring(0,dot) : name;
+    }
+
+    private JSONArray tags(String text) {
+        JSONArray result = new JSONArray();
+        String[] lines = serviceSafe(text).split("\\n",-1);
+        for (String line : lines) {
+            String value = line.trim();
+            if (!value.startsWith("- 标签：")) continue;
+            value = value.substring("- 标签：".length()).trim();
+            for (String item : value.split("[,，]")) {
+                String tag = item.trim();
+                if (!tag.isEmpty() && !result.contains(tag)) result.add(tag);
+            }
+        }
+        return result;
+    }
+
+    private boolean containsAny(JSONArray actual,List<String> wanted) {
+        for (String tag : wanted) {
+            if (actual.contains(tag)) return true;
+        }
+        return false;
+    }
+
+    private List<String> tagList(JSONArray tags) {
+        List<String> result = new ArrayList<>();
+        if (tags == null) return result;
+        for (Object object : tags) {
+            String value = serviceSafe(String.valueOf(object)).trim();
+            if (!value.isEmpty() && !result.contains(value)) result.add(value);
+        }
+        return result;
+    }
+
+    private String snippet(String text,String needle) {
+        String value = serviceSafe(text).replaceAll("\\s+"," ").trim();
+        if (value.isEmpty()) return "";
+        if (!needle.isEmpty()) {
+            int index = value.toLowerCase(Locale.ROOT).indexOf(needle);
+            if (index >= 0) {
+                int start = Math.max(0,index - 80);
+                int end = Math.min(value.length(),index + needle.length() + 120);
+                return (start > 0 ? "..." : "")+value.substring(start,end)
+                        +(end < value.length() ? "..." : "");
+            }
+        }
+        return value.length() > 240 ? value.substring(0,240)+"..." : value;
     }
 
     private String generatedMediaName(String prefix,String extension) {

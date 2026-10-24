@@ -38,6 +38,8 @@ tool_search
 | 工具 | 用途 |
 |---|---|
 | `self_state` | 查看回复冷却、工作区、记忆和长度约束 |
+| `time_calc` | 按角色时区计算当前时间、加减时间、时间差和倒计时 |
+| `todo_add` / `todo_list` / `todo_done` / `todo_snooze` | 用户待办、角色自身待办与提醒联动 |
 | `history_search` | 搜索当前群消息流水 |
 | `memory_search` | 按主题检索跨群短期、长期、永久和个人记忆，可选 `userID`，默认当前发言人 |
 | `kb_search` | 检索已启用的知识库，返回条目、小节与正文 |
@@ -46,7 +48,10 @@ tool_search
 | `web_image_send` | 从白名单网页或图片直链读取一张公开图片并发送到当前群 |
 | `sticker_save` | 当前或最近图片适合复用时，主动保存到 MBB-Sticker 表情库 |
 | `profile_get` | 查询群员个人印象 |
-| `workspace_list` / `workspace_read` / `workspace_search` | 查询角色私有工作区 |
+| `profile_update` | 用户明确纠正称呼、喜好或相处边界时更新档案；修改他人档案仅 owner |
+| `workspace_list` / `workspace_read` | 查询角色私有工作区 |
+| `workspace_search` | 按文本、标题、类型、标签和时间范围结构化检索 |
+| `workspace_recent` | 列出最近修改的工作区文件 |
 | `workspace_write` | 创建、覆盖或追加 UTF-8 文本文件 |
 | `workspace_import_image` | 把当前/最近图片或白名单网页图片保存到工作区 |
 | `workspace_media_list` | 列出图片、语音和视频文件及大小、更新时间 |
@@ -60,6 +65,13 @@ tool_search
 `memory_search` 用于补充常驻注入之外的按需回忆。它会同时返回 `shortTerm`、`profile`、
 `longTerm` 和 `global` 四部分，并受 `toolResultMaxChars` 单次预算约束；个人记忆默认查询当前
 发言人，也可以传 `userID` 查询指定群员。该工具在只读检索批次中可和其他查询工具并行执行。
+
+`profile_update` 只用于用户明确纠正自己的称呼、喜好、不喜欢或相处边界；普通群员只能修改
+自己的档案，owner 才能指定其他 QQ。不要根据群昵称猜测身份并直接改写档案。
+
+`todo_add` 默认创建当前用户待办，`scope=self` 创建角色自身待办且仅 owner 可用。带
+`dueTime` 且 `remind=true` 时会调用现有 reminder 创建到点提醒；`todo_done` 会取消关联提醒，
+`todo_snooze` 会同步延后提醒。`time_calc` 支持 `now / add / diff / until`，统一使用角色配置时区。
 
 安装 `MBB-QQ` 后会额外开放 `qq_*` 工具，包括群资料、成员资料、远程历史、
 消息详情、群公告、已读、戳一戳、点赞、表情回应、撤回自己的消息、发送工作区图片/语音、
@@ -216,6 +228,10 @@ JPEG、PNG、GIF、WebP，不允许模型直接传本地绝对路径。默认写
 `workspace_draft_save` 写入 `drafts/<reply|qzone|draw|story|other>/`，文件名带时间戳和短随机后缀，
 正文保留标题、类型、创建时间和标签。MBB-ComfyUI 完成生图时会通过受信任回调把图片自动归档到
 `media/generated/comfyui/`。
+
+`workspace_search` 现在可以不传 `query`，改用 `kind`、`tags`、`days` 组合过滤；`kind` 支持
+`text / note / journal / person / idea / reference / draft / image / audio / video`。
+`workspace_recent` 等价于只按最近修改时间筛选，适合角色快速找回刚写过的笔记、草稿或图片。
 
 适合放进工作区的内容：
 

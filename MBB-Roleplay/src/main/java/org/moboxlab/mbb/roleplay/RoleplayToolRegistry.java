@@ -29,6 +29,11 @@ public class RoleplayToolRegistry {
         this.historySearch = new RoleplayHistorySearchService(service);
         register(new ToolSearchTool());
         register(new SelfStateTool());
+        register(new TimeCalcTool());
+        register(new TodoAddTool());
+        register(new TodoListTool());
+        register(new TodoDoneTool());
+        register(new TodoSnoozeTool());
         register(new HistorySearchTool());
         register(new MemorySearchTool());
         register(new KnowledgeSearchTool());
@@ -36,6 +41,7 @@ public class RoleplayToolRegistry {
         register(new WebSearchTool());
         register(new WebImageSendTool());
         register(new ProfileGetTool());
+        register(new ProfileUpdateTool());
         register(new WorkspaceListTool());
         register(new WorkspaceReadTool());
         register(new WorkspaceWriteTool());
@@ -45,6 +51,7 @@ public class RoleplayToolRegistry {
         register(new WorkspaceDraftSaveTool());
         register(new WorkspaceDeleteTool());
         register(new WorkspaceSearchTool());
+        register(new WorkspaceRecentTool());
         register(new WorkspaceRenameTool());
         register(new WorkspaceCopyTool());
         register(new WorkspaceRestoreTool());
@@ -485,6 +492,204 @@ public class RoleplayToolRegistry {
         }
     }
 
+    private class TimeCalcTool extends BaseTool {
+        @Override
+        public String name() { return "time_calc"; }
+
+        @Override
+        public String description() {
+            return "按角色时区计算当前时间、时间加减、两个时间差和距离目标时间";
+        }
+
+        @Override
+        public String category() { return "utility"; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("operation",property("string","now / add / diff / until"));
+            properties.put("baseTime",property("string","基准时间，省略为当前时间"));
+            properties.put("targetTime",property("string","目标时间，支持 yyyy-MM-dd HH:mm:ss、明天 08:00 等"));
+            properties.put("amount",property("integer","add 操作的数量"));
+            properties.put("unit",property("string","second / minute / hour / day / week，或中文单位"));
+            return functionSchema(name(),description(),properties,new String[]{"operation"});
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            try {
+                JSONObject data = service.timeService().calculate(args.getString("operation"),
+                        args.getString("baseTime"),args.getString("targetTime"),
+                        args.getIntValue("amount"),args.getString("unit"));
+                RoleplayToolResult result = RoleplayToolResult.ok("时间计算完成");
+                result.data = data;
+                return result;
+            } catch (Exception e) {
+                return RoleplayToolResult.failed(e.getMessage());
+            }
+        }
+    }
+
+    private class TodoAddTool extends BaseTool {
+        @Override
+        public String name() { return "todo_add"; }
+
+        @Override
+        public String description() {
+            return "新增用户待办或角色自身待办；有时限时可同时创建提醒";
+        }
+
+        @Override
+        public String category() { return "productivity"; }
+
+        @Override
+        public boolean sideEffect() { return true; }
+
+        @Override
+        public int maxCallsPerTurn() { return 3; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("title",property("string","待办内容"));
+            properties.put("dueTime",property("string","可选截止时间，如 明天 08:00"));
+            properties.put("scope",property("string","user 当前用户待办，self 角色自身待办；默认 user"));
+            properties.put("remind",property("boolean","到点是否创建提醒"));
+            return functionSchema(name(),description(),properties,new String[]{"title"});
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            try {
+                JSONObject data = service.todoService().add(context.groupID,context.userID,
+                        context.userName,args.getString("title"),args.getString("dueTime"),
+                        args.getString("scope"),args.getBooleanValue("remind"));
+                RoleplayToolResult result = RoleplayToolResult.ok("待办已创建");
+                result.data = data;
+                return result;
+            } catch (Exception e) {
+                return RoleplayToolResult.failed(e.getMessage());
+            }
+        }
+    }
+
+    private class TodoListTool extends BaseTool {
+        @Override
+        public String name() { return "todo_list"; }
+
+        @Override
+        public String description() {
+            return "查看当前用户待办、角色自身待办或两者合并列表";
+        }
+
+        @Override
+        public String category() { return "productivity"; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("scope",property("string","all / user / self，默认 all"));
+            properties.put("includeDone",property("boolean","是否包含已完成，默认 false"));
+            properties.put("limit",property("integer","最多返回多少条，1 到 100"));
+            return functionSchema(name(),description(),properties,new String[0]);
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            try {
+                JSONObject data = service.todoService().list(context.groupID,context.userID,
+                        service.isOwner(context.userID),args.getString("scope"),
+                        args.getBooleanValue("includeDone"),args.getIntValue("limit"));
+                JSONArray items = data.getJSONArray("items");
+                RoleplayToolResult result = RoleplayToolResult.ok("待办 "
+                        +(items == null ? 0 : items.size())+" 条");
+                result.data = data;
+                return result;
+            } catch (Exception e) {
+                return RoleplayToolResult.failed(e.getMessage());
+            }
+        }
+    }
+
+    private class TodoDoneTool extends BaseTool {
+        @Override
+        public String name() { return "todo_done"; }
+
+        @Override
+        public String description() { return "把一条待办标记为完成，并取消关联提醒"; }
+
+        @Override
+        public String category() { return "productivity"; }
+
+        @Override
+        public boolean sideEffect() { return true; }
+
+        @Override
+        public int maxCallsPerTurn() { return 3; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("id",property("integer","todo_list 返回的待办 ID"));
+            return functionSchema(name(),description(),properties,new String[]{"id"});
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            try {
+                JSONObject data = service.todoService().done(args.getLongValue("id"),
+                        context.groupID,context.userID,service.isOwner(context.userID));
+                RoleplayToolResult result = RoleplayToolResult.ok("待办已完成");
+                result.data = data;
+                return result;
+            } catch (Exception e) {
+                return RoleplayToolResult.failed(e.getMessage());
+            }
+        }
+    }
+
+    private class TodoSnoozeTool extends BaseTool {
+        @Override
+        public String name() { return "todo_snooze"; }
+
+        @Override
+        public String description() { return "延后一条待办的时间，并同步调整关联提醒"; }
+
+        @Override
+        public String category() { return "productivity"; }
+
+        @Override
+        public boolean sideEffect() { return true; }
+
+        @Override
+        public int maxCallsPerTurn() { return 3; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("id",property("integer","待办 ID"));
+            properties.put("dueTime",property("string","新的截止时间"));
+            properties.put("minutes",property("integer","也可以只延后多少分钟，默认 30"));
+            return functionSchema(name(),description(),properties,new String[]{"id"});
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            try {
+                int minutes = args.containsKey("minutes")
+                        ? args.getIntValue("minutes") : 30;
+                JSONObject data = service.todoService().snooze(args.getLongValue("id"),
+                        context.groupID,context.userID,service.isOwner(context.userID),
+                        args.getString("dueTime"),minutes);
+                RoleplayToolResult result = RoleplayToolResult.ok("待办已延后");
+                result.data = data;
+                return result;
+            } catch (Exception e) {
+                return RoleplayToolResult.failed(e.getMessage());
+            }
+        }
+    }
+
     private class HistorySearchTool extends BaseTool {
         @Override
         public String name() { return "history_search"; }
@@ -892,6 +1097,69 @@ public class RoleplayToolRegistry {
         }
     }
 
+    private class ProfileUpdateTool extends BaseTool {
+        @Override
+        public String name() { return "profile_update"; }
+
+        @Override
+        public String description() {
+            return "用户明确纠正称呼、喜好或相处边界时，更新群员个人档案；改他人档案仅 owner 可用";
+        }
+
+        @Override
+        public String category() { return "memory"; }
+
+        @Override
+        public boolean sideEffect() { return true; }
+
+        @Override
+        public int maxCallsPerTurn() { return 2; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("userID",property("integer","可选目标 QQ，默认当前发言者；改他人仅 owner"));
+            properties.put("alias",property("string","应该怎么称呼这个群员"));
+            properties.put("likes",property("string","明确表达过的喜好"));
+            properties.put("dislikes",property("string","明确表达过的不喜欢"));
+            properties.put("notes",property("string","相处方式或边界"));
+            return functionSchema(name(),description(),properties,new String[0]);
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            try {
+                long targetID = args.getLongValue("userID");
+                if (targetID <= 0) targetID = context.userID;
+                if (targetID != context.userID && !service.isOwner(context.userID)) {
+                    return RoleplayToolResult.failed("只有 owner 可以修改其他群员的档案");
+                }
+                JSONObject member = new JSONObject(true);
+                copyField(args,member,"alias");
+                copyField(args,member,"likes");
+                copyField(args,member,"dislikes");
+                copyField(args,member,"notes");
+                if (member.isEmpty()) return RoleplayToolResult.failed("至少提供一个要更新的档案字段");
+                String userName = targetID == context.userID ? context.userName : "";
+                boolean changed = service.getMemberService().applyAi(
+                        context.groupID,targetID,userName,member);
+                JSONObject profile = service.getMemberService().profile(context.groupID,targetID);
+                RoleplayToolResult result = RoleplayToolResult.ok(changed
+                        ? "群员档案已更新" : "群员档案没有变化");
+                result.data.put("userID",targetID);
+                result.data.put("profile",profile == null ? new JSONObject(true) : profile);
+                return result;
+            } catch (Exception e) {
+                return RoleplayToolResult.failed(e.getMessage());
+            }
+        }
+
+        private void copyField(JSONObject source,JSONObject target,String key) {
+            String value = service.safe(source.getString(key)).trim();
+            if (!value.isEmpty()) target.put(key,value);
+        }
+    }
+
     private class WorkspaceListTool extends BaseTool {
         @Override
         public String name() { return "workspace_list"; }
@@ -1232,7 +1500,9 @@ public class RoleplayToolRegistry {
         public String name() { return "workspace_search"; }
 
         @Override
-        public String description() { return "在角色私有工作区中按普通文本搜索，返回文件路径和行号"; }
+        public String description() {
+            return "按文本、标题、文件类型、标签和时间范围检索角色工作区";
+        }
 
         @Override
         public String category() { return "workspace"; }
@@ -1240,18 +1510,61 @@ public class RoleplayToolRegistry {
         @Override
         public JSONObject schema() {
             JSONObject properties = new JSONObject(true);
-            properties.put("query",property("string","要搜索的文本"));
+            properties.put("query",property("string","可选，搜索文件名、标题或正文"));
             properties.put("path",property("string","相对 data/ 的搜索目录，省略为根目录"));
+            properties.put("kind",property("string","all / text / note / journal / person / idea / reference / draft / image / audio / video"));
+            properties.put("tags",property("array","可选标签数组，匹配任意一个"));
+            properties.put("days",property("integer","可选，只搜索最近多少天"));
             properties.put("maxResults",property("integer","最多返回结果数，1 到 100"));
-            return functionSchema(name(),description(),properties,new String[]{"query"});
+            return functionSchema(name(),description(),properties,new String[0]);
         }
 
         @Override
         public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
             try {
-                RoleplayToolResult result = RoleplayToolResult.ok("已完成工作区搜索");
-                result.data = workspace.search(args.getString("path"),args.getString("query"),
-                        args.getIntValue("maxResults"));
+                JSONObject data = workspace.structuredSearch(args.getString("path"),
+                        args.getString("query"),args.getString("kind"),args.getJSONArray("tags"),
+                        args.getIntValue("maxResults"),args.getIntValue("days"));
+                JSONArray items = data.getJSONArray("items");
+                RoleplayToolResult result = RoleplayToolResult.ok("工作区检索命中 "
+                        +(items == null ? 0 : items.size())+" 个文件");
+                result.data = data;
+                return result;
+            } catch (Exception e) {
+                return RoleplayToolResult.failed(e.getMessage());
+            }
+        }
+    }
+
+    private class WorkspaceRecentTool extends BaseTool {
+        @Override
+        public String name() { return "workspace_recent"; }
+
+        @Override
+        public String description() { return "列出角色工作区最近修改的文件，可按类型和天数筛选"; }
+
+        @Override
+        public String category() { return "workspace"; }
+
+        @Override
+        public JSONObject schema() {
+            JSONObject properties = new JSONObject(true);
+            properties.put("path",property("string","相对 data/ 的目录，省略为根目录"));
+            properties.put("kind",property("string","all / text / note / journal / person / idea / reference / draft / image / audio / video"));
+            properties.put("days",property("integer","只看最近多少天"));
+            properties.put("limit",property("integer","最多返回多少条，1 到 100"));
+            return functionSchema(name(),description(),properties,new String[0]);
+        }
+
+        @Override
+        public RoleplayToolResult execute(RoleplayToolContext context,JSONObject args) {
+            try {
+                JSONObject data = workspace.recent(args.getString("path"),
+                        args.getString("kind"),args.getIntValue("limit"),args.getIntValue("days"));
+                JSONArray items = data.getJSONArray("items");
+                RoleplayToolResult result = RoleplayToolResult.ok("最近文件 "
+                        +(items == null ? 0 : items.size())+" 个");
+                result.data = data;
                 return result;
             } catch (Exception e) {
                 return RoleplayToolResult.failed(e.getMessage());

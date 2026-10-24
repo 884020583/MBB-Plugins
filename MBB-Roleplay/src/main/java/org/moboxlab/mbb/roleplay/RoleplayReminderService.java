@@ -174,6 +174,22 @@ public class RoleplayReminderService {
         return item;
     }
 
+    public JSONObject getPendingForTask(long groupID,long userID,long remindTime,
+                                        String task,String target) {
+        JSONObject row = storage().queryOne(
+                "SELECT `ID`,`target`,`task`,`remindTime` FROM `"+TABLE+"` "
+                        + "WHERE `groupID`=? AND `userID`=? AND `remindTime`=? AND `task`=? "
+                        + "AND `target`=? AND `status`='pending' LIMIT 1",
+                groupID,userID,remindTime,safe(task),safe(target));
+        if (row == null) return null;
+        JSONObject item = new JSONObject(true);
+        item.put("ID",row.getLongValue("ID"));
+        item.put("target",safe(row.getString("target")));
+        item.put("task",safe(row.getString("task")));
+        item.put("remindTime",row.getLongValue("remindTime"));
+        return item;
+    }
+
     public boolean update(long id,long groupID,long userID,long remindTime,String task) {
         JSONObject row = getPending(id,groupID,userID);
         if (row == null || remindTime <= System.currentTimeMillis() || safe(task).trim().isEmpty()) {
