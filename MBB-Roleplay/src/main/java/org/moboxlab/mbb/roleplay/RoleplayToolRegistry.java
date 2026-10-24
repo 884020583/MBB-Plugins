@@ -172,6 +172,30 @@ public class RoleplayToolRegistry {
         return builder.toString();
     }
 
+    /**
+     * 给系统提示词用的紧凑能力索引。只列工具名，不展开 schema，
+     * 让角色知道自己能做什么，同时保留 tool_search 的按需参数查询。
+     */
+    public String capabilityIndexText(RoleplayConfig config) {
+        Map<String,List<String>> names = new LinkedHashMap<>();
+        for (RoleplayTool tool : tools.values()) {
+            if (!enabled(tool,config)) continue;
+            String category = tool.category() == null ? "general" : tool.category();
+            List<String> items = names.get(category);
+            if (items == null) {
+                items = new java.util.ArrayList<>();
+                names.put(category,items);
+            }
+            items.add(tool.name());
+        }
+        StringBuilder builder = new StringBuilder();
+        for (Map.Entry<String,List<String>> entry : names.entrySet()) {
+            builder.append("- ").append(entry.getKey()).append("：")
+                    .append(String.join("、",entry.getValue())).append("\n");
+        }
+        return builder.toString();
+    }
+
     public JSONObject selfTest(RoleplayConfig config) {
         JSONArray issues = new JSONArray();
         int checked = 0;
@@ -405,7 +429,7 @@ public class RoleplayToolRegistry {
 
         @Override
         public String description() {
-            return "按当前任务搜索并加载可用工具；返回工具名、分类和用途，下一轮即可调用";
+            return "查询工具参数或发现不确定的能力；已知工具名可直接调用，无需先搜索";
         }
 
         @Override

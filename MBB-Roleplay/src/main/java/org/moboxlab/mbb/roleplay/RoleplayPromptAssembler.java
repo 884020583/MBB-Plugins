@@ -158,8 +158,8 @@ public class RoleplayPromptAssembler {
 
     private String toolPolicyText() {
         if (!service.config().toolEnable) return "";
-        String catalogue = service.toolLoopService().registry()
-                .categoryCatalogue(service.config());
+        String capabilityIndex = service.toolLoopService().registry()
+                .capabilityIndexText(service.config());
         String stickerRule = "";
         if (service.toolLoopService().registry().isEnabled("sticker",service.config())) {
             int chance = (int)Math.round(service.config().stickerSendChance * 100);
@@ -170,18 +170,22 @@ public class RoleplayPromptAssembler {
                     +"需要长期保存原始素材时可用 workspace_import_image 归入私人素材库；"
                     +"普通聊天截图、隐私内容和一次性图片不要收藏。";
         }
-        return "工具协议说明：这是能力说明，不是当前聊天内容。可用能力分类：\n"+catalogue
-                +"分类含义：core 是基础回合工具，retrieval 查历史/记忆/知识库，"
-                +"web 用于联网搜索、网页正文和网页图片发送，workspace 维护角色私有文件，"
-                +"action 包含生图、提醒、记忆写入、表情包和戳回去，"
-                +"qq 包含群资料、历史消息、互动、媒体发送和 Qzone。"
-                +"首轮只开放核心工具。需要历史、记忆、知识库、网页、工作区、生图、提醒等能力时，"
-                +"先调用 tool_search 搜索并加载对应工具。工具结果会保留在当前回合，可以连续多轮调用；"
+        return "工具协议说明：这是能力说明，不是当前聊天内容。当前可用工具：\n"+capabilityIndex
+                +"工具按需装载。你已经知道工具名时可以直接调用，循环会自动装载；"
+                +"只有不确定工具名或需要查看参数时再用 tool_search。工具结果会保留在当前回合，可以连续多轮调用。"
+                +"主动性原则：不要只在用户明确说“搜索、计算、记录、查一下”时才用工具；"
+                +"当事实需要查证、时间需要精确计算、旧资料需要找回、任务需要持续跟踪、"
+                +"图片/素材值得保存，或 QQ 管理能力更可靠时，应主动使用对应工具，不要凭记忆猜。"
+                +"只读检索可以更主动；发消息、退群、禁言、发布内容等副作用工具必须确认当前意图和权限，"
+                +"不要因为工具存在就强行使用或重复调用。"
                 +"常驻记忆只是当前相关摘要，需要额外查找更早的短期、长期、永久或某位群员的个人记忆时，"
                 +"用 memory_search 按主题主动检索。"
                 +"用户明确纠正自己的称呼、喜好或相处边界时，用 profile_update 更新个人档案；"
                 +"不要仅凭群昵称猜测本人身份。需要记录待办或延后任务时使用 todo_add、todo_list、"
                 +"todo_done、todo_snooze；日期与倒计时计算优先使用 time_calc。"
+                +"典型主动场景：问近期事件或需要核对公开事实时主动 web_search；"
+                +"需要找以前写过的笔记、草稿或图片时主动 workspace_search/workspace_recent；"
+                +"群员提到容易忘的任务时主动 todo_add；用户纠正人物信息时主动 profile_update。"
                 +stickerRule
                 +"联网搜索前先由你自己把用户原句改写成检索关键词，不要把整句聊天直接拿去搜索；"
                 +"优先使用作品、人物、站点的官方英文名与常用英文别名，并自行补充时间、版本或 CVE 等限定词；"
