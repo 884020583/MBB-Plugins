@@ -3,13 +3,13 @@
 MoBoxBot 的离线评测与回归基线插件：用固定题库对 MBB-AI 做可重复的自动评测，由 LLM 判分并与基线对比。评测只在命令触发或后台调度时运行，**不参与线上对话回复**。
 
 - 规格：[docs/MBB-Eval.md](../docs/MBB-Eval.md)
-- 规格票：#50；本片实施票：#51（A-1 插件骨架与构建接入）
+- 规格票：#50；实施票：#51（A-1 插件骨架与构建接入）、#53（A-2 四表建表、索引与 run_id/CAS 骨架）
 
 ## 当前阶段
 
-A-1 骨架阶段：插件可构建、可被主程序加载、可读取并钳制配置。尚未注册 `/eval` 命令，也不含题库加载、判分、报表与基线逻辑，这些由后续切片按规格 §16.2 接入。
+A-2 存储骨架阶段：插件可构建、可被主程序加载、可读取并钳制配置；启用时幂等创建四张数据表与七个索引，并对老库只补列、不删除不重建。尚未注册 `/eval` 命令，也不含题库加载、判分、报表与基线逻辑，这些由后续切片按规格 §16.2 接入。
 
-当前版本：`V0.1.0.0.0334`（apiVersion `0.3`）。
+当前版本：`V0.1.0.0.0405`（apiVersion `0.3`）。
 
 ## 配置
 
@@ -37,6 +37,17 @@ A-1 骨架阶段：插件可构建、可被主程序加载、可读取并钳制�
 | `evalAllowPersonaMismatch` | `false` | `true` / `false` | 题库 persona 与 `capabilities.personaHash` 不一致时降级为告警试跑 |
 | `evalProfile` | 空 | 非空时作为评测生成的默认 profile | 为空时使用 `capabilities` 返回的 `aiProfile` |
 | `evalJudgeProfile` | 空 | 空则回退 `evalProfile`，再为空回退 `capabilities.aiProfile` | judge 档案；为空时报告须标注「同家族 judge，分数仅作趋势」 |
+
+## 数据表
+
+插件启用时经主程序 `StorageService` 幂等执行建表与建索引（规格 §4.2、§4.6）：
+
+- `plugin_mbb_eval_run`：评测运行主记录（run_id、档位、状态、快照、调用预算等）；索引 `idx_eval_run_started`、`idx_eval_run_status`。
+- `plugin_mbb_eval_case_result`：用例结果；唯一索引 `idx_eval_case_uniq(run_id, case_id)`，检索索引 `idx_eval_case_dim`。
+- `plugin_mbb_eval_call`：单次生成与判分调用记录；索引 `idx_eval_call_run`、`idx_eval_call_stage`。
+- `plugin_mbb_eval_baseline`：回归基线；唯一索引 `idx_eval_baseline_active(active) WHERE active = 1`。
+
+建表、补列或建索引失败时记 ERROR 并禁用评测写路径（`/eval report` 等只读命令仍可用），绝不 DROP 或重建已有表；后续版本新增列先用 `PRAGMA table_info` 读现有列，确认缺列再 `ALTER TABLE ADD COLUMN`。
 
 ## 命令与权限（规划）
 
@@ -69,4 +80,4 @@ MBB-Eval 经 `capabilities` / `eval-generate` 调用 MBB-Roleplay 的评测接�
 
 ## 数据目录
 
-插件数据目录由框架提供（`getDataFolder()`）。按规格，报表固定写入 `./MoBoxBot/plugins/MBB-Eval/reports/`，题库文件位于 `./MoBoxBot/plugins/MBB-Roleplay/evals/`；当前骨架阶段不建表、不落盘。
+插件数据目录由框架提供（`getDataFolder()`）。按规格，报表固定写入 `./MoBoxBot/plugins/MBB-Eval/reports/`，题库文件位于 `./MoBoxBot/plugins/MBB-Roleplay/evals/`；数据表落在主程序数据库，由 `StorageService` 管理。当前存储骨架阶段只建表与索引，不写评测数据、不生成报表。

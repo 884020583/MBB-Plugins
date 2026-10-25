@@ -20,7 +20,8 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
-| V0.1.0.0.0334 | 2026-10-26 | 新增 `MBB-Eval` 插件骨架（A-1，issue #51）：新增独立插件目录与构建脚本，`build-all.ps1` 可自动发现并产出合规 JAR；新增主类空壳与 `plugin.json`（`provides=eval`，`softDepend` 为 MBB-Roleplay / MBB-AI），落地 `evalCallBudget` 等 14 个配置键的读取、默认值与越界钳制。本片只交付可构建、可加载、配置可读的骨架，尚未注册 `/eval` 命令。 |
+| V0.1.0.0.0405 | 2026-10-26 | A-2（issue #53）：启用时幂等创建 `plugin_mbb_eval_run` / `plugin_mbb_eval_case_result` / `plugin_mbb_eval_call` / `plugin_mbb_eval_baseline` 四张表与 7 个 `idx_eval_*` 索引；老库先经 `PRAGMA table_info` 判断再补列，规格外多余列只告警，不删除、不重建；建表/补列/建索引失败记 ERROR 并禁用评测写路径。新增 `run_id`（`r-<yyyyMMddHHmmss>-<smoke 或 full>-<4 位随机>`）生成（本地格式校验 + 查库避重）与 COMPLETED / FAILED / ABORTED 终态 CAS 骨架。未注册 `/eval` 命令，题库、判分、报表与基线由后续切片按规格 §16.2 接入。 |
+| V0.1.0.0.0334 | 2026-10-26 | 新增 `MBB-Eval` 插件骨架（A-1，issue #51）：新增独立插件目录与构建脚本，`build-all.ps1` 可自动发现并产出合规 JAR；新增主类空壳与 `plugin.json`（`provides=eval`，`softDepend` 为 MBB-Roleplay / MBB-AI），落地 `evalCallBudget` 等 14 个配置键的读取、默认值与越界钳制。未注册 `/eval` 命令。 |
 | V0.13.0.2.1535 | 2026-10-25 | 修复 `MBB-Roleplay` 的 `pokeStreakWindowSecond` 与 `pokeStreakThreshold` 配置项从未生效：配置加载时补上读取，窗口按 `10` 到 `3600` 秒、阈值按 `2` 到 `20` 次钳位，默认仍为 `60` 秒 / `3` 次；`docs/roleplay/configuration.md` 与 `docs/roleplay/integrations.md` 补充取值范围、钳位与生效说明。 |
 | V0.13.0.1.0718 | 2026-10-25 | 修复 `MBB-Roleplay` 的 `turnThreads` 配置项从未生效：配置加载时补上读取并按 `1` 到 `16` 钳位，默认仍为 `4`；`docs/roleplay/configuration.md` 补充取值范围与钳位说明。 |
 | V0.13.0.0.0831 | 2026-10-24 | `MBB-Roleplay` 新增 `todo_add / todo_list / todo_done / todo_snooze`：待办落 SQLite，支持用户待办与 owner-only 角色自身待办，可关联 reminder 并在完成/延后时同步处理提醒。`workspace_search` 升级为按正文、标题、kind、tags 和 days 的结构化检索，新增 `workspace_recent`。新增 `time_calc`，支持 now/add/diff/until 和角色时区。新增 `profile_update`，普通群员只能修订自己的称呼、喜好和相处边界，owner 才能修改他人档案。 |
