@@ -566,6 +566,8 @@ public class RoleplayConfig {
         config.pokeBackEnable = plugin.getConfig().getBoolean("pokeBackEnable",true);
         config.pokeReplyMaxChars = plugin.getConfig().getInt("pokeReplyMaxChars",20);
         config.pokeBackCooldownSecond = plugin.getConfig().getInt("pokeBackCooldownSecond",60);
+        config.pokeStreakWindowSecond = plugin.getConfig().getInt("pokeStreakWindowSecond",60);
+        config.pokeStreakThreshold = plugin.getConfig().getInt("pokeStreakThreshold",3);
         config.quoteReplyEnable = plugin.getConfig().getBoolean("quoteReplyEnable",true);
         config.promptTotalChars = plugin.getConfig().getInt("promptTotalChars",120000);
         config.routerEnable = plugin.getConfig().getBoolean("routerEnable",true);
@@ -980,6 +982,10 @@ public class RoleplayConfig {
         if (config.turnThreads > 16) config.turnThreads = 16;
         if (config.pokeBackCooldownSecond < 0) config.pokeBackCooldownSecond = 0;
         if (config.pokeBackCooldownSecond > 3600) config.pokeBackCooldownSecond = 3600;
+        if (config.pokeStreakWindowSecond < 10) config.pokeStreakWindowSecond = 10;
+        if (config.pokeStreakWindowSecond > 3600) config.pokeStreakWindowSecond = 3600;
+        if (config.pokeStreakThreshold < 2) config.pokeStreakThreshold = 2;
+        if (config.pokeStreakThreshold > 20) config.pokeStreakThreshold = 20;
         if (config.promptTotalChars < 4000) config.promptTotalChars = 4000;
         if (config.promptTotalChars > 400000) config.promptTotalChars = 400000;
         if (config.routerProfile == null) config.routerProfile = "";

@@ -245,9 +245,9 @@ pokeBackEnable: true
 pokeReplyMaxChars: 20
 #对同一用户戳回去的最小间隔秒数
 pokeBackCooldownSecond: 60
-#连续戳一戳的统计窗口秒数，窗口内超过阈值才算骚扰
+#连续戳一戳的统计窗口秒数，范围 10 到 3600，超出会被钳位，窗口内达到阈值次数才算骚扰
 pokeStreakWindowSecond: 60
-#窗口内戳几次开始算骚扰，达到后才会涨厌烦
+#窗口内戳几次开始算骚扰，范围 2 到 20，超出会被钳位，达到阈值即判定骚扰
 pokeStreakThreshold: 3
 #最多加载多少条长期记忆
 maxLongMemories: 150

@@ -113,8 +113,8 @@ pokeReplyEnable: true       #是否响应戳一戳
 pokeBackEnable: true        #是否允许戳回去
 pokeReplyMaxChars: 20       #戳一戳回复单条短消息的最大字符数
 pokeBackCooldownSecond: 60  #对同一用户戳回去的最小间隔
-pokeStreakWindowSecond: 60  #连续戳一戳的统计窗口
-pokeStreakThreshold: 3      #窗口内戳几次开始算骚扰
+pokeStreakWindowSecond: 60  #连续戳一戳的统计窗口，范围 10 到 3600，超出被钳位
+pokeStreakThreshold: 3      #窗口内戳几次开始算骚扰，范围 2 到 20，超出被钳位
 ```
 
 戳一戳的正文使用专用发送路径，只发送一条消息，不参与普通回复的两段拆分。模型返回较长内容时，插件会优先在句末或弱标点处截断到 `pokeReplyMaxChars`。
@@ -122,6 +122,7 @@ pokeStreakThreshold: 3      #窗口内戳几次开始算骚扰
 戳一戳默认是**主动互动的加分项**：单独戳一下只会小幅提升心情、好感和信任，不会涨厌烦。
 只有在 `pokeStreakWindowSecond` 秒内被同一个人戳到 `pokeStreakThreshold` 次以上，才升级成骚扰事件，
 开始涨厌烦并压低耐心；这一轮也不会再戳回去，角色会用一句短促的话让对方别戳，但不会辱骂或发火。
+两个参数都有范围：窗口 `10` 到 `3600` 秒，阈值 `2` 到 `20` 次，超出会被钳位，不会报错；改完执行 `/role reload` 或重启主程序后生效。
 
 `MBB-Poke` 已经在处理戳一戳，所以本插件检测到它处于启用状态时会自动跳过戳一戳事件，
 避免同一件事回两次。

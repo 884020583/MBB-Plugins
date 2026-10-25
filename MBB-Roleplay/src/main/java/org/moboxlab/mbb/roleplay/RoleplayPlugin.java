@@ -59,6 +59,8 @@ public class RoleplayPlugin extends Plugin {
     }
 
     public void reloadRoleplay() {
+        //重新读盘，保证手工修改 config.yml 后执行重载也能生效
+        getConfig().load();
         int repaired = RoleplayConfigMigrator.ensure(this);
         if (repaired > 0) {
             getLogger().sendInfo("Roleplay 配置重载时自动补全或迁移 "+repaired+" 项。");

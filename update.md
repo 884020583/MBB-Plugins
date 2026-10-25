@@ -20,6 +20,7 @@
 
 | 版本号 | 日期 | 更新内容 |
 |---|---|---|
+| V0.13.0.2.1535 | 2026-10-25 | 修复 `MBB-Roleplay` 的 `pokeStreakWindowSecond` 与 `pokeStreakThreshold` 配置项从未生效：配置加载时补上读取，窗口按 `10` 到 `3600` 秒、阈值按 `2` 到 `20` 次钳位，默认仍为 `60` 秒 / `3` 次；`docs/roleplay/configuration.md` 与 `docs/roleplay/integrations.md` 补充取值范围、钳位与生效说明。 |
 | V0.13.0.1.0718 | 2026-10-25 | 修复 `MBB-Roleplay` 的 `turnThreads` 配置项从未生效：配置加载时补上读取并按 `1` 到 `16` 钳位，默认仍为 `4`；`docs/roleplay/configuration.md` 补充取值范围与钳位说明。 |
 | V0.13.0.0.0831 | 2026-10-24 | `MBB-Roleplay` 新增 `todo_add / todo_list / todo_done / todo_snooze`：待办落 SQLite，支持用户待办与 owner-only 角色自身待办，可关联 reminder 并在完成/延后时同步处理提醒。`workspace_search` 升级为按正文、标题、kind、tags 和 days 的结构化检索，新增 `workspace_recent`。新增 `time_calc`，支持 now/add/diff/until 和角色时区。新增 `profile_update`，普通群员只能修订自己的称呼、喜好和相处边界，owner 才能修改他人档案。 |
 | V0.12.0.0.0757 | 2026-10-24 | `MBB-Roleplay` 扩展 workspace：新增 `workspace_import_image`、`workspace_media_list`、`workspace_note_append`、`workspace_draft_save`，支持当前/最近/白名单网页图片导入、媒体索引、结构化日记与笔记、回复/Qzone/生图/剧情草稿归档；图片导入按文件头验证格式并受 `workspaceMaxMediaBytes` 限制。`MBB-ComfyUI` 完成生图时把输出文件路径回调给 Roleplay，自动归档到 `media/generated/comfyui/`。同时修复生图完成重复回复：draw 提交成功后抑制本轮额外最终正文，只由 ComfyUI 完成回调发送图片和完成提醒。 |
