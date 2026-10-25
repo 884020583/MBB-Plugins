@@ -1,0 +1,18 @@
+{
+  "name": "MBB-Eval",
+  "version": "V0.1.0.0.0334",
+  "apiVersion": "0.3",
+  "main": "org.moboxlab.mbb.eval.EvalPlugin",
+  "author": "MoBoxLab",
+  "description": "MoBoxBot 离线评测与回归基线插件：固定题库 + LLM 判分 + 基线对比，不参与线上对话回复",
+  "website": "",
+  "depend": [],
+  "softDepend": [
+    "MBB-Roleplay",
+    "MBB-AI"
+  ],
+  "loadBefore": [],
+  "provides": [
+    "eval"
+  ]
+}

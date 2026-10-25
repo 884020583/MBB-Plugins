@@ -1,0 +1,19 @@
+#MBB-Eval 插件配置
+#配置读取器按行解析，键名保持原样，不支持 YAML 嵌套
+#键、默认值、取值范围与钳制口径见 docs/MBB-Eval.md §12.1 与插件 README
+#配置在插件启用时读取一次并钳制；v1 不提供热重载，改配置后需重载插件或重启主程序
+
+evalCallBudget: 100
+evalRunDeadlineMinutes: 30
+evalKeepRuns: 30
+evalDefaultTier: smoke
+evalTimeoutSecond: 60
+evalJudgeTimeoutSecond: 60
+evalGenerateRetries: 1
+evalCachedResamples: 3
+evalFailStreakAbort: 3
+evalFailBackoffSeconds: 30
+evalBankFile: ""
+evalAllowPersonaMismatch: false
+evalProfile: ""
+evalJudgeProfile: ""
