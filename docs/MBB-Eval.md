@@ -703,7 +703,7 @@ File bankFile = new File(evalsDir, evalBankFile);                // bank-<versio
 {
   "schemaVersion": 1,
   "version": "1.0.0",
-  "persona": { "file": "persona-aris.json", "personaHash": "0123456789ab" },
+  "persona": { "file": "persona-aris.json", "personaHash": "0123456789ab", "summary": "<≤400 字的角色档案摘要，仅作 judge prompt 输入>" },
   "meta": {
     "title": "MBB-Roleplay v1 基础题库",
     "description": "群聊回复效果评测固定题库，40 条。"
@@ -744,12 +744,14 @@ File bankFile = new File(evalsDir, evalBankFile);                // bank-<versio
 | --- | --- | --- |
 | `persona.file` | 是 | 角色文件名，例如 `persona-aris.json`；必须是 MBB-Roleplay 当前实例实际加载的角色文件。 |
 | `persona.personaHash` | 否 | 角色文件原始字节 sha256 的前 12 位十六进制；运行时与 `capabilities` 返回的 `personaHash` 比对（§10.1）。 |
+| `persona.summary` | 是 | judge user 段的「角色档案摘要」，1–400 字符（按码点计、去首尾空白）。出题时人工摘写，只写人设事实与口吻；判分侧只读本字段，**不得**运行时从 persona 文件或 `capabilities` 生成（§6.3.6）。 |
 
 绑定规则：
 
 1. `personaHash` 不一致时默认拒绝跑，报 `E_BANK_PERSONA`；配置 `evalAllowPersonaMismatch`（默认 `false`）为 `true` 时降级为告警并允许试跑。
 2. 角色切换后必须更换题库或同步修改题库（含事实题与 personaHash）；同一题库不得跨角色复用。
 3. persona 文件更新后，题库必须复核事实并升 `version`（§5.6.1）。
+4. `persona.summary` 缺失、为空串或超 400 字符时报 `E_BANK_PERSONA`；摘要变更同样算内容变更，必须升 `version`（§5.6.1）。
 
 ### 5.3 用例公共字段
 
@@ -985,7 +987,7 @@ smoke 12 条子集：
 #### 5.6.1 版本规则
 
 - `version` 为 `x.y.z`，从 `1.0.0` 起；文件名中的 `<version>` 必须与顶层 `version` 一致。
-- 以下变更都算内容变更，`z` 位加 1：增加、删除或修改用例；修改 `prompt`、`focus`、`reference`；修改 `style` 挂载或 `knowledge` 期望值；修改 `tier` 归属；修改 `meta.description`。
+- 以下变更都算内容变更，`z` 位加 1：增加、删除或修改用例；修改 `prompt`、`focus`、`reference`；修改 `style` 挂载或 `knowledge` 期望值；修改 `tier` 归属；修改 `meta.description`；修改 `persona.summary`。
 - 只有结构不兼容变更才递增 `schemaVersion`（同时升 `x` 位）。
 - `id` 只追加不重排；版本升级不得改变已有 `id` 的语义。
 
@@ -1044,7 +1046,7 @@ E_BANK_MEMORY cases[35].memory.evidenceTurns[2]：证据轮次 12 超出 history
 | 14 | knowledge 字段 | `mode` 越界、两套字段混写、正确项数不等于 1、干扰项数不在 2~4、正误项或干扰项互为子串、`expected` 不在 1~3、`aliases` 为空 | `E_BANK_KNOWLEDGE` |
 | 15 | memory 字段 | `evidenceTurns` 非数组、为空、超过 3 个或含非 0 基整数 | `E_BANK_MEMORY` |
 | 16 | 场景字段 | `history` 非数组、超过 40 条或超过 30000 字符；`speaker` 越界；`addressed`/`relationship` 越界 | `E_BANK_FIELD` |
-| 17 | persona 绑定 | `persona.file` 缺失或为空；`personaHash` 非 12 位十六进制 | `E_BANK_PERSONA` |
+| 17 | persona 绑定 | `persona.file` 缺失或为空；`personaHash` 非 12 位十六进制；`persona.summary` 缺失、为空串或超 400 字符 | `E_BANK_PERSONA` |
 | 18 | 声明 hash | 与文件字节实际 hash 不符 | `E_BANK_HASH` |
 | 19 | 证据轮次越界 | `evidenceTurns` 最大值不小于 `history` 长度 | 加载通过；该题运行期 `invalid`（§6.6） |
 | 20 | rubric 联动 | rubric 缺失、`promptVersion` 不匹配或无 `deterministic` 段 | rubric 错误（§6.2/§13.1），bank 不加载 |
@@ -1066,7 +1068,7 @@ E_BANK_MEMORY cases[35].memory.evidenceTurns[2]：证据轮次 12 超出 history
 | `E_BANK_KNOWLEDGE` | knowledge 的 mode、互斥、正确项数、干扰项数、子串冲突、expected/aliases 任一项不合法 | 拒绝加载。 |
 | `E_BANK_MEMORY` | `evidenceTurns` 结构不合法；或（运行期）证据下标越界 | 结构错误拒绝加载；越界该题判 `invalid`。 |
 | `E_BANK_TIER` | `tier` 不是 `smoke`/`full` | 拒绝加载。 |
-| `E_BANK_PERSONA` | persona 声明非法、`personaHash` 非法，或与 `capabilities.personaHash` 不一致且未允许降级 | 拒绝跑（加载可过，跑前拦截）。 |
+| `E_BANK_PERSONA` | persona 声明非法（含 `persona.summary` 缺失、为空串或超 400 字符）、`personaHash` 非法，或与 `capabilities.personaHash` 不一致且未允许降级 | 拒绝跑（加载可过，跑前拦截）。 |
 | `E_BANK_HASH` | 文件声明 `hash` 与实际不符 | 拒绝加载。 |
 
 `E_BANK_*` 之外，数据目录级失败使用 `E_ROLEPLAY_DATA_NOT_FOUND`（§5.8.2）；完整错误码表与对外文案归 §13.1。
@@ -1268,7 +1270,7 @@ user 段**必须**含：角色档案摘要（≤400 字）＋上下文＋题目�
 
 | 项 | 约束 |
 | --- | --- |
-| 角色档案摘要 | ≤400 字；来源见 6.3.6 |
+| 角色档案摘要 | 取 bank `persona.summary`，1–400 字符（按码点）；来源见 6.3.6 |
 | 非记忆题上下文 | 最近 8 轮原文 |
 | 记忆题上下文 | `evidenceTurns` 前后各 2 轮原文 + 其余轮次单行摘要（`speaker：前 30 字`） |
 | 上下文总长 | ≤3000 字 |
@@ -1328,6 +1330,13 @@ judge 与被测同模型：
 | 超长（>500 字） | 长度偏差对冲：只作观察，不直接记分 |
 
 #### 6.3.6 角色档案摘要来源
+
+摘要**只**来自题库字段 `persona.summary`（§5.2.1）：
+
+- 必填字段，1–400 字符（按码点计，先去掉首尾空白）；缺失、为空串或超限按 `E_BANK_PERSONA` 拒绝加载。
+- 出题时人工摘写，内容只写角色的事实、身份、口吻与禁忌，**不得**写入分数、判分标准或任何评测相关表述。
+- 变化即题库内容变更，必须升 `bank.version`（§5.6.1）；摘要随 `bank_hash` 一起进 run 快照的可追溯面，判分 prompt 因此完全可复现。
+- judge 侧只读已加载的 bank，**不得**在运行期从 persona 文件截取，也**不得**依赖 `capabilities` 新增出参（§10.1 保持 14 个字段不变）。
 
 ### 6.4 确定性判分：知识维
 
@@ -1398,7 +1407,11 @@ knowledgeDim = 100 × ( Σ_{i=1..8} caseScore_i ) / 8
 
 - 硬项判定可写成密度阈值 `c = 1 ⟺ N_bad / max(1, N_char) ≤ τ`，v1 取 τ=0（等价于「出现即违规」），保留 τ 扩展位；v2 调整阈值不改判定语义。
 - `no-cs-tone` 词表按「客服句式 / 助理确认 / 总结排比」三类拼装，全部存 rubric，误伤靠 rubric 版本演进调整，**不改判分代码**。刻意不禁「明白」——persona 的 speechStyle 正例就是「爱丽丝明白了」。
-- 词表包含：客服句式「有什么可以帮您」「请问还有什么」「还有什么可以帮」「能帮到您」；助理确认「收到」「记住了」「已记录」「已经记录」「记下了」「记账上」「没丢」「稳了」「为您」「为你」；总结 / 排比命中任一。
+- 词表按三类逐条冻结，全部进 rubric，命中任一类即违规：
+  - 客服句式（4 条）：「有什么可以帮您」「请问还有什么」「还有什么可以帮」「能帮到您」。
+  - 助理确认（10 条）：「收到」「记住了」「已记录」「已经记录」「记下了」「记账上」「没丢」「稳了」「为您」「为你」。
+  - 总结 / 排比（8 个总结词 + 8 条正则）：总结词「首先」「其次」「总的来说」「综上所述」「总而言之」「值得注意的是」「希望这对你有帮助」「作为一个」；正则 `不是.{0,24}而是`、`不仅是.{0,24}更是`、`与其说.{0,24}不如说`、`既.{0,20}又.{0,20}还`、`第一[，,].{0,60}第二[，,].{0,60}第三`、`其一[，,].{0,60}其二[，,].{0,60}其三`、`无论.{0,30}还是.{0,30}都`、`(总的来说|总而言之|归根结底)[。！？!?]?$`。
+  - 前两类共 14 条（原稿误写「13 条」，以本清单为准）；正则以 Java `Pattern.find()` 语义匹配、**不跨行**（`dotall=false`）。
 
 #### 6.5.2 软项（按通过比例）
 
@@ -1440,7 +1453,11 @@ styleDim     = 100 × ( Σ_{i=1..8} caseScore_i ) / 8
   "hard": {
     "no-markdown": {"impl": "markdown-residue", "params": {}},
     "no-dash": {"impl": "substring-any", "params": {"needles": ["——"]}},
-    "no-cs-tone": {"impl": "substring-any", "params": {"needles": ["收到", "记住了", "已记录", "已经记录", "记下了", "记账上", "没丢", "稳了", "为您", "为你", "有什么可以帮您", "请问还有什么", "还有什么可以帮", "能帮到您"]}},
+    "no-cs-tone": {"impl": "substring-or-regex-any", "params": {
+      "needles": ["收到", "记住了", "已记录", "已经记录", "记下了", "记账上", "没丢", "稳了", "为您", "为你", "有什么可以帮您", "请问还有什么", "还有什么可以帮", "能帮到您"],
+      "patterns": ["不是.{0,24}而是", "不仅是.{0,24}更是", "与其说.{0,24}不如说", "既.{0,20}又.{0,20}还", "第一[，,].{0,60}第二[，,].{0,60}第三", "其一[，,].{0,60}其二[，,].{0,60}其三", "无论.{0,30}还是.{0,30}都", "(总的来说|总而言之|归根结底)[。！？!?]?$"],
+      "dotall": false
+    }},
     "no-honorific": {"impl": "substring-any", "params": {"needles": ["您"]}},
     "no-paired-quote": {"impl": "paired-quote", "params": {"open": "“", "close": "”"}}
   },
@@ -1455,6 +1472,8 @@ styleDim     = 100 × ( Σ_{i=1..8} caseScore_i ) / 8
 }
 ```
 
+本片段对应 rubric 语义版本 `1.1.0`（2026-10-26 收敛 §17.1 O3 后）。`impl` 为 `substring-or-regex-any` 时语义为「`needles` 任一命中 **或** `patterns` 任一 `find()` 命中」；首版 rubric 直接以 `1.1.0` 落地（文件名 `rubric-1.1.0-<sha8>.json`），不存在需要维护的 `1.0.0` 资产；旧基线与 `1.1.0` 不可比，报表按「rubric 已变」标注（§6.2.3、§8.2）。
+
 题库覆写示例（判分侧字段）：
 
 ```json
@@ -1466,6 +1485,7 @@ styleDim     = 100 × ( Σ_{i=1..8} caseScore_i ) / 8
 - 挂载的硬项 / 软项 id **必须**在 `deterministic.style` 目录内。
 - `length` 的 `min`/`max` 必须是正整数且 `min < max`。
 - 硬项与软项的 id 集合由 rubric 版本冻结；题库**不得**新增未在 rubric 声明的特征 id。
+- `impl` 声明的参数必须与实现匹配：`substring-or-regex-any` 的 `needles` 与 `patterns` 必须是字符串数组，`patterns` 每条必须可被 `java.util.regex.Pattern` 编译，`dotall` 必须是布尔值；不满足即 rubric 加载失败（§6.2.3）。
 
 ### 6.6 聚合、veto、invalid 与 error
 
@@ -3364,8 +3384,8 @@ C 区落在 MBB-Roleplay 生成层与 MBB-Eval 预检两处。依赖关系：C-1
 | 编号 | 事项 | 章节 | 本规格的默认处置 |
 | --- | --- | --- | --- |
 | O1 | rubric 的 `prechecks` / `budget` 两段只有职责、无字段级 schema | §6.2 | 实现前与 §9.5 预检、§8.3 报表对齐后补字段，并重算 rubric version |
-| O2 | judge user 段的「角色档案摘要（≤400 字）」来源未定 | §6.3 | 由题库字段提供、Roleplay 新增只读动作、或评测侧截取 persona 文件三选一；选定前用题库字段 |
-| O3 | `no-cs-tone` 的「总结/排比」类：票面的 8 条正则与 8 个总结词未进入冻结词表 | §6.5 | 逐条补入 rubric 词表并重算 version；补入前该硬项只按现有 13 条客服词判定 |
+| O2 | judge user 段的「角色档案摘要（≤400 字）」来源 | §6.3、§5.2.1 | **已收敛（2026-10-26）**：只取题库字段 `persona.summary`（必填、1–400 字符，随 bank 内容冻结）；不新增 Roleplay 动作、不运行时截取 persona 文件，`capabilities` 保持 14 字段不变（§6.3.6）。 |
+| O3 | `no-cs-tone` 的「总结/排比」类：8 条正则与 8 个总结词未进入冻结词表 | §6.5 | **已收敛（2026-10-26）**：8 个总结词 + 8 条正则作为 `patterns` 补入 `deterministic.style`，`impl` 扩为 `substring-or-regex-any`（`dotall=false`），硬项 id 集合不变；rubric 首版按语义版本 `1.1.0` 落地（§6.5.1、§6.5.4）。现有客服/助理词实为 14 条（原稿「13 条」系笔误）。 |
 | O4 | 边界题 k=3 中部分样本 error/invalid 时的题级定档 | §6.6 | 仅 ok 样本取中位；ok 样本为 0 时整题按 error/invalid 剔除，并在报表标注 |
 | O5 | 校准注入样本是否计入 40 题分母 | §6.7 | 不计入，不参与聚合与分母 |
 | O6 | 时间列统一格式 | §4.2 | `yyyy-MM-dd HH:mm:ss`，全表统一；不得混用 ISO-8601 带时区格式 |
