@@ -1,5 +1,6 @@
 package org.moboxlab.mbb.eval.runner;
 
+import java.lang.management.ManagementFactory;
 import java.util.List;
 
 import com.alibaba.fastjson.JSONObject;
@@ -44,6 +45,20 @@ public final class EvalRunRecovery {
     }
 
     /**
+     * 用当前进程的启动时刻装配回收器（§13.5）：判定基准来自 {@code RuntimeMXBean.getStartTime()}，
+     * 取不到时回退为当前时刻（此时只会回收严格早于现在的行，仍不会误伤本次启动后新写的行）。
+     */
+    public static EvalRunRecovery forCurrentProcess(EvalStore store, PluginLogger logger) {
+        long startedAt;
+        try {
+            startedAt = ManagementFactory.getRuntimeMXBean().getStartTime();
+        } catch (RuntimeException e) {
+            startedAt = System.currentTimeMillis();
+        }
+        return new EvalRunRecovery(store, logger, startedAt);
+    }
+
+    /**
      * 回收早于本次进程启动时刻的 RUNNING 行。
      *
      * <p>查询与写入都不抛异常：查询失败由 {@link EvalStore} 记 WARN 并返回空/部分行，
@@ -54,6 +69,7 @@ public final class EvalRunRecovery {
         List<JSONObject> staleRows = store.findRunningRunsStartedBefore(threshold);
         int recovered = 0;
         int failed = 0;
+        int unchanged = 0;
         for (JSONObject row : staleRows) {
             String runId = row == null ? null : row.getString("run_id");
             if (runId == null || runId.trim().isEmpty()) {
@@ -65,6 +81,9 @@ public final class EvalRunRecovery {
                     EvalStore.STATUS_ABORTED, 0L, null, ORPHAN_SUMMARY);
             if (result.notExecuted()) {
                 failed++;
+            } else if (result.kind() == EvalRunner.FinalizeKind.ALREADY_TERMINAL) {
+                // 0：查询与 CAS 之间该行已被其他路径收口（例如上一次回收），幂等跳过、不重复计数。
+                unchanged++;
             } else {
                 recovered++;
             }
@@ -77,7 +96,7 @@ public final class EvalRunRecovery {
             warn("init 孤儿回收：已把 " + recovered + " 条早于启动时刻 " + threshold
                     + " 的 RUNNING 行置为 ABORTED(" + ABORT_REASON_ORPHAN + ")");
         }
-        return new RecoveryResult(staleRows.size(), recovered, failed);
+        return new RecoveryResult(staleRows.size(), recovered, failed, unchanged);
     }
 
     private void warn(String message) {
@@ -86,16 +105,18 @@ public final class EvalRunRecovery {
         }
     }
 
-    /** 单次回收的统计；scanned = recovered + failed（查询失败时可能为 0）。 */
+    /** 单次回收的统计；scanned = recovered + unchanged + failed（查询失败时可能为 0）。 */
     public static final class RecoveryResult {
         private final int scanned;
         private final int recovered;
         private final int failed;
+        private final int unchanged;
 
-        private RecoveryResult(int scanned, int recovered, int failed) {
+        private RecoveryResult(int scanned, int recovered, int failed, int unchanged) {
             this.scanned = scanned;
             this.recovered = recovered;
             this.failed = failed;
+            this.unchanged = unchanged;
         }
 
         /** 被选中的早期 RUNNING 行数。 */
@@ -111,6 +132,11 @@ public final class EvalRunRecovery {
         /** CAS 未执行、仍留在 RUNNING 的行数。 */
         public int failed() {
             return failed;
+        }
+
+        /** 查询到但已被其他路径收口（CAS 返回 0）的行数；二次回收幂等时全部计入这里。 */
+        public int unchanged() {
+            return unchanged;
         }
     }
 }
