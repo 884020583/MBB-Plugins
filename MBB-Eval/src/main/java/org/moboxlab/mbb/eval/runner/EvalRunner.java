@@ -22,8 +22,11 @@ import java.util.concurrent.atomic.AtomicReference;
  * <p>并发约束：同一时刻只允许一个 RUNNING run。受理时不仅看内存中的 active，还会查库确认没有
  * 遗留的 RUNNING 行（插件重启后内存状态为空，但库里的行还在），避免同一时间出现两个 RUNNING。
  * 状态行只能由 CAS（{@code WHERE status='RUNNING'}）改写，禁止覆盖式更新（§4.4、§13.4）。</p>
+ *
+ * <p>命令层只依赖 {@link EvalRunService}：受理与中止都在命令线程内一次调用返回，命令线程自己不轮询、
+ * 不等待 run 结束、不发起任何 AI 调用（§9.4）。</p>
  */
-public final class EvalRunner {
+public final class EvalRunner implements EvalRunService {
 
     /** 占位循环的轮询间隔：中止与墙钟检查的响应上限。 */
     private static final long POLL_MILLIS = 200L;
@@ -65,20 +68,20 @@ public final class EvalRunner {
             this.rejection = rejection;
         }
 
-        static AcceptResult accepted(String runId, String tier, int caseCount, int planned, int budgetLimit) {
+        public static AcceptResult accepted(String runId, String tier, int caseCount, int planned, int budgetLimit) {
             return new AcceptResult(AcceptKind.ACCEPTED, runId, tier, caseCount, planned, budgetLimit, null);
         }
 
-        static AcceptResult busy(String runId, String tier, String message, String hint) {
+        public static AcceptResult busy(String runId, String tier, String message, String hint) {
             return new AcceptResult(AcceptKind.BUSY, runId, tier, 0, 0, 0,
                     new EvalPreflight.Rejection(null, message, hint));
         }
 
-        static AcceptResult rejected(String tier, EvalPreflight.Rejection rejection) {
+        public static AcceptResult rejected(String tier, EvalPreflight.Rejection rejection) {
             return new AcceptResult(AcceptKind.REJECTED, null, tier, 0, 0, 0, rejection);
         }
 
-        static AcceptResult failed(String tier, String message) {
+        public static AcceptResult failed(String tier, String message) {
             return new AcceptResult(AcceptKind.FAILED, null, tier, 0, 0, 0,
                     new EvalPreflight.Rejection(null, message, null));
         }
@@ -142,15 +145,15 @@ public final class EvalRunner {
             this.message = message;
         }
 
-        static AbortResult aborted(String runId) {
+        public static AbortResult aborted(String runId) {
             return new AbortResult(AbortKind.ABORTED, runId, null);
         }
 
-        static AbortResult none() {
+        public static AbortResult none() {
             return new AbortResult(AbortKind.NONE, null, null);
         }
 
-        static AbortResult failed(String message) {
+        public static AbortResult failed(String message) {
             return new AbortResult(AbortKind.FAILED, null, message);
         }
 
@@ -372,14 +375,14 @@ public final class EvalRunner {
             if (active.get() != null) {
                 RunState running = active.get();
                 return busyResult(running.runId, running.tier,
-                        "当前进度 " + running.budget.used() + "/" + running.budget.limit()
-                                + "（本进程持有该 run）");
+                        running.budget.used() + "/" + running.budget.limit(),
+                        "可发 /eval status 查看进度，或 /eval abort 中止该 run");
             }
             JSONObject leftover = store.findRunningRun();
             if (leftover != null) {
                 return busyResult(leftover.getString("run_id"), leftover.getString("tier"),
-                        "当前进度 " + leftover.getIntValue("calls_used") + "/"
-                                + leftover.getIntValue("calls_budget") + "（上次运行遗留的 RUNNING 行）");
+                        leftover.getIntValue("calls_used") + "/" + leftover.getIntValue("calls_budget"),
+                        "该行为上次运行遗留，本进程无法收尾，需先发 /eval abort 中止，再 /eval status 查看状态");
             }
             EvalPreflight.Rejection rejection = preflight == null ? null : preflight.check(normalized);
             if (rejection != null) {
@@ -425,10 +428,14 @@ public final class EvalRunner {
         }
     }
 
-    /** §9.7：第二个 /eval run 必须直接回当前 runId 与当前进度，不排队、不新建行、不报错。 */
-    private AcceptResult busyResult(String runId, String tier, String progress) {
-        return AcceptResult.busy(runId, tier, progress,
-                "可发 /eval status 查看详情，或 /eval abort 中止该 run");
+    /**
+     * §9.7：第二个 /eval run 必须直接回当前 runId 与当前进度，不排队、不新建行、不报错。
+     *
+     * <p>{@code progress} 只放 {@code used/limit}，{@code hint} 放下一步动作，由命令层拼成一行回执
+     * （命令层负责「当前进度」等说明文字，runner 只提供事实）。</p>
+     */
+    private AcceptResult busyResult(String runId, String tier, String progress, String hint) {
+        return AcceptResult.busy(runId, tier, progress, hint);
     }
 
     /**
