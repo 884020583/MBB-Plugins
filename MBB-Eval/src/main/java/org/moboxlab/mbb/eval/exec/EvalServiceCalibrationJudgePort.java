@@ -1,9 +1,11 @@
 package org.moboxlab.mbb.eval.exec;
 
 import java.util.Collections;
+import java.util.List;
 
 import org.moboxlab.mbb.eval.calib.EvalCalibrationJudgePort;
 import org.moboxlab.mbb.eval.calib.EvalCalibrationSample;
+import org.moboxlab.mbb.eval.deterministic.EvalVetoPrecheck;
 import org.moboxlab.mbb.eval.judge.EvalJudgeFailureTracker;
 import org.moboxlab.mbb.eval.judge.EvalJudgeOutcome;
 import org.moboxlab.mbb.eval.judge.EvalJudgeRequest;
@@ -17,14 +19,17 @@ import org.moboxlab.mbb.eval.rubric.EvalRubric;
  * <p>本适配器只做样本到判分请求的转换与结果透传；预算占位、stage=calib 调用行与
  * calls_used 自增由 {@code EvalCallInvoker#judgeCalibration} 在调用侧完成（§6.7.4、§9.5）。</p>
  *
- * <p>边界样本的 veto 判定当前没有独立通道（§6.3.5 硬项尚未产出 veto 标记）：本适配器只把
- * boundary 样本照常送 judge，由 {@code EvalCalibrationResult} 用 label==0 兜底判定门槛。
- * 这是 §6.7.4 的 v1 近似，硬项 veto 接线后应改为读取 veto 结果。</p>
+ * <p>边界样本另走 {@link #boundaryVeto(String, String)}：复用 {@link EvalVetoPrecheck}
+ * 的 §6.3.5 硬项判定，并通过 {@link #personaFragment()} 注入当前人设片段，保证边界门槛
+ * 只认硬项 veto 命中，不再用 label==0 兜底（§6.7.4）。</p>
  */
 public final class EvalServiceCalibrationJudgePort implements EvalCalibrationJudgePort {
 
     /** 接口的默认退化路径没有 run 上下文；这里用一个合法占位 id，落库仍用调用方传入的真实 run_id。 */
     private static final String PLACEHOLDER_RUN_ID = "calib-run";
+
+    /** 注入到边界样本回复的人设片段长度（码点）。 */
+    private static final int FRAGMENT_CODE_POINTS = 20;
 
     private final EvalJudgeService service;
     private final EvalRubric rubric;
@@ -108,10 +113,31 @@ public final class EvalServiceCalibrationJudgePort implements EvalCalibrationJud
         return outcome.result();
     }
 
+    @Override
+    public String boundaryVeto(String reply, String personaSummary) {
+        String effectiveSummary = personaSummary == null || personaSummary.trim().isEmpty()
+                ? this.personaSummary : personaSummary.trim();
+        return EvalVetoPrecheck.vetoReason(reply, null, false, effectiveSummary);
+    }
+
+    @Override
+    public String personaFragment() {
+        int codePoints = personaSummary.codePointCount(0, personaSummary.length());
+        int end = codePoints <= FRAGMENT_CODE_POINTS
+                ? personaSummary.length()
+                : personaSummary.offsetByCodePoints(0, FRAGMENT_CODE_POINTS);
+        return personaSummary.substring(0, end);
+    }
+
+    @Override
+    public String personaSummary() {
+        return personaSummary;
+    }
+
     /**
      * 记忆维的证据轮：校准样本固定把末轮当作事实证据；其他维度没有证据轮。
      */
-    private static java.util.List<Integer> evidenceTurns(EvalCalibrationSample sample) {
+    private static List<Integer> evidenceTurns(EvalCalibrationSample sample) {
         if (!EvalCalibrationSample.DIMENSION_MEMORY.equals(sample.dimensionId())
                 || sample.history().isEmpty()) {
             return Collections.emptyList();

@@ -56,14 +56,25 @@ public final class EvalCalibrationRunner {
         EvalLog.info(logger, "开始校准自证 run=" + id + " 样本数=" + samples.size());
         List<EvalCalibrationResult.SampleOutcome> outcomes =
                 new ArrayList<EvalCalibrationResult.SampleOutcome>(samples.size());
+        boolean boundaryVetoed = false;
         for (EvalCalibrationSample sample : samples) {
             if (stopCondition != null && stopCondition.stop()) {
                 EvalLog.warn(logger, "校准自证提前中止 run=" + id + "，已执行样本=" + outcomes.size());
                 break;
             }
+            if (EvalCalibrationSample.DIMENSION_BOUNDARY.equals(sample.dimensionId())) {
+                String veto = safeBoundaryVeto(sample);
+                if (veto == null) {
+                    EvalLog.warn(logger, "边界硬项 veto 未命中 case=" + sample.caseId());
+                } else {
+                    boundaryVetoed = true;
+                    EvalLog.info(logger, "边界硬项 veto 命中 case=" + sample.caseId()
+                            + " reason=" + veto);
+                }
+            }
             outcomes.add(runOne(sample));
         }
-        EvalCalibrationResult result = new EvalCalibrationResult(id, outcomes, false);
+        EvalCalibrationResult result = new EvalCalibrationResult(id, outcomes, boundaryVetoed);
         for (String warning : result.warnings()) {
             EvalLog.warn(logger, "校准告警：" + warning);
         }
@@ -74,6 +85,24 @@ public final class EvalCalibrationRunner {
                     + " evidence=" + result.evidenceFailures() + "/" + result.evidenceTotal());
         }
         return result;
+    }
+
+    /**
+     * 边界样本先过硬项预检：用固定回复拼接端口注入的人设片段，再交给生产预检实现。
+     *
+     * <p>预检异常一律收敛为「未命中」，不阻断后续 judge 调用。</p>
+     */
+    private String safeBoundaryVeto(EvalCalibrationSample sample) {
+        try {
+            String fragment = judgePort.personaFragment();
+            String testedReply = sample.reply() + (fragment == null ? "" : fragment);
+            String summary = judgePort.personaSummary();
+            return judgePort.boundaryVeto(testedReply, summary == null ? "" : summary);
+        } catch (RuntimeException e) {
+            EvalLog.error(logger, "边界硬项预检异常 case=" + sample.caseId() + " "
+                    + e.getClass().getSimpleName());
+            return null;
+        }
     }
 
     private EvalCalibrationResult.SampleOutcome runOne(EvalCalibrationSample sample) {

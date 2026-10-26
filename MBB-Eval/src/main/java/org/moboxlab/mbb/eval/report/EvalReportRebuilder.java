@@ -97,7 +97,7 @@ public final class EvalReportRebuilder {
         EvalDeltaResult delta = computeDelta(safeRunId);
         File target;
         try {
-            target = EvalReportWriter.writeToFile(data, reportsDir, delta, logger);
+            target = EvalReportWriter.writeToFile(data, reportsDir, delta);
         } catch (IOException e) {
             EvalLog.warn(logger, "重建报表写盘失败，保留旧文件 runId=" + safeRunId
                     + " 原因=" + e.getMessage());
