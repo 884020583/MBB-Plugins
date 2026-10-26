@@ -146,11 +146,11 @@ public final class EvalPreflightSources {
     public interface JudgeProfileSource extends StageSource {
     }
 
-    /** MBB-AI 在线可调。 */
+    /** MBB-AI 已安装且启用（§10.1）；缺失或未启用时拒绝并提示 aiHost。 */
     public interface AiStatusSource extends StageSource {
     }
 
-    /** 数据目录 ./MoBoxBot/plugins/MBB-Roleplay/evals 可读。 */
+    /** 数据目录存在可读，且 reports 输出目录可建可写（§9.5 第七项）。 */
     public interface DataDirStatusSource extends StageSource {
     }
 

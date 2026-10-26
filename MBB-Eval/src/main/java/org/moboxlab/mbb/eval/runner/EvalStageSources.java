@@ -1,24 +1,35 @@
 package org.moboxlab.mbb.eval.runner;
 
+import java.io.File;
+
 import org.moboxlab.mbb.eval.bank.EvalBankCache;
 import org.moboxlab.mbb.eval.bank.EvalBankIdentity;
+import org.moboxlab.mbb.eval.bank.EvalBankLocator;
 import org.moboxlab.mbb.eval.bank.EvalBankPersonaBinding;
 import org.moboxlab.mbb.eval.bank.EvalBankProblem;
 import org.moboxlab.mbb.eval.gateway.EvalCapabilityClient;
 import org.moboxlab.mbb.eval.rubric.EvalRubricCache;
+import org.moboxlab.mbb.eval.runner.EvalPreflightSources.AiStatusSource;
 import org.moboxlab.mbb.eval.runner.EvalPreflightSources.BankStatusSource;
 import org.moboxlab.mbb.eval.runner.EvalPreflightSources.CapabilitiesStatusSource;
+import org.moboxlab.mbb.eval.runner.EvalPreflightSources.DataDirStatusSource;
 import org.moboxlab.mbb.eval.runner.EvalPreflightSources.PersonaStatusSource;
 import org.moboxlab.mbb.eval.runner.EvalPreflightSources.RubricStatusSource;
 import org.moboxlab.mbb.eval.runner.EvalPreflightSources.StageReport;
+import org.moboxlab.moboxbot.API.Plugin;
+import org.moboxlab.moboxbot.API.PluginManager;
 
 /**
- * 预检前三项的真实来源（B-5）：题库、rubric、persona。
+ * 预检各阶段的生产来源（B-5、W-3）：题库、rubric、persona、MBB-AI、数据目录。
  *
- * <p>三个来源只读 onEnable 缓存，不重复读文件（§5.7.4）；题库或 rubric 失败时返回 REJECT，
- * 并把缓存里已排好序的前 5 条明细放进 {@link StageReport#details()}，由命令层逐条回显。
- * persona 在每次预检时用 capabilities 的实时 personaHash 与题库身份重新比对，
+ * <p>题库、rubric、persona 只读 onEnable 缓存，不重复读文件（§5.7.4）；题库或 rubric 失败时
+ * 返回 REJECT，并把缓存里已排好序的前 5 条明细放进 {@link StageReport#details()}，由命令层
+ * 逐条回显。persona 在每次预检时用 capabilities 的实时 personaHash 与题库身份重新比对，
  * {@code evalAllowPersonaMismatch=true} 时降级为 WARN 并允许试跑（§5.2.1、§8.5）。</p>
+ *
+ * <p>MBB-AI 与数据目录是 §9.5 八项预检的第六、七项，判定看运行期真实状态：
+ * MBB-AI 插件必须存在且已启用（§10.1），数据目录必须存在、reports/ 子目录可建且可写。
+ * 两者失败都返回 REJECT，并给出绝对路径/修复建议，供 EvalRejectionPresenter 统一渲染。</p>
  */
 public final class EvalStageSources {
 
@@ -117,5 +128,95 @@ public final class EvalStageSources {
                 return StageReport.pass(binding.message());
             }
         };
+    }
+
+    /** MBB-AI 插件名（与 MBB-AI 自身的 plugin.json 一致）。 */
+    public static final String AI_PLUGIN_NAME = "MBB-AI";
+    /** 数据目录不可用时的统一修复建议。 */
+    private static final String DATA_DIR_HINT =
+            "请检查数据目录与 reports/ 子目录的权限或磁盘空间后重启插件；/eval report 仍可用";
+    /** 数据目录缺失/不可读时的修复建议（§9.5 第七项）。 */
+    private static final String EVALS_DIR_HINT =
+            "请确认 ./MoBoxBot/plugins/MBB-Roleplay/evals 存在且可读，并放入 bank-<version>.json 后重跑 /eval run；"
+                    + "/eval report 仍可用";
+
+    /**
+     * MBB-AI 来源（§9.5 第六项、§10.1）：插件存在且已启用才 PASS。
+     *
+     * @param pluginManager 服务器插件管理器；null 表示服务器未就绪
+     */
+    public static AiStatusSource ai(final PluginManager pluginManager) {
+        return new AiStatusSource() {
+            @Override
+            public StageReport report(String tier) {
+                if (pluginManager == null) {
+                    return StageReport.reject("",
+                            "MBB-AI 状态不可用：服务器未就绪，无法查询插件管理器",
+                            "请确认服务器与 aiHost 配置后重启插件再重跑 /eval run");
+                }
+                return aiReport(pluginManager.getPlugin(AI_PLUGIN_NAME));
+            }
+        };
+    }
+
+    /** 纯判定 MBB-AI 插件状态；抽出以便单测直接注入 null（未安装）。 */
+    static StageReport aiReport(Plugin ai) {
+        if (ai == null) {
+            return StageReport.reject("",
+                    "MBB-AI 未安装或未启用：插件列表中没有 " + AI_PLUGIN_NAME,
+                    "请安装并启用 MBB-AI 插件，并检查 aiHost 配置（§10.1）后重跑 /eval run");
+        }
+        if (!ai.isEnabled()) {
+            return StageReport.reject("",
+                    "MBB-AI 插件存在但未启用：" + AI_PLUGIN_NAME,
+                    "请启用 MBB-AI 插件，并检查 aiHost 配置（§10.1）后重跑 /eval run");
+        }
+        return StageReport.pass("MBB-AI 已启用：" + AI_PLUGIN_NAME);
+    }
+
+    /**
+     * 数据目录来源（§9.5 第七项）：evals 目录存在可读，reports/ 子目录可建且可写。
+     *
+     * @param evalsDirectory   评测数据目录（MBB-Roleplay/evals），可为 null 表示无法推导
+     * @param reportsDirectory 报表输出目录（插件数据目录/reports），可为 null 表示未装配
+     */
+    public static DataDirStatusSource dataDir(final File evalsDirectory,
+            final File reportsDirectory) {
+        return new DataDirStatusSource() {
+            @Override
+            public StageReport report(String tier) {
+                if (evalsDirectory == null) {
+                    return StageReport.reject(EvalBankLocator.CODE_DATA_NOT_FOUND,
+                            "评测数据目录不可用：无法从插件数据目录推导 evals 路径",
+                            "请确认插件数据目录位于 ./MoBoxBot/plugins/MBB-Eval 下后重启插件");
+                }
+                if (!evalsDirectory.isDirectory()) {
+                    return StageReport.reject(EvalBankLocator.CODE_DATA_NOT_FOUND,
+                            "评测数据目录不存在：" + absolute(evalsDirectory), EVALS_DIR_HINT);
+                }
+                if (!evalsDirectory.canRead()) {
+                    return StageReport.reject(EvalBankLocator.CODE_DATA_NOT_FOUND,
+                            "评测数据目录不可读：" + absolute(evalsDirectory), EVALS_DIR_HINT);
+                }
+                if (reportsDirectory == null) {
+                    return StageReport.reject("",
+                            "评测数据目录不可写：reports 输出目录未装配", DATA_DIR_HINT);
+                }
+                boolean created = reportsDirectory.isDirectory() || reportsDirectory.mkdirs();
+                if (!created || !reportsDirectory.canWrite()) {
+                    return StageReport.reject("",
+                            "评测数据目录不可写：" + absolute(reportsDirectory), DATA_DIR_HINT);
+                }
+                return StageReport.pass("评测数据目录可用：" + absolute(evalsDirectory));
+            }
+        };
+    }
+
+    private static String absolute(File file) {
+        try {
+            return file.getAbsolutePath();
+        } catch (RuntimeException e) {
+            return file.getPath();
+        }
     }
 }

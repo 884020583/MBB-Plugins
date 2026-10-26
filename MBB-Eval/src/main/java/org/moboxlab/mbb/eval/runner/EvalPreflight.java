@@ -32,10 +32,12 @@ import java.util.Set;
  * 预算，预算永远最后。接口能力读 {@link EvalCapabilityClient} 的真实快照，只有 AVAILABLE 放行；
  * 其余状态按 §13.2 给出「版本不匹配 / 未启用 / 插件缺失 / 契约异常」的定向文案。</p>
  *
- * <p>题库、rubric、persona、MBB-AI、数据目录尚未接线，默认用
- * {@link EvalPreflightSources.PendingSource} 表达 PENDING：视为通过，但同一实例对同一项只
- * WARN 一次「&lt;项&gt; 尚未接线，跳过预检」。这样骨架期不会因为缺数据源而「永远拒绝」。
- * B-5 / D-4 / F-2 接线时通过 {@link Builder} 替换对应来源即可，不改本类编排。</p>
+ * <p>题库、rubric、persona、judge profile、MBB-AI 与数据目录的来源都由 {@link Builder} 注入：
+ * judge profile 未显式注入但有配置时自动用 {@link EvalPreflightSources.ConfigJudgeProfileSource}
+ * （evalJudgeProfile → evalProfile → aiProfile 回退链）；其余未注入项退回
+ * {@link EvalPreflightSources.PendingSource}，表达 PENDING：视为通过，但同一实例对同一项只
+ * WARN 一次「&lt;项&gt; 尚未接线，跳过预检」。生产装配见 EvalPlugin 的 initRunner，接线时通过
+ * {@link Builder} 替换对应来源即可，不改本类编排。</p>
  *
  * <p>预算计划集中在 {@link EvalPreflightPlan}：full 79 次、smoke 25 次，超出 evalCallBudget 时
  * 按 §13.2 同时给出构成与两条出路（调大上限至 100 或改跑 smoke）。</p>

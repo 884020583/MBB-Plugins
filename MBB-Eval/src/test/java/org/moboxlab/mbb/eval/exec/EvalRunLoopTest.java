@@ -9,8 +9,11 @@ import static org.junit.Assert.assertTrue;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
+import java.sql.Statement;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Map;
 
 import org.junit.After;
 import org.junit.Before;
@@ -20,6 +23,9 @@ import org.moboxlab.mbb.eval.config.EvalConfig;
 import org.moboxlab.mbb.eval.gateway.EvalGenerateRequest;
 import org.moboxlab.mbb.eval.gateway.EvalGenerateResult;
 import org.moboxlab.mbb.eval.judge.EvalJudgeResult;
+import org.moboxlab.mbb.eval.metrics.EvalAiUsageDay;
+import org.moboxlab.mbb.eval.metrics.EvalAiUsageSource;
+import org.moboxlab.mbb.eval.report.EvalReportData;
 import org.moboxlab.mbb.eval.rubric.EvalRubric;
 import org.moboxlab.mbb.eval.rubric.EvalRubricLoadResult;
 import org.moboxlab.mbb.eval.rubric.EvalRubricLoader;
@@ -169,6 +175,58 @@ public final class EvalRunLoopTest {
         assertEquals(40, result.executedCases());
         assertEquals(144, result.callsUsed());
         assertEquals(40, store.findCaseResults(RUN_ID).size());
+    }
+
+    /** F-8b/§6.1/§7.5：终态报表必须用 rubric 权重与注入的 L3 旁证源。 */
+    @Test
+    public void reportShouldUseInjectedWeightsAndUsageSource() throws Exception {
+        final List<String> queries = new ArrayList<String>();
+        final Map<String, Double> weights = customWeights();
+        EvalRunLoop loop = new EvalRunLoop(new EvalRunLoop.Deps()
+                .store(store)
+                .config(EvalConfig.load(null))
+                .bank(bank)
+                .rubric(rubric)
+                .generatePort(new FakeGeneratePort())
+                .judgePort(new FakeJudgePort())
+                .reportsDirectory(new File(tempDir, "reports"))
+                .logger(logger)
+                .reportWeights(weights)
+                .aiUsageSource(new EvalAiUsageSource() {
+                    @Override
+                    public List<EvalAiUsageDay> queryDailyUsage(String profile, String startDate,
+                            String endDate) {
+                        queries.add(profile + "@" + startDate + "~" + endDate);
+                        return new ArrayList<EvalAiUsageDay>();
+                    }
+                }));
+        EvalRunLoop.Result result = loop.run(request(futureBudget(25, 100), newStopPoint()));
+        assertEquals(EvalRunLoop.Status.COMPLETED, result.status());
+
+        // 主循环不写终态；补上 profile 与结束时间，让报表能按 §7.5 取旁证。
+        Statement statement = storage.connection().createStatement();
+        try {
+            statement.executeUpdate("UPDATE plugin_mbb_eval_run SET eval_profile='default',"
+                    + " ended_at='" + EvalStore.nowText() + "' WHERE run_id='" + RUN_ID + "'");
+        } finally {
+            statement.close();
+        }
+
+        EvalReportData data = result.reportData(store);
+        assertEquals("报表必须采用 rubric 五维权重", weights, data.weights());
+        assertNotNull("报表必须带 L3 旁证对象", data.aiUsage());
+        assertFalse("必须调用注入的旁证源", queries.isEmpty());
+        assertTrue("旁证查询应使用 run 的 eval_profile：" + queries, queries.get(0).startsWith("default@"));
+    }
+
+    private static Map<String, Double> customWeights() {
+        Map<String, Double> weights = new LinkedHashMap<String, Double>();
+        weights.put("persona", Double.valueOf(0.40D));
+        weights.put("boundary", Double.valueOf(0.20D));
+        weights.put("memory", Double.valueOf(0.20D));
+        weights.put("knowledge", Double.valueOf(0.10D));
+        weights.put("style", Double.valueOf(0.10D));
+        return weights;
     }
 
     @Test
