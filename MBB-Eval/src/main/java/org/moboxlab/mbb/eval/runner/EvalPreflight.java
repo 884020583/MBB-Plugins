@@ -3,7 +3,6 @@ package org.moboxlab.mbb.eval.runner;
 import com.alibaba.fastjson.JSONObject;
 import org.moboxlab.mbb.eval.config.EvalConfig;
 import org.moboxlab.mbb.eval.gateway.EvalCapabilityClient;
-import org.moboxlab.mbb.eval.gateway.RoleplayEvalGateway;
 import org.moboxlab.mbb.eval.runner.EvalPreflightSources.AiStatusSource;
 import org.moboxlab.mbb.eval.runner.EvalPreflightSources.BankStatusSource;
 import org.moboxlab.mbb.eval.runner.EvalPreflightSources.CapabilitiesStatusSource;
@@ -213,34 +212,6 @@ public final class EvalPreflight {
     /** 八项预检的可注入装配入口。 */
     public static Builder builder() {
         return new Builder();
-    }
-
-    /**
-     * 生产装配：Roleplay 能力快照 + judge profile 回退链 + 其余未接线项按 PENDING 放行。
-     *
-     * <p>能力探测统一经 {@link RoleplayEvalGateway#fetchCapabilities()}，不在预检里直接
-     * 摸 {@code PluginManager}：取服务、调用动作与出参解析都收在网关内；判定与缓存由
-     * {@link EvalCapabilityClient} 负责，本类只读快照。</p>
-     */
-    public static EvalPreflight forPlugin(Plugin plugin, EvalConfig config) {
-        final PluginLogger logger = plugin == null ? null : plugin.getLogger();
-        final RoleplayEvalGateway gateway = new RoleplayEvalGateway(plugin, logger);
-        final EvalCapabilityClient client = new EvalCapabilityClient(new EvalCapabilityClient.CapabilitiesSource() {
-            @Override
-            public Object fetch() {
-                return gateway.fetchCapabilities();
-            }
-        }, logger);
-        return builder()
-                .config(config)
-                .logger(logger)
-                .capabilities(new CapabilitiesStatusSource() {
-                    @Override
-                    public EvalCapabilityClient.Snapshot snapshot() {
-                        return client.snapshot();
-                    }
-                })
-                .build();
     }
 
     /**

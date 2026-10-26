@@ -3,6 +3,10 @@ package org.moboxlab.mbb.eval.runner;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicReference;
 
+import org.moboxlab.mbb.eval.log.EvalLog;
+import org.moboxlab.mbb.eval.store.EvalStore;
+import org.moboxlab.moboxbot.API.PluginLogger;
+
 /**
  * 单次 run 的停止点（规格 §9.6、§13.4、§16.9 H-4）。
  *
@@ -93,6 +97,7 @@ public final class EvalRunStopPoint {
 
     private final String runId;
     private final RunStatusProbe probe;
+    private final PluginLogger logger;
     private final AtomicReference<String> requestedReason = new AtomicReference<String>(null);
     private final AtomicBoolean terminalSeen = new AtomicBoolean(false);
     /** 上次查询探针的时刻；只用于限频，不参与停止判定。 */
@@ -100,7 +105,7 @@ public final class EvalRunStopPoint {
 
     /** 没有终态探针的停止点：只依赖进程内的中止标志。 */
     public EvalRunStopPoint(String runId) {
-        this(runId, null);
+        this(runId, null, null);
     }
 
     /**
@@ -108,11 +113,19 @@ public final class EvalRunStopPoint {
      * @param probe 终态探针，可为 null；只读查询，不写库
      */
     public EvalRunStopPoint(String runId, RunStatusProbe probe) {
+        this(runId, probe, null);
+    }
+
+    /**
+     * @param logger 插件日志，可为 null；只用于探针查询异常时的 WARN
+     */
+    public EvalRunStopPoint(String runId, RunStatusProbe probe, PluginLogger logger) {
         if (runId == null || runId.trim().isEmpty()) {
             throw new IllegalArgumentException("run_id 不能为空，无法创建停止点");
         }
         this.runId = runId;
         this.probe = probe;
+        this.logger = logger;
     }
 
     public String runId() {
@@ -123,10 +136,11 @@ public final class EvalRunStopPoint {
      * 请求停止：幂等，首次原因生效（§13.1.3 只记第一个真实原因），后续调用不覆盖。
      *
      * @param reason 原因码，例如 {@code user-abort} / {@code budget} / {@code shutdown}；
-     *               为 null 或空时按 {@code aborted} 记录
+     *               为 null 或空时按 {@code user-abort} 记录（原因集合封闭在 §13.1.3）
      */
     public void requestStop(String reason) {
-        String normalized = reason == null || reason.trim().isEmpty() ? "aborted" : reason;
+        String normalized = reason == null || reason.trim().isEmpty()
+                ? EvalStore.ABORT_REASON_USER : reason;
         requestedReason.compareAndSet(null, normalized);
     }
 
@@ -207,6 +221,8 @@ public final class EvalRunStopPoint {
         try {
             terminal = probe.terminal();
         } catch (RuntimeException e) {
+            EvalLog.warn(logger, "[MBB-Eval] 终态探针查询异常，按未收口处理，run_id=" + runId
+                    + "：" + e.getMessage());
             terminal = false;
         }
         if (terminal) {

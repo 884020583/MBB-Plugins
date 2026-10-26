@@ -119,14 +119,15 @@ public final class EvalCaseExecutorTest {
                 "persona", generate, judge, newStopPoint(), newLedger(100)));
 
         assertEquals(EvalCaseScore.Status.OK, result.status());
-        assertEquals(6, result.calls());
-        assertEquals(3, generate.requests.size());
+        // §6.7.1：生成侧只发起一次，判分侧按 k 次复核同一份回复。
+        assertEquals(4, result.calls());
+        assertEquals(1, generate.requests.size());
         assertEquals(3, judge.inputs.size());
         assertEquals(1.0D, result.caseScore().doubleValue(), 0.0001D);
         assertTrue(result.written());
         assertNotNull(store.parseDetailJson(store.findCaseResult(RUN_ID, caseJson.getString("id"))));
-        assertEquals(6, store.findCalls(RUN_ID).size());
-        assertEquals(6, store.findRun(RUN_ID).getIntValue("calls_used"));
+        assertEquals(4, store.findCalls(RUN_ID).size());
+        assertEquals(4, store.findRun(RUN_ID).getIntValue("calls_used"));
     }
 
     @Test
@@ -156,7 +157,8 @@ public final class EvalCaseExecutorTest {
                 "persona", generate, new FakeJudgePort(), newStopPoint(), newLedger(100)));
 
         assertEquals(EvalCaseScore.Status.ERROR, result.status());
-        assertEquals(3, result.calls());
+        // 生成失败只消耗一次调用，错误样本按 k 份写入便于报表标 partial。
+        assertEquals(1, result.calls());
         assertTrue(result.written());
         JSONObject row = store.findCaseResult(RUN_ID, caseJson.getString("id"));
         assertEquals("error", row.getString("status"));

@@ -25,16 +25,6 @@ public final class EvalScoreFormat {
         return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).toPlainString();
     }
 
-    /** 一位小数取整值；仅供展示前转换，不得参与后续分数计算。 */
-    public static double roundOne(double value) {
-        return BigDecimal.valueOf(value).setScale(1, RoundingMode.HALF_UP).doubleValue();
-    }
-
-    /** 两位小数取整值；仅供展示前转换，不得参与后续分数计算。 */
-    public static double roundTwo(double value) {
-        return BigDecimal.valueOf(value).setScale(2, RoundingMode.HALF_UP).doubleValue();
-    }
-
     /** 比例按百分比展示，保留一位小数，如 0.125 → "12.5%"。 */
     public static String percentOneDecimal(double ratio) {
         return oneDecimal(ratio * 100.0d) + "%";

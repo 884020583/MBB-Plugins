@@ -1,7 +1,9 @@
 package org.moboxlab.mbb.eval.report;
 
 import org.moboxlab.mbb.eval.baseline.EvalDeltaResult;
+import org.moboxlab.mbb.eval.log.EvalLog;
 import org.moboxlab.mbb.eval.metrics.EvalMetrics;
+import org.moboxlab.moboxbot.API.PluginLogger;
 import org.moboxlab.mbb.eval.store.EvalStore;
 
 import java.io.File;
@@ -18,7 +20,8 @@ import java.util.Locale;
 /**
  * 报表渲染（F-4：规格 §8.3 九节 Markdown、§8.4 对比口径、§8.5 可信度、§13.4 落盘）。
  *
- * <p>纯渲染：只读 {@link EvalReportData}，不读库、不记日志，同一输入重复渲染得到同一文本。
+ * <p>纯渲染：只读 {@link EvalReportData}，不读库，同一输入重复渲染得到同一文本。写盘入口
+ * 接受可选 {@link PluginLogger}，仅用于记录群内摘要写入失败等不影响主报表的 WARN。
  * 九节标题与顺序逐字按 §8.3，任何不可得值都写固定文案（{@link EvalReportData#MISSING}、
  * 「样本不足（n=…，需 ≥…）」），不补 0、不省略。</p>
  *
@@ -565,7 +568,7 @@ public final class EvalReportWriter {
      * @throws IOException 目录创建或写入失败，交由命令层记录与重试
      */
     public static File writeToFile(EvalReportData data, File reportsDir) throws IOException {
-        return writeToFile(data, reportsDir, null);
+        return writeToFile(data, reportsDir, null, null);
     }
 
     /**
@@ -579,6 +582,21 @@ public final class EvalReportWriter {
      */
     public static File writeToFile(EvalReportData data, File reportsDir, EvalDeltaResult delta)
             throws IOException {
+        return writeToFile(data, reportsDir, delta, null);
+    }
+
+    /**
+     * 写报表文件，并记录群内摘要写入失败等可降级错误。
+     *
+     * @param data       装配结果
+     * @param reportsDir 报表目录
+     * @param delta      基线比较结果；null 时使用 {@link EvalReportData#delta()}
+     * @param logger     插件日志器；null 表示静默
+     * @return 写入的完整报表文件
+     * @throws IOException 目录创建或完整报表写入失败
+     */
+    public static File writeToFile(EvalReportData data, File reportsDir, EvalDeltaResult delta,
+                                   PluginLogger logger) throws IOException {
         if (data == null) {
             throw new IllegalArgumentException("报表数据不能为空");
         }
@@ -594,7 +612,7 @@ public final class EvalReportWriter {
         }
         File target = new File(reportsDir, fileName(runId));
         writeAtomically(target, render(data, delta));
-        writeGroupSummary(data, reportsDir, runId);
+        writeGroupSummary(data, reportsDir, runId, logger);
         return target;
     }
 
@@ -604,7 +622,8 @@ public final class EvalReportWriter {
      * <p>仅 {@code COMPLETED} 的 run 生成摘要（I-2 口径，≤15 行）；摘要为附属产物，
      * 写失败只跳过摘要，不破坏已落盘的完整报表，也不向命令层抛错（§13.4）。</p>
      */
-    private static void writeGroupSummary(EvalReportData data, File reportsDir, String runId) {
+    private static void writeGroupSummary(EvalReportData data, File reportsDir, String runId,
+                                          PluginLogger logger) {
         if (!EvalGroupSummaryFormatter.canSummarize(data)) {
             return;
         }
@@ -613,7 +632,8 @@ public final class EvalReportWriter {
         try {
             writeAtomically(target, text);
         } catch (IOException e) {
-            return;
+            EvalLog.warn(logger, "[MBB-Eval] 群内摘要写入失败，已保留完整报表，run_id=" + runId
+                    + "：" + e.getMessage());
         }
     }
 

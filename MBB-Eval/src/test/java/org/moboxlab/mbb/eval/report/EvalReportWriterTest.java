@@ -55,7 +55,7 @@ public class EvalReportWriterTest {
 
     @Test
     public void unknownRunShouldStillRenderNineSectionsInOrder() {
-        String text = EvalReportWriter.render(EvalReportData.assemble(store, "r-20260101000000-full-zzzz"));
+        String text = EvalReportWriter.render(EvalReportData.assemble(store, "r-20260101000000-full-zzzz", TestReportWeights.map(), null, null));
 
         assertSectionsInOrder(text);
         assertTrue(text.contains(EvalReportData.MISSING));
@@ -210,7 +210,7 @@ public class EvalReportWriterTest {
     @Test
     public void missingMetricsShouldRenderFixedUnavailableNotes() {
         seedRun(RUN, "2026-10-25 23:00:00", RUBRIC, reportPath(RUN));
-        EvalReportData data = EvalReportData.assemble(store, RUN);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
         String text = EvalReportWriter.render(data);
 
         assertTrue(text.contains("- 总分：数据缺失"));
@@ -236,7 +236,7 @@ public class EvalReportWriterTest {
     @Test
     public void privacyFieldsShouldNotAppearInReport() {
         seedSnapshot();
-        EvalReportData data = EvalReportData.assemble(store, RUN);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
         String text = EvalReportWriter.render(data);
 
         assertFalse(text.contains("sk-secret-9f2"));
@@ -313,8 +313,7 @@ public class EvalReportWriterTest {
         assertEquals("reports/数据缺失", EvalReportWriter.relativeReportPath(""));
         assertEquals("reports/数据缺失", EvalReportWriter.relativeReportPath(null));
 
-        String missing = EvalReportWriter.renderPrivacy(EvalReportData.assemble(store,
-                "r-20260101000000-full-zzzz"));
+        String missing = EvalReportWriter.renderPrivacy(EvalReportData.assemble(store, "r-20260101000000-full-zzzz", TestReportWeights.map(), null, null));
         assertTrue(missing.contains("- 报表路径：reports/数据缺失"));
         assertFalse(missing.contains("sk-secret-9f2"));
     }
@@ -329,7 +328,7 @@ public class EvalReportWriterTest {
         seedCase(RUN, "case-long", "persona", "ok", 80.0D, "2", 1, 1,
                 longEvidence + "\n第二行");
 
-        EvalReportData data = EvalReportData.assemble(store, RUN);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
         EvalReportData.CaseRecord record = data.cases().get(0);
         assertTrue(record.evidenceSummary().length() <= EvalReportData.EVIDENCE_LIMIT + 1);
         assertTrue(record.evidenceSummary().endsWith("…"));
@@ -354,7 +353,7 @@ public class EvalReportWriterTest {
         seedFullCases(RUN);
         seedGenCalls(RUN);
         seedBaseline(BASE_RUN, 69.0D, RUBRIC);
-        EvalReportData data = EvalReportData.assemble(store, RUN);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
         String text = EvalReportWriter.render(data);
 
         assertTrue(text.contains("- 结论：不可比（九键不同）"));
@@ -367,7 +366,7 @@ public class EvalReportWriterTest {
     @Test
     public void trendTableShouldHaveSixColumns() {
         seedSnapshot();
-        String text = EvalReportWriter.render(EvalReportData.assemble(store, RUN));
+        String text = EvalReportWriter.render(EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null));
 
         List<String> lines = new ArrayList<String>();
         boolean inTrend = false;
@@ -438,7 +437,7 @@ public class EvalReportWriterTest {
         seedGenCalls(RUN);
         seedBaseCases(BASE_RUN);
         seedBaseline(BASE_RUN, 69.0D, RUBRIC);
-        return EvalReportData.assemble(store, RUN);
+        return EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
     }
 
     private void seedRun(String runId, String startedAt, String rubricVersion, String reportPath) {

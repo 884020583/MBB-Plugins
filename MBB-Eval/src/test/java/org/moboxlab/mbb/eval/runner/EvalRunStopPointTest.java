@@ -191,7 +191,8 @@ public class EvalRunStopPointTest {
 
         EvalRunStopPoint emptyReason = new EvalRunStopPoint("r-20261026000002-smoke-0002");
         emptyReason.requestStop(null);
-        assertEquals("空白原因按 aborted 记录", "aborted", emptyReason.requestedReason());
+        assertEquals("空白原因按 user-abort 记录（§13.1.3 封闭集合）",
+                EvalStore.ABORT_REASON_USER, emptyReason.requestedReason());
 
         EvalRunStopPoint failingProbe = new EvalRunStopPoint("r-20261026000003-smoke-0003",
                 new EvalRunStopPoint.RunStatusProbe() {

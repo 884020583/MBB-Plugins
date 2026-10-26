@@ -15,6 +15,7 @@ import org.junit.Rule;
 import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.moboxlab.mbb.eval.TestEvalAssets;
+import org.moboxlab.mbb.eval.store.EvalStore;
 
 import com.alibaba.fastjson.JSONObject;
 
@@ -53,8 +54,17 @@ public class EvalBankCacheTest {
         assertEquals("bank_hash 必须来自缓存内容", EvalHashUtil.bankHash(bytes), cache.bankHash());
         assertEquals("bank_hash 为 12 位小写十六进制", 12, cache.bankHash().length());
         assertEquals(cache.bankHash(), cache.bankHash().toLowerCase());
-        assertEquals("内置题库共 40 条用例", 40, cache.caseCount());
-        assertEquals("内置题库 smoke 12 条", 12, cache.smokeCount());
+        // 结构性断言：按缓存内容统计，题库增删用例时不会因写死数字误报。
+        int expectedCases = cache.json().getJSONArray("cases").size();
+        int expectedSmoke = 0;
+        for (int i = 0; i < expectedCases; i++) {
+            if (EvalStore.TIER_SMOKE.equals(
+                    cache.json().getJSONArray("cases").getJSONObject(i).getString("tier"))) {
+                expectedSmoke++;
+            }
+        }
+        assertEquals("caseCount 与题库内容一致", expectedCases, cache.caseCount());
+        assertEquals("smokeCount 与题库内容一致", expectedSmoke, cache.smokeCount());
         assertEquals(bankFile.getAbsolutePath(), cache.absolutePath());
         assertEquals("原始字节应原样缓存", bytes.length, cache.raw().length);
         assertNotNull("JSON 对象应缓存", cache.json());
@@ -64,7 +74,8 @@ public class EvalBankCacheTest {
         String summary = cache.summary();
         for (String fragment : new String[] {
                 TestEvalAssets.BANK_FILE_NAME, "version=1.0.0", "bank_hash=" + cache.bankHash(),
-                "40 条用例", "smoke 12 条", bankFile.getAbsolutePath() }) {
+                expectedCases + " 条用例", "smoke " + expectedSmoke + " 条",
+                bankFile.getAbsolutePath() }) {
             assertTrue("摘要缺少字段 " + fragment + "：" + summary, summary.contains(fragment));
         }
         assertTrue("成功时不应有错误码：" + cache.code(), cache.code().isEmpty());

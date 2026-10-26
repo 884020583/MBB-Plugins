@@ -140,7 +140,12 @@ public final class EvalCaseExecutor {
         return writeRow(context, start, caseScore, 1, 1, 0, 0L, 0L, 0L, 0, detail, evidence);
     }
 
-    /** LLM 维：k 次采样 + judge，聚合中位数（§6.7）。 */
+    /**
+     * LLM 维：每题只生成一次，再按 k 采样判分并聚合中位数（§6.7）。
+     *
+     * <p>生成侧按 §9.5 计一次调用；judge 的采样次数 k 由调用方按维度注入（boundary=3，其余=1），
+     * 确定性维不经过本方法。生成失败时按 k 个 error 样本落库（调用数仍是实际发生的次数）。</p>
+     */
     private EvalCaseResult executeJudge(EvalCaseContext context, long start) {
         EvalGenerateRequest prototype = generateRequest(context, 0, 0);
         EvalGenerateRequest.Problem problem = prototype.validate();
@@ -153,86 +158,94 @@ public final class EvalCaseExecutor {
 
         Collect collect = new Collect();
         int k = context.sampleCount();
-        for (int i = 0; i < k; i++) {
-            EvalRunStopPoint.Decision stop = context.stopPoint().beforeCall();
-            if (stop.stop()) {
-                return stopped(context, start, stop, collect.calls);
+        EvalRunStopPoint.Decision stop = context.stopPoint().beforeCall();
+        if (stop.stop()) {
+            return stopped(context, start, stop, collect.calls);
+        }
+        EvalCallInvoker.GenerateOutcome generated = context.invoker().generate(
+                context.runId(), context.caseId(), 0,
+                new EvalCallInvoker.GenerateCall() {
+                    @Override
+                    public EvalGenerateResult call(EvalCallInvoker.GenerateTarget target) {
+                        return context.generatePort().generate(
+                                generateRequest(context, target.sessionSampleIndex(), target.attempt()));
+                    }
+                });
+        collect.calls += generated.calls();
+        collect.cached += generated.cachedHits();
+        if (generated.isBudgetStopped()) {
+            return aborted(context, start, collect.calls, generated.abortReason(), "预算触顶");
+        }
+        EvalGenerateResult generatedResult = generated.result();
+        if (generated.kind() != EvalCallInvoker.GenerateKind.OK || generatedResult == null) {
+            String errorType = generatedResult == null ? EvalGenerateResult.ERROR_INTERNAL
+                    : generatedResult.errorType();
+            if (EvalGenerateResult.ERROR_DISABLED.equals(errorType)) {
+                EvalLog.error(context.logger(), "eval-generate 返回 disabled，停止整 run：case="
+                        + context.caseId());
+                return aborted(context, start, collect.calls, EvalGenerateResult.ERROR_DISABLED,
+                        "接口已关闭");
             }
-            final int sampleIndex = i;
-            EvalCallInvoker.GenerateOutcome generated = context.invoker().generate(
-                    context.runId(), context.caseId(), sampleIndex,
-                    new EvalCallInvoker.GenerateCall() {
-                        @Override
-                        public EvalGenerateResult call(EvalCallInvoker.GenerateTarget target) {
-                            return context.generatePort().generate(
-                                    generateRequest(context, target.sessionSampleIndex(), target.attempt()));
-                        }
-                    });
-            collect.calls += generated.calls();
-            collect.cached += generated.cachedHits();
-            if (generated.isBudgetStopped()) {
-                return aborted(context, start, collect.calls, generated.abortReason(), "预算触顶");
-            }
-            EvalGenerateResult generatedResult = generated.result();
-            if (generated.kind() != EvalCallInvoker.GenerateKind.OK || generatedResult == null) {
-                String errorType = generatedResult == null ? EvalGenerateResult.ERROR_INTERNAL
-                        : generatedResult.errorType();
-                if (EvalGenerateResult.ERROR_DISABLED.equals(errorType)) {
-                    EvalLog.error(context.logger(), "eval-generate 返回 disabled，停止整 run：case="
-                            + context.caseId());
-                    return aborted(context, start, collect.calls, EvalGenerateResult.ERROR_DISABLED,
-                            "接口已关闭");
-                }
-                EvalLog.errorOf(context.logger(), context.caseId(), errorType,
-                        context.clock().currentTimeMillis() - start);
+            EvalLog.errorOf(context.logger(), context.caseId(), errorType,
+                    context.clock().currentTimeMillis() - start);
+            // 生成只发生一次；失败按 k 个 error 样本记录，聚合为 error 而不是折算 0 分。
+            for (int i = 0; i < k; i++) {
                 collect.samples.add(Sample.error(errorType));
-                continue;
             }
-            if (!generatedResult.cached()) {
-                collect.addUsage(generatedResult.usage());
-            }
-            String veto = vetoReason(generatedResult);
-            if (veto != null) {
-                collect.samples.add(Sample.vetoed(veto, generatedResult.finishReason()));
-                break;
-            }
-            stop = context.stopPoint().beforeCall();
-            if (stop.stop()) {
-                return stopped(context, start, stop, collect.calls);
-            }
-            EvalCallInvoker.JudgeOutcome judged = context.invoker().judge(
-                    context.runId(), context.caseId(), sampleIndex, 0,
-                    new EvalCallInvoker.JudgeCall() {
-                        @Override
-                        public EvalJudgeResult call() {
-                            return context.judgePort().judge(judgeInput(context, sampleIndex,
-                                    generatedResult.content()));
-                        }
-                    });
-            collect.calls++;
-            if (judged.isBudgetStopped()) {
-                return aborted(context, start, collect.calls, judged.abortReason(), "预算触顶");
-            }
-            if (context.judgePort().aborted()) {
-                String reason = context.judgePort().abortReason();
-                EvalLog.error(context.logger(), "判分熔断，停止整 run：case=" + context.caseId()
-                        + " 原因=" + reason);
-                return aborted(context, start, collect.calls,
-                        reason == null ? "ai-unavailable" : reason, "判分熔断");
-            }
-            EvalJudgeResult judgeResult = judged.result();
-            if (judgeResult == null) {
-                judgeResult = EvalJudgeResult.error(context.dimension(), EvalJudgeResult.KIND_TRANSPORT,
-                        EvalGenerateResult.ERROR_INTERNAL, false, 0, null, "判分返回 null", null, 0);
-            }
-            if (judgeResult.isOk()) {
-                collect.samples.add(Sample.ok(judgeResult.label(), judgeResult.evidence(),
-                        generatedResult.content(), generatedResult.finishReason(),
-                        generatedResult.cached()));
-            } else if (judgeResult.isInvalid()) {
-                collect.samples.add(Sample.invalid(judgeResult.errorKind(), generatedResult.finishReason()));
-            } else {
-                collect.samples.add(Sample.error(judgeResult.errorType()));
+            EvalCaseScore errorScore = aggregate(context, collect, k);
+            JSONObject errorDetail = detailOf(collect);
+            return writeRow(context, start, errorScore, k, collect.samples.size(), collect.cached,
+                    collect.tokensPrompt, collect.tokensCompletion, collect.tokensTotal, collect.calls,
+                    errorDetail, aggregateEvidence(collect, k));
+        }
+        if (!generatedResult.cached()) {
+            collect.addUsage(generatedResult.usage());
+        }
+        String veto = vetoReason(generatedResult);
+        if (veto != null) {
+            collect.samples.add(Sample.vetoed(veto, generatedResult.finishReason()));
+        } else {
+            String content = generatedResult.content();
+            for (int i = 0; i < k; i++) {
+                stop = context.stopPoint().beforeCall();
+                if (stop.stop()) {
+                    return stopped(context, start, stop, collect.calls);
+                }
+                final int judgeSampleIndex = i;
+                EvalCallInvoker.JudgeOutcome judged = context.invoker().judge(
+                        context.runId(), context.caseId(), judgeSampleIndex, 0,
+                        new EvalCallInvoker.JudgeCall() {
+                            @Override
+                            public EvalJudgeResult call() {
+                                return context.judgePort().judge(judgeInput(context, judgeSampleIndex,
+                                        content));
+                            }
+                        });
+                collect.calls++;
+                if (judged.isBudgetStopped()) {
+                    return aborted(context, start, collect.calls, judged.abortReason(), "预算触顶");
+                }
+                if (context.judgePort().aborted()) {
+                    String reason = context.judgePort().abortReason();
+                    EvalLog.error(context.logger(), "判分熔断，停止整 run：case=" + context.caseId()
+                            + " 原因=" + reason);
+                    return aborted(context, start, collect.calls,
+                            reason == null ? EvalStore.ABORT_REASON_AI_UNAVAILABLE : reason, "判分熔断");
+                }
+                EvalJudgeResult judgeResult = judged.result();
+                if (judgeResult == null) {
+                    judgeResult = EvalJudgeResult.error(context.dimension(), EvalJudgeResult.KIND_TRANSPORT,
+                            EvalGenerateResult.ERROR_INTERNAL, false, 0, null, "判分返回 null", null, 0);
+                }
+                if (judgeResult.isOk()) {
+                    collect.samples.add(Sample.ok(judgeResult.label(), judgeResult.evidence(),
+                            content, generatedResult.finishReason(), generatedResult.cached()));
+                } else if (judgeResult.isInvalid()) {
+                    collect.samples.add(Sample.invalid(judgeResult.errorKind(),
+                            generatedResult.finishReason()));
+                } else {
+                    collect.samples.add(Sample.error(judgeResult.errorType()));
+                }
             }
         }
 

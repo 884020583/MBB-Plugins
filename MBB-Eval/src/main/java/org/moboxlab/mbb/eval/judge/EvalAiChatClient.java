@@ -96,11 +96,4 @@ public final class EvalAiChatClient implements EvalJudgeChatClient {
         }
         return plugin.getServer().getPluginManager().getService(SERVICE_NAME);
     }
-
-    /** 便于排查：只在客户端被显式构造时输出一次装配日志。 */
-    public void logWired() {
-        if (logger != null) {
-            logger.sendInfo("[MBB-Eval] 判分 chat 客户端已接入 MBB-AI（动作 " + ACTION_CHAT + "）");
-        }
-    }
 }

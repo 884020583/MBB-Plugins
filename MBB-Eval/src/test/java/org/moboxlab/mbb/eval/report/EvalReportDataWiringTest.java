@@ -73,7 +73,7 @@ public class EvalReportDataWiringTest {
         seedRun(RUN, RUBRIC, improvingCases(), 40);
         seedGenCalls(RUN, 20);
 
-        EvalReportData data = EvalReportData.assemble(store, RUN);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
 
         assertNotNull("§5 必须挂上 F-6 delta", data.delta());
         assertTrue(data.delta().available());
@@ -94,7 +94,7 @@ public class EvalReportDataWiringTest {
         seedRun(RUN, RUBRIC, flatCases(60.0D, 40), 40);
         seedGenCalls(RUN, 20);
 
-        EvalReportData data = EvalReportData.assemble(store, RUN);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
 
         assertNotNull(data.delta());
         assertTrue(data.delta().comparable());
@@ -113,7 +113,7 @@ public class EvalReportDataWiringTest {
         seedRun(RUN, "rubric-2", flatCases(60.0D, 40), 40);
         seedGenCalls(RUN, 20);
 
-        EvalReportData data = EvalReportData.assemble(store, RUN);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
 
         assertNotNull(data.delta());
         assertFalse(data.delta().comparable());
@@ -134,7 +134,7 @@ public class EvalReportDataWiringTest {
         seedGenCalls(RUN, 20);
         EvalAiUsageSource empty = new FakeSource(Collections.<EvalAiUsageDay>emptyList());
 
-        EvalReportData data = EvalReportData.assemble(store, RUN, null, empty);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), empty, null);
         String text = EvalReportWriter.render(data);
 
         assertNotNull("有数据源时必须产出 L3 旁证对象", data.aiUsage());
@@ -155,7 +155,7 @@ public class EvalReportDataWiringTest {
                 new EvalAiUsageDay("2026-10-25", "eval-profile-1", 100L, 96L, 4L,
                         1000L, 500L, 1500L, 25000L, 3L)));
 
-        EvalReportData data = EvalReportData.assemble(store, RUN, null, source);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), source, null);
         String text = EvalReportWriter.render(data);
 
         assertTrue(data.aiUsage().available());
@@ -179,7 +179,7 @@ public class EvalReportDataWiringTest {
             }
         };
 
-        EvalReportData data = EvalReportData.assemble(store, RUN, null, broken);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), broken, null);
 
         assertNotNull(data.aiUsage());
         assertFalse("读失败按不可得兜底，不抛错", data.aiUsage().available());
@@ -192,7 +192,7 @@ public class EvalReportDataWiringTest {
         seedRun(RUN, RUBRIC, flatCases(60.0D, 40), 40);
         seedGenCalls(RUN, 20);
 
-        EvalReportData data = EvalReportData.assemble(store, RUN);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
 
         assertNull(data.aiUsage());
         assertNotNull(data.delta());
@@ -206,7 +206,7 @@ public class EvalReportDataWiringTest {
         seedBaselineRun();
         seedRun(RUN, RUBRIC, flatCases(60.0D, 40), 40);
         seedGenCalls(RUN, 20);
-        EvalReportData data = EvalReportData.assemble(store, RUN);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
         File reportsDir = new File(folder.getRoot(), "reports");
 
         File report = EvalReportWriter.writeToFile(data, reportsDir);
@@ -227,7 +227,7 @@ public class EvalReportDataWiringTest {
         seedBaselineRun();
         seedRun(RUN, RUBRIC, flatCases(60.0D, 40), 40);
         seedGenCalls(RUN, 20);
-        EvalReportData data = EvalReportData.assemble(store, RUN);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
 
         File reportsDir = new File(folder.getRoot(), "reports");
         EvalReportWriter.writeToFile(data, reportsDir);
@@ -252,7 +252,7 @@ public class EvalReportDataWiringTest {
         row.put("started_at", STARTED_AT);
         row.put("rubric_version", RUBRIC);
         assertTrue(store.insertRunning(row));
-        EvalReportData data = EvalReportData.assemble(store, RUN);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
         assertFalse(EvalGroupSummaryFormatter.canSummarize(data));
 
         File reportsDir = new File(folder.getRoot(), "reports");
