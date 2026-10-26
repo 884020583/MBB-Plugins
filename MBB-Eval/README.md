@@ -3,13 +3,13 @@
 MoBoxBot 的离线评测与回归基线插件：用固定题库对 MBB-AI 做可重复的自动评测，由 LLM 判分并与基线对比。评测只在命令触发或后台调度时运行，**不参与线上对话回复**。
 
 - 规格：[docs/MBB-Eval.md](../docs/MBB-Eval.md)
-- 规格票：#50；实施票：#51（A-1 插件骨架与构建接入）、#53（A-2 四表建表、索引与 run_id/CAS 骨架）、#60（A-3 命令受理、预检桩与 runner 骨架）、#61（A-4 Roleplay 网关骨架）、#54（A-5 测试载体与最小用例）、#57（G-1 命令框架与权限矩阵）；规格 #50 其余切片（F-1 存储门面、D-2 rubric 加载、D-1 确定性判分、B-1 内置题库、C-3 能力协商、C-2 Roleplay 评测生成、F-5 基线与九键可比性、E-3 报表性能节、H-2 调用重试与预算记账、H-4 终态与生命周期、I-5 Roleplay 旧键收口与墓碑）按 §16 波次推进中
+- 规格票：#50；实施票：#51（A-1 插件骨架与构建接入）、#53（A-2 四表建表、索引与 run_id/CAS 骨架）、#60（A-3 命令受理、预检桩与 runner 骨架）、#61（A-4 Roleplay 网关骨架）、#54（A-5 测试载体与最小用例）、#57（G-1 命令框架与权限矩阵）；规格 #50 其余切片（F-1 存储门面、D-2 rubric 加载、D-1 确定性判分、B-1 内置题库、C-3 能力协商、C-2 Roleplay 评测生成、F-5 基线与九键可比性、E-3 报表性能节、H-2 调用重试与预算记账、H-4 终态与生命周期、I-5 Roleplay 旧键收口与墓碑，以及 A–I 区其余切片）已按 §16 波次全部落地
 
 ## 当前阶段
 
-规格 #50 实施中（按 §16 波次推进）：插件可构建、可被主程序加载、可读取并钳制配置；启用时幂等创建四张数据表与七个索引，并对老库只补列、不删除不重建；已注册 `/eval` 命令，具备逐子命令权限判定、预检与单 run 互斥、run_id 生成、RUNNING 行写入与终态 CAS；对 MBB-Roleplay 的 `capabilities` / `eval-generate` 已有完整网关（入参拼装、出参必需字段校验、errorType 处置映射、sessionId 编码），预检据此判定接口版本与禁用状态。骨架期 `/eval run` 受理后只做占位执行（不读题库、不调用 AI、不写 case/call 行）；题库、rubric、判分、报表与基线由后续切片按规格 §16.2 接入。命令框架已按 §9.1–§9.3 收口：9 条命令与 OWNER / BOT_ADMIN / EVERYONE 权限矩阵、冷却 3 秒、`help` 自描述、未知与无子命令回可用命令提示、统一 `[eval]` 回执前缀，均有回归用例固化。已按 §16 波次合入存储门面与 ST1–ST10 契约（F-1）、rubric 加载与版本校验（D-2）、确定性判分内核（D-1）、v1 内置题库 `bank-1.0.0`（B-1）与能力协商客户端（C-3）；判分调用、聚合预算将按 H 区接线，`/eval run` 依旧只做占位执行。已合入 F-5 基线与九键可比性（首个成功 full run 自动建唯一 active 基线、smoke 永不成为基线、显式重设理由必填、九键按 §8.2 顺序比较并列出全部差异与缺失键）、E-3 报表性能节（§7 六类指标、run 总时长与评测自身开销单列、六项不可得固定标注）、H-2 调用重试与预算记账（只按 `retryable` 退避重试、`cached` 换 `sessionId` 重采、每次物理调用先占预算再落 `_call` 行且不超卖）、H-4 终态与生命周期（每 case 落库前与每次调用前检查停止点、停用尽力终态 CAS 并区分结果、孤儿回收按进程启动时刻且幂等，CAS 0/-1 只告警不重试）；Roleplay 侧已收口 `evalApiEnable` 正式键与 `evalApiEnable && evalEnable` 语义，`/role eval` 改为墓碑提示。构建脚本已支持可选 `-Test` 本地自检（配置键、SQL 文本、run_id 正则、权限矩阵、命令框架与清单资源），不传 `-Test` 时行为与此前一致。
+规格 #50 已按 §16 波次落地：插件可构建、可被主程序加载、可读取并钳制配置；启用时幂等创建四张数据表与七个索引，并对老库只补列、不删除不重建。启用期一次性完成「定位题库 → 仅在缺失时释放内置 `bank-1.0.0` 与默认 rubric → 先 rubric 后题库校验 → persona 绑定 → 建缓存」，失败按错误码记 WARN/ERROR 并保留绝对路径，只读命令照常可用；不热重载。`/eval` 9 条命令全部可用：`run` 经八项预检（接口能力、题库、rubric、persona、judge profile、MBB-AI、数据目录、预算）后受理，命令线程立即返回三行回执，实际评测在插件自有单线程 daemon 中执行（smoke 12 题 / full 40 题，逐题 `eval-generate` 采样与 judge 判分，每次物理调用先占预算再落 `_call` 行），预算、墙钟、停止点、判断熔断与孤儿回收均按 §9/§13 收口，终态只经 CAS 写入且 `-1`/`0` 只告警不重试。`report` 从库现算九节 Markdown（含 §7 性能节、L3 用量旁证、基线 delta 与显著性、隐私字段白名单），`baseline` 维护唯一 active 基线并按九键判断可比性，`baseline set` 只接受 COMPLETED full 且理由必填，`list` 零调用列出题库，`status` 只读展示进度与失败分布；群内摘要为 ≤15 行纯文本。库：`bank-1.0.0`（40 条，配比 12/8/8/6/6，smoke 12）与默认 rubric `1.1.0-c32119f4` 随 JAR 发布，只在 `evals/` 缺失时释放，已存在的文件不覆盖、不删除。
 
-当前版本：`V0.1.0.0.1920`（apiVersion `0.3`）。
+当前版本：`V0.1.0.0.2325`（apiVersion `0.3`）。
 
 ## 配置
 
@@ -53,7 +53,7 @@ MoBoxBot 的离线评测与回归基线插件：用固定题库对 MBB-AI 做可
 
 已注册 `/eval`，逐子命令权限见规格 §9（与 `/eval help` 输出一致）：`/eval run`、`/eval abort`、`/eval baseline set` 需要 OWNER；`/eval status`、`/eval report`、`/eval list`、`/eval baseline`、`/eval baseline show` 需要 BOT_ADMIN；`/eval help` 对所有人开放。子命令与档位大小写敏感，冷却 3 秒（由主程序命令框架按 `cooldownSeconds` 执行），无 `reload`；无子命令回用法提示，未知子命令与 `/eval reload` 回「未知子命令」提示，两者都列出可用命令，且不建 run、不调用 AI。
 
-骨架期已可用：`/eval help`、`/eval status`（最近一次或指定 run 的只读快照）、`/eval abort`（含插件重启后遗留 RUNNING 行的收尾）；`/eval run` 走接口能力（`evalApiVersion`、`actions` 含 `eval-generate`、`evalApiEnable`）与 planned 预算预检，受理后只做占位执行（不读题库、不产生 AI 调用）。题库、rubric、persona 等预检项待 B/C/D 区接入。`/eval report`、`/eval list`、`/eval baseline` 三组仅做权限判定后回「后续切片接入」。
+全部子命令可用：`run` 逐项预检并按 §9.3.1 回三行受理回执（题数 / 预计调用与预算 / 状态与中止入口），同一时刻只允许一个 run（内存单飞 + DB RUNNING 行双保险），重复 run 回当前 runId 与进度；`status` 支持无参与指定 run 的只读快照（进度、`calls_used`/`calls_budget`、失败分布、剩余墙钟）；`report` 只对 COMPLETED 从库重建报表并回路径与 ≤15 行摘要；`list` 零调用列出题库；`baseline` 与 `baseline show` 展示 active 基线与最近历史；`baseline set` 仅 OWNER 且理由必填；`abort` 走终态 CAS，插件停用时尽力置 ABORTED(shutdown)。拒绝类回执统一带错误码、绝对路径、最多 5 条明细与下一步动作。
 
 ## 跨插件接口
 
@@ -86,7 +86,7 @@ MBB-Eval 不 import MBB-Roleplay 的任何内部类，只经主程序的服务�
 .\build.ps1 -Bot "D:\CodeX\Projects\MoBoxBot\out\MoBoxBot.jar" -Test
 ```
 
-`-Test` 在打包成功后编译 `src/test/java` 并用 JUnitCore 跑 `*Test` 用例，覆盖配置键与钳制、四表七索引的 SQL 文本边界（索引名、唯一性与部分谓词）、`run_id` 格式与主键冲突重生成、终态 CAS 返回值语义、权限矩阵，以及命令框架（`help` 列出 9 条命令与最低权限、权限不足只回一句且不触碰 runner、无子命令/未知子命令/`reload`/`baseline` 多余参数的提示、子命令与档位大小写敏感、冷却 3 秒、`[eval]` 前缀），以及存储门面 ST1–ST10 契约（含 `-1` / `0` 语义与部分行识别）、rubric 加载与版本校验、确定性判分（8 步归一化 / 知识维 / 风格维）、v1 题库结构与 persona 绑定、能力协商五态，以及直接解包 `out/MBB-Eval.jar` 检查根目录清单与 `plugin.json` / `config.yml` 内容。首次运行会把 `junit 4.13.2` 与 `hamcrest-core 1.3` 下载到 `out/test-libs` 并做 sha1 校验（离线环境可手工放入同名 jar，内置 sha1 兜底），下载失败即构建失败。全量构建 `build-all.ps1` 不传 `-Test`，因此没有测试环境时全量构建不受影响。
+`-Test` 在打包成功后编译 `src/test/java` 并用 JUnitCore 跑 `*Test` 用例，覆盖配置键与钳制、四表七索引的 SQL 文本边界（索引名、唯一性与部分谓词）、`run_id` 格式与主键冲突重生成、终态 CAS 返回值语义、权限矩阵，以及命令框架（`help` 列出 9 条命令与最低权限、权限不足只回一句且不触碰 runner、无子命令/未知子命令/`reload`/`baseline` 多余参数的提示、子命令与档位大小写敏感、冷却 3 秒、`[eval]` 前缀），以及存储门面 ST1–ST10 契约（含 `-1` / `0` 语义与部分行识别）、rubric 加载与版本校验、确定性判分（8 步归一化 / 知识维 / 风格维）、v1 题库结构与 persona 绑定、能力协商五态，以及直接解包 `out/MBB-Eval.jar` 检查根目录清单与 `plugin.json` / `config.yml` 内容；当前共 58 个测试类 591 个测试方法，覆盖存储门面契约、判分内核、报表渲染与重建、run 主循环与中止路径、预检八项与错误码呈现、基线 delta 与可信度门槛。首次运行会把 `junit 4.13.2` 与 `hamcrest-core 1.3` 下载到 `out/test-libs` 并做 sha1 校验（离线环境可手工放入同名 jar，内置 sha1 兜底），下载失败即构建失败。全量构建 `build-all.ps1` 不传 `-Test`，因此没有测试环境时全量构建不受影响。
 
 ## 安装
 
