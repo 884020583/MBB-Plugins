@@ -3,13 +3,13 @@
 MoBoxBot 的离线评测与回归基线插件：用固定题库对 MBB-AI 做可重复的自动评测，由 LLM 判分并与基线对比。评测只在命令触发或后台调度时运行，**不参与线上对话回复**。
 
 - 规格：[docs/MBB-Eval.md](../docs/MBB-Eval.md)
-- 规格票：#50；实施票：#51（A-1 插件骨架与构建接入）、#53（A-2 四表建表、索引与 run_id/CAS 骨架）
+- 规格票：#50；实施票：#51（A-1 插件骨架与构建接入）、#53（A-2 四表建表、索引与 run_id/CAS 骨架）、#60（A-3 命令受理、预检桩与 runner 骨架）
 
 ## 当前阶段
 
-A-2 存储骨架阶段：插件可构建、可被主程序加载、可读取并钳制配置；启用时幂等创建四张数据表与七个索引，并对老库只补列、不删除不重建。尚未注册 `/eval` 命令，也不含题库加载、判分、报表与基线逻辑，这些由后续切片按规格 §16.2 接入。
+A-3 命令与 runner 骨架阶段：插件可构建、可被主程序加载、可读取并钳制配置；启用时幂等创建四张数据表与七个索引，并对老库只补列、不删除不重建；已注册 `/eval` 命令，具备逐子命令权限判定、预检与单 run 互斥、run_id 生成、RUNNING 行写入与终态 CAS。骨架期 `/eval run` 受理后只做占位执行（不读题库、不调用 AI、不写 case/call 行），用于验证受理与卸载中止路径；题库、rubric、判分、报表与基线由后续切片按规格 §16.2 接入。
 
-当前版本：`V0.1.0.0.0405`（apiVersion `0.3`）。
+当前版本：`V0.1.0.0.1353`（apiVersion `0.3`）。
 
 ## 配置
 
@@ -49,9 +49,11 @@ A-2 存储骨架阶段：插件可构建、可被主程序加载、可读取并�
 
 建表、补列或建索引失败时记 ERROR 并禁用评测写路径（`/eval report` 等只读命令仍可用），绝不 DROP 或重建已有表；后续版本新增列先用 `PRAGMA table_info` 读现有列，确认缺列再 `ALTER TABLE ADD COLUMN`。
 
-## 命令与权限（规划）
+## 命令与权限
 
-命令在后续切片注册，当前不可用。权限口径见规格 §9：`/eval run`、`/eval abort`、`/eval baseline set` 需要 OWNER；`/eval status`、`/eval report`、`/eval list`、`/eval baseline`、`/eval baseline show` 需要 BOT_ADMIN；`/eval help` 对所有人开放。
+已注册 `/eval`，逐子命令权限见规格 §9（与 `/eval help` 输出一致）：`/eval run`、`/eval abort`、`/eval baseline set` 需要 OWNER；`/eval status`、`/eval report`、`/eval list`、`/eval baseline`、`/eval baseline show` 需要 BOT_ADMIN；`/eval help` 对所有人开放。子命令与档位大小写敏感，冷却 3 秒，无 `reload`。
+
+骨架期已可用：`/eval help`、`/eval status`（最近一次或指定 run 的只读快照）、`/eval abort`（含插件重启后遗留 RUNNING 行的收尾）；`/eval run` 走接口能力与预算预检，受理后只做占位执行（不读题库、不产生 AI 调用）。题库、rubric、persona 等预检项待 B/C/D 区接入。`/eval report`、`/eval list`、`/eval baseline` 三组仅做权限判定后回「后续切片接入」。
 
 ## 构建
 
@@ -80,4 +82,4 @@ MBB-Eval 经 `capabilities` / `eval-generate` 调用 MBB-Roleplay 的评测接�
 
 ## 数据目录
 
-插件数据目录由框架提供（`getDataFolder()`）。按规格，报表固定写入 `./MoBoxBot/plugins/MBB-Eval/reports/`，题库文件位于 `./MoBoxBot/plugins/MBB-Roleplay/evals/`；数据表落在主程序数据库，由 `StorageService` 管理。当前存储骨架阶段只建表与索引，不写评测数据、不生成报表。
+插件数据目录由框架提供（`getDataFolder()`）。按规格，报表固定写入 `./MoBoxBot/plugins/MBB-Eval/reports/`，题库文件位于 `./MoBoxBot/plugins/MBB-Roleplay/evals/`；数据表落在主程序数据库，由 `StorageService` 管理。当前骨架阶段只写 run 主记录（受理时 RUNNING、停止或中止时 ABORTED），不写 case/call 行、不生成报表。

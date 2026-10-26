@@ -2,7 +2,10 @@ package org.moboxlab.mbb.eval;
 
 import org.moboxlab.moboxbot.API.Plugin;
 import org.moboxlab.moboxbot.API.Storage.StorageService;
+import org.moboxlab.mbb.eval.command.EvalCommand;
 import org.moboxlab.mbb.eval.config.EvalConfig;
+import org.moboxlab.mbb.eval.runner.EvalPreflight;
+import org.moboxlab.mbb.eval.runner.EvalRunner;
 import org.moboxlab.mbb.eval.store.EvalSchemaService;
 import org.moboxlab.mbb.eval.store.EvalStore;
 
@@ -11,19 +14,21 @@ import org.moboxlab.mbb.eval.store.EvalStore;
  *
  * <p>负责：保存默认配置、在启用时读取并钳制 14 个 eval* 配置键、把越界与非法项写入日志；
  * 启用时幂等创建四张数据表与索引，失败则禁用评测写路径但不重建、不删表；
- * schema 就绪后装配 {@link EvalStore}，供后续切片生成 run_id 与终态 CAS。
- * 命令注册、executor、题库与报表由后续切片接入；当前不注册任何命令，也不参与线上回复。</p>
+ * 随后装配 {@link EvalPreflight} 与 {@link EvalRunner} 并注册 /eval 命令。
+ * 停用时先让 runner 尽力把 RUNNING 行收尾为 ABORTED(shutdown)，再释放引用。
+ * 题库、rubric、报表与判决由后续切片接入；当前 run 为占位执行，不读题库、不发起 AI 调用。</p>
  */
 public class EvalPlugin extends Plugin {
 
     private EvalConfig evalConfig;
     private EvalStore evalStore;
+    private EvalRunner evalRunner;
     private boolean schemaReady;
 
     @Override
     public void onLoad() {
         saveDefaultConfig();
-        getLogger().sendInfo("[MBB-Eval] 插件已加载，骨架阶段：读取配置与数据表，未注册命令");
+        getLogger().sendInfo("[MBB-Eval] 插件已加载，骨架阶段：读取配置、数据表与命令");
     }
 
     @Override
@@ -35,6 +40,7 @@ public class EvalPlugin extends Plugin {
         getLogger().sendInfo("[MBB-Eval] 配置已读取，共 " + EvalConfig.keys().size()
                 + " 项，默认档位 " + evalConfig.defaultTier());
         initStorage();
+        initRunner();
         getLogger().sendInfo("[MBB-Eval] 已启用，版本 " + getVersion());
     }
 
@@ -61,8 +67,29 @@ public class EvalPlugin extends Plugin {
         getLogger().sendInfo("[MBB-Eval] 数据表已就绪（4 表 / 7 索引）");
     }
 
+    /**
+     * 装配预检与 runner，并注册 /eval 命令。
+     *
+     * <p>即使数据表未就绪也要注册命令：/eval status、/eval help 仍应可用，run 由预检回
+     * 「数据表未就绪」而不是静默消失（§4.6、§13.4）。</p>
+     */
+    private void initRunner() {
+        if (getServer() == null) {
+            getLogger().sendError("[MBB-Eval] 服务器未就绪，未注册 /eval 命令");
+            return;
+        }
+        EvalPreflight preflight = EvalPreflight.forPlugin(this, evalConfig);
+        evalRunner = new EvalRunner(evalStore, evalConfig, preflight, getLogger(), getVersion());
+        getServer().getPluginManager().registerCommand(this, new EvalCommand(evalRunner, evalConfig));
+        getLogger().sendInfo("[MBB-Eval] 已注册 /eval 命令（骨架阶段，run 为占位执行，不发起 AI 调用）");
+    }
+
     @Override
     public void onDisable() {
+        if (evalRunner != null) {
+            evalRunner.shutdown();
+            evalRunner = null;
+        }
         evalConfig = null;
         evalStore = null;
         schemaReady = false;
