@@ -39,22 +39,43 @@ public final class EvalBudgetLedger {
      */
     public EvalBudgetLedger(String runId, int planned, int limit, long deadlineAtMillis,
             CallsUsedWriter writer, PluginLogger logger) {
-        if (runId == null || runId.trim().isEmpty()) {
-            throw new IllegalArgumentException("run_id 不能为空");
-        }
-        if (writer == null) {
-            throw new IllegalArgumentException("calls_used 写穿器不能为空");
-        }
-        this.runId = runId;
-        this.budget = new EvalRunBudget(planned, limit, deadlineAtMillis);
-        this.writer = writer;
-        this.logger = logger;
+        this(runId, new EvalRunBudget(planned, limit, deadlineAtMillis), writer, logger);
     }
 
     /** 以 EvalStore 作为写穿目标的生产装配。 */
     public EvalBudgetLedger(String runId, int planned, int limit, long deadlineAtMillis,
             EvalStore store, PluginLogger logger) {
-        this(runId, planned, limit, deadlineAtMillis, storeWriter(store), logger);
+        this(runId, new EvalRunBudget(planned, limit, deadlineAtMillis), storeWriter(store), logger);
+    }
+
+    /**
+     * 与 runner 共享同一个 {@link EvalRunBudget} 实例。
+     *
+     * <p>主循环内 runner 与 ledger 必须看同一份 used/limit/deadline：否则 /eval status 会一直读到 0，
+     * 且 /eval abort 的中止标志传不到调用前占位。本构造只接管既有实例，不再新建预算。</p>
+     *
+     * @throws IllegalArgumentException run_id 为空、预算为空或写穿器为空
+     */
+    public EvalBudgetLedger(String runId, EvalRunBudget budget, CallsUsedWriter writer,
+            PluginLogger logger) {
+        if (runId == null || runId.trim().isEmpty()) {
+            throw new IllegalArgumentException("run_id 不能为空");
+        }
+        if (budget == null) {
+            throw new IllegalArgumentException("预算实例不能为空");
+        }
+        if (writer == null) {
+            throw new IllegalArgumentException("calls_used 写穿器不能为空");
+        }
+        this.runId = runId;
+        this.budget = budget;
+        this.writer = writer;
+        this.logger = logger;
+    }
+
+    /** 共享 runner 预算并以 EvalStore 作为写穿目标。 */
+    public EvalBudgetLedger(String runId, EvalRunBudget budget, EvalStore store, PluginLogger logger) {
+        this(runId, budget, storeWriter(store), logger);
     }
 
     /**

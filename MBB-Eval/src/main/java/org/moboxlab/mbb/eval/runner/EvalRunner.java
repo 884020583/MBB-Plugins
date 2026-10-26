@@ -2,9 +2,14 @@ package org.moboxlab.mbb.eval.runner;
 
 import com.alibaba.fastjson.JSONObject;
 import org.moboxlab.mbb.eval.config.EvalConfig;
+import org.moboxlab.mbb.eval.exec.EvalRunLoop;
+import org.moboxlab.mbb.eval.report.EvalReportData;
+import org.moboxlab.mbb.eval.report.EvalReportWriter;
 import org.moboxlab.mbb.eval.store.EvalStore;
 import org.moboxlab.moboxbot.API.PluginLogger;
 
+import java.io.File;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
@@ -18,9 +23,10 @@ import java.util.concurrent.atomic.AtomicReference;
 /**
  * run 受理与骨架期占位执行（规格 §9.3、§9.4、§13.4）。
  *
- * <p>本切片只负责把「一次 /eval run」的生命周期管起来：预检 → 生成 run_id → 写 RUNNING 行 →
- * 占位执行 → 终态 CAS。占位执行不调用 AI、不写 case/call 行，只是让中止与墙钟路径可以真实走到，
- * 具体评测流程由 F 区替换 {@link #placeholderLoop(RunState)}。</p>
+ * <p>本类负责把「一次 /eval run」的生命周期管起来：预检 → 生成 run_id → 写 RUNNING 行 →
+ * {@link EvalRunLoop} 真实主循环 → 终态 CAS → COMPLETED 时生成报表并回写 report_path。
+ * 未装配主循环依赖时保留占位轮询 {@link #placeholderLoop(RunState)}：只观察中止、墙钟与外部终态，
+ * 不调用 AI、不写 case/call 行，供生命周期自检使用。</p>
  *
  * <p>并发约束：同一时刻只允许一个 RUNNING run。受理时不仅看内存中的 active，还会查库确认没有
  * 遗留的 RUNNING 行（插件重启后内存状态为空，但库里的行还在），避免同一时间出现两个 RUNNING。
@@ -411,6 +417,8 @@ public final class EvalRunner implements EvalRunService {
     private final PluginLogger logger;
     private final String evalPluginVersion;
     private final ExecutorService executor;
+    /** 真实评测主循环；null 表示未装配执行依赖，只做守护轮询（不写 case/call 行、不发终态）。 */
+    private final EvalRunLoop runLoop;
     private final AtomicReference<RunState> active = new AtomicReference<RunState>(null);
     private final AtomicBoolean closing = new AtomicBoolean(false);
 
@@ -423,11 +431,23 @@ public final class EvalRunner implements EvalRunService {
      */
     public EvalRunner(EvalStore store, EvalConfig config, EvalPreflight preflight, PluginLogger logger,
                       String evalPluginVersion) {
+        this(store, config, preflight, logger, evalPluginVersion, null);
+    }
+
+    /**
+     * 带主循环的装配。
+     *
+     * @param runLoop 真实评测主循环；null 表示未装配执行依赖（例如只做生命周期自检的构造），
+     *                此时只保留守护轮询，不写 case/call 行、不发终态、不生成报表
+     */
+    public EvalRunner(EvalStore store, EvalConfig config, EvalPreflight preflight, PluginLogger logger,
+                      String evalPluginVersion, EvalRunLoop runLoop) {
         this.store = store;
         this.config = config;
         this.preflight = preflight;
         this.logger = logger;
         this.evalPluginVersion = evalPluginVersion;
+        this.runLoop = runLoop;
         this.executor = Executors.newSingleThreadExecutor(new ThreadFactory() {
             @Override
             public Thread newThread(Runnable runnable) {
@@ -525,7 +545,7 @@ public final class EvalRunner implements EvalRunService {
                         new EvalRunBudget(planned, budgetLimit, deadlineAtMillis),
                         new EvalRunStopPoint(runId, statusProbe(runId)));
                 active.set(state);
-                schedulePlaceholder(state);
+                scheduleRun(state);
                 return AcceptResult.accepted(runId, normalized, caseCount, planned, budgetLimit);
             }
             return AcceptResult.failed(normalized, "连续 " + INSERT_MAX_ATTEMPTS + " 次写入 run 行失败");
@@ -739,16 +759,110 @@ public final class EvalRunner implements EvalRunService {
     }
 
     /**
-     * 骨架期占位执行：不调用 AI、不写 case/call 行，只轮询中止与墙钟，命中后落终态。
-     * F 区接入真实评测流程时整体替换本方法，终态写入仍复用 {@link #finishAbort(RunState, String)}。
+     * 把一次 run 交给 runner 自己的单线程 daemon executor。
+     *
+     * <p>装配了 {@link EvalRunLoop} 时执行真实评测主循环；未装配时保留守护轮询
+     * （只观察中止、墙钟与外部终态，不调用 AI、不写 case/call 行），供生命周期自检使用。</p>
      */
-    private void schedulePlaceholder(final RunState state) {
+    private void scheduleRun(final RunState state) {
         executor.execute(new Runnable() {
             @Override
             public void run() {
-                placeholderLoop(state);
+                if (runLoop == null) {
+                    placeholderLoop(state);
+                } else {
+                    runMainLoop(state);
+                }
             }
         });
+    }
+
+    /**
+     * 真实评测主循环：题库子集逐题执行 → 终态 CAS → COMPLETED 时生成报表。
+     *
+     * <p>所有写库仍走 {@link #casTerminal}（-1 / 0 只 WARN、不重试，§13.4）；外部已收口
+     * （TERMINAL_IN_STORE）时只释放内存持有，不得用内存状态覆盖数据库。</p>
+     */
+    private void runMainLoop(final RunState state) {
+        EvalRunLoop.Result result;
+        try {
+            result = runLoop.run(EvalRunLoop.Request.of(state.runId, state.tier, state.budget,
+                    state.stopPoint));
+        } catch (RuntimeException e) {
+            warn("评测主循环异常，run_id=" + state.runId + "：" + e.getMessage());
+            finishFailed(state, "主循环异常：" + e.getClass().getSimpleName());
+            return;
+        }
+        if (result == null) {
+            warn("评测主循环未返回结果，run_id=" + state.runId);
+            finishFailed(state, "主循环未返回结果");
+            return;
+        }
+        if (result.terminalInStore()) {
+            if (state.finished.compareAndSet(false, true)) {
+                active.compareAndSet(state, null);
+            }
+            warn("run 已由其他路径收口，run_id=" + state.runId + "，本轮不再发终态 CAS");
+            return;
+        }
+        if (result.status() == EvalRunLoop.Status.COMPLETED) {
+            finishCompleted(state, result);
+            return;
+        }
+        finishAbort(state, result.abortReason());
+    }
+
+    /**
+     * COMPLETED 收口：先 CAS 终态，成功后才生成报表并回写 report_path。
+     *
+     * <p>CAS 返回 0 / -1 时 {@link #casTerminal} 已记 WARN，这里不再重试、也不生成报表，
+     * 避免出现「报表存在但 run 行仍是 RUNNING」的假完成（§13.4）。</p>
+     */
+    private void finishCompleted(final RunState state, final EvalRunLoop.Result result) {
+        if (!state.finished.compareAndSet(false, true)) {
+            return;
+        }
+        long durationMs = Math.max(0L, System.currentTimeMillis() - state.startedAtMillis);
+        FinalizeResult finalized = casTerminal(store, logger, state.runId, EvalStore.STATUS_COMPLETED,
+                durationMs, null, null);
+        active.compareAndSet(state, null);
+        if (!finalized.applied()) {
+            return;
+        }
+        writeReport(state.runId, result);
+    }
+
+    /** 生成 reports/run-&lt;runId&gt;.md 并把相对路径写回 run 行；失败只 WARN，不改终态。 */
+    private void writeReport(final String runId, final EvalRunLoop.Result result) {
+        File reportsDir = runLoop.reportsDirectory();
+        if (reportsDir == null) {
+            warn("报表目录未装配，跳过报表生成，run_id=" + runId);
+            return;
+        }
+        try {
+            EvalReportData data = result.reportData(store);
+            EvalReportWriter.writeToFile(data, reportsDir);
+            int updated = store.updateReportPath(runId, EvalReportWriter.relativeReportPath(runId));
+            if (updated <= 0) {
+                warn("报表已生成但 report_path 未写入（run_id=" + runId + "，update 返回 " + updated + "）");
+            }
+        } catch (IOException e) {
+            warn("报表写入失败，run_id=" + runId + "：" + e.getMessage());
+        } catch (RuntimeException e) {
+            warn("报表生成异常，run_id=" + runId + "：" + e.getMessage());
+        }
+    }
+
+    /** 主循环异常时的 FAILED 收口；同样遵守 §13.4：CAS 失败只 WARN、不重试。 */
+    private FinalizeResult finishFailed(final RunState state, final String summary) {
+        if (!state.finished.compareAndSet(false, true)) {
+            return null;
+        }
+        long durationMs = Math.max(0L, System.currentTimeMillis() - state.startedAtMillis);
+        FinalizeResult result = casTerminal(store, logger, state.runId, EvalStore.STATUS_FAILED, durationMs,
+                null, summary);
+        active.compareAndSet(state, null);
+        return result;
     }
 
     private void placeholderLoop(RunState state) {

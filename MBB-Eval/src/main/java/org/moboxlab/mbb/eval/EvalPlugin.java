@@ -10,9 +10,17 @@ import org.moboxlab.mbb.eval.bank.EvalBankResources;
 import org.moboxlab.mbb.eval.baseline.EvalBaselineService;
 import org.moboxlab.mbb.eval.command.EvalCommand;
 import org.moboxlab.mbb.eval.config.EvalConfig;
+import org.moboxlab.mbb.eval.exec.EvalRoleplayGeneratePort;
+import org.moboxlab.mbb.eval.exec.EvalRunLoop;
+import org.moboxlab.mbb.eval.exec.EvalServiceJudgePort;
 import org.moboxlab.mbb.eval.gateway.EvalCapabilityClient;
 import org.moboxlab.mbb.eval.gateway.RoleplayEvalGateway;
+import org.moboxlab.mbb.eval.judge.EvalAiChatClient;
+import org.moboxlab.mbb.eval.judge.EvalJudge;
+import org.moboxlab.mbb.eval.judge.EvalJudgeChatClient;
+import org.moboxlab.mbb.eval.judge.EvalJudgeFailureTracker;
 import org.moboxlab.mbb.eval.judge.EvalJudgePrompt;
+import org.moboxlab.mbb.eval.judge.EvalJudgeService;
 import org.moboxlab.mbb.eval.rubric.EvalRubricCache;
 import org.moboxlab.mbb.eval.runner.EvalDataBootstrap;
 import org.moboxlab.mbb.eval.runner.EvalPreflight;
@@ -42,6 +50,8 @@ public class EvalPlugin extends Plugin {
     private EvalRunner evalRunner;
     private EvalCapabilityClient capabilityClient;
     private CapabilitiesStatusSource capabilitiesSource;
+    private RoleplayEvalGateway gateway;
+    private EvalRunLoop runLoop;
     private EvalDataBootstrap dataBootstrap;
     private EvalBankCache bankCache;
     private EvalRubricCache rubricCache;
@@ -127,7 +137,7 @@ public class EvalPlugin extends Plugin {
      */
     private void initEvalData() {
         try {
-            RoleplayEvalGateway gateway = new RoleplayEvalGateway(this, getLogger());
+            gateway = new RoleplayEvalGateway(this, getLogger());
             capabilityClient = new EvalCapabilityClient(gateway, getLogger());
             final EvalCapabilityClient client = capabilityClient;
             capabilitiesSource = new CapabilitiesStatusSource() {
@@ -194,15 +204,56 @@ public class EvalPlugin extends Plugin {
             builder.capabilities(capabilitiesSource);
         }
         EvalPreflight preflight = builder.build();
-        evalRunner = new EvalRunner(evalStore, evalConfig, preflight, getLogger(), getVersion());
         // 只读命令只注入库、题库缓存与报表目录，不注入 runner（§9.7、§16.8 G-3）。
         EvalReadOnlyBoundary boundary = new EvalReadOnlyBoundary(new File(getDataFolder()));
+        runLoop = buildRunLoop(boundary.reportsDirectory());
+        evalRunner = new EvalRunner(evalStore, evalConfig, preflight, getLogger(), getVersion(), runLoop);
         EvalBaselineService baselineService = buildBaselineService();
         getServer().getPluginManager().registerCommand(this, new EvalCommand(
                 evalRunner, evalConfig, evalStore, baselineService, bankCache, boundary.reportsDirectory()));
-        getLogger().sendInfo("[MBB-Eval] 已注册 /eval 命令（run 为占位执行；status/report/list/baseline "
-                + "为只读命令，不写库、不建 run、不发起 AI 调用；baseline set / abort 为写侧命令"
+        getLogger().sendInfo("[MBB-Eval] 已注册 /eval 命令（run 已接入主循环"
+                + (runLoop == null ? "，但题库/rubric/网关未就绪，本次未装配执行依赖" : "")
+                + "；status/report/list/baseline 为只读命令，不写库、不建 run、不发起 AI 调用；"
+                + "baseline set / abort 为写侧命令"
                 + (baselineService == null ? "，基线服务因 rubric 权重不可用未接线" : "") + "）");
+    }
+
+    /**
+     * 装配真实主循环（§9.4–§9.6）：题库用例 + rubric + 生成/判分端口 + 报表目录。
+     *
+     * <p>任一必需件缺失时返回 {@code null}：run 仍由预检拒绝，不装配半成品执行链；
+     * 判分 chat 走 MBB-AI 公开服务，缺失只影响 persona/boundary/memory 三维。</p>
+     */
+    private EvalRunLoop buildRunLoop(File reportsDirectory) {
+        if (evalStore == null) {
+            getLogger().sendWarn("[MBB-Eval] 数据表未就绪，run 主循环未装配");
+            return null;
+        }
+        if (gateway == null || bankCache == null || !bankCache.ok()
+                || rubricCache == null || !rubricCache.ok()) {
+            getLogger().sendWarn("[MBB-Eval] 题库/rubric/网关未就绪，run 主循环未装配（预检会拒绝 /eval run）");
+            return null;
+        }
+        try {
+            EvalJudgeChatClient chatClient = new EvalAiChatClient(this, getLogger());
+            EvalJudge judge = EvalJudge.fromConfig(chatClient, evalConfig, "default");
+            EvalJudgeService judgeService = new EvalJudgeService(judge,
+                    EvalJudgeFailureTracker.fromConfig(evalConfig), getLogger());
+            EvalRunLoop.Deps deps = new EvalRunLoop.Deps()
+                    .store(evalStore)
+                    .config(evalConfig)
+                    .bank(bankCache.json())
+                    .rubric(rubricCache.rubric())
+                    .generatePort(new EvalRoleplayGeneratePort(gateway))
+                    .judgePort(new EvalServiceJudgePort(judgeService, rubricCache.rubric()))
+                    .reportsDirectory(reportsDirectory)
+                    .logger(getLogger());
+            return new EvalRunLoop(deps);
+        } catch (RuntimeException e) {
+            getLogger().sendWarn("[MBB-Eval] run 主循环装配失败，/eval run 将只做预检："
+                    + e.getMessage());
+            return null;
+        }
     }
 
     /**
@@ -235,6 +286,8 @@ public class EvalPlugin extends Plugin {
         evalStore = null;
         capabilityClient = null;
         capabilitiesSource = null;
+        gateway = null;
+        runLoop = null;
         dataBootstrap = null;
         bankCache = null;
         rubricCache = null;
