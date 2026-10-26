@@ -5,6 +5,7 @@ import org.moboxlab.mbb.eval.baseline.EvalBaselineService;
 import org.moboxlab.mbb.eval.config.EvalConfig;
 import org.moboxlab.mbb.eval.exec.EvalRunLoop;
 import org.moboxlab.mbb.eval.log.EvalLog;
+import org.moboxlab.mbb.eval.report.EvalGroupSummaryFormatter;
 import org.moboxlab.mbb.eval.report.EvalReportData;
 import org.moboxlab.mbb.eval.report.EvalReportWriter;
 import org.moboxlab.mbb.eval.store.EvalStore;
@@ -405,16 +406,19 @@ public final class EvalRunner implements EvalRunService {
         private final long startedAtMillis;
         private final EvalRunBudget budget;
         private final EvalRunStopPoint stopPoint;
+        /** COMPLETED 完成摘要的回送目标；null 表示本次不回送（旧 accept 入口或自检）。 */
+        private final EvalCompletionSink completionSink;
         private final AtomicBoolean finished = new AtomicBoolean(false);
 
         private RunState(String runId, String tier, int caseCount, long startedAtMillis, EvalRunBudget budget,
-                         EvalRunStopPoint stopPoint) {
+                         EvalRunStopPoint stopPoint, EvalCompletionSink completionSink) {
             this.runId = runId;
             this.tier = tier;
             this.caseCount = caseCount;
             this.startedAtMillis = startedAtMillis;
             this.budget = budget;
             this.stopPoint = stopPoint;
+            this.completionSink = completionSink;
         }
     }
 
@@ -503,6 +507,19 @@ public final class EvalRunner implements EvalRunService {
      * @param tier {@code smoke}/{@code full}，null 取 {@code evalDefaultTier}
      */
     public AcceptResult accept(String tier) {
+        return accept(tier, null);
+    }
+
+    /**
+     * 受理一次 /eval run，并登记 COMPLETED 完成摘要的回送目标（§9.3.1、§9.4 第 4 步）。
+     *
+     * <p>顺序与旧入口完全一致；sink 只存进 {@link RunState}，不改变任何受理判定。
+     * 完成摘要只在 COMPLETED 收尾、报表落盘与终态 CAS 应用之后发送一次。</p>
+     *
+     * @param tier           {@code smoke}/{@code full}，null 取 {@code evalDefaultTier}
+     * @param completionSink 完成摘要回送目标；null 表示本次不回送
+     */
+    public AcceptResult accept(String tier, EvalCompletionSink completionSink) {
         String normalized = tier;
         if (normalized == null && config != null) {
             normalized = config.defaultTier();
@@ -563,7 +580,7 @@ public final class EvalRunner implements EvalRunService {
                         + (config == null ? 30L : config.runDeadlineMinutes()) * 60_000L;
                 RunState state = new RunState(runId, normalized, caseCount, startedAtMillis,
                         new EvalRunBudget(planned, budgetLimit, deadlineAtMillis),
-                        new EvalRunStopPoint(runId, statusProbe(runId)));
+                        new EvalRunStopPoint(runId, statusProbe(runId)), completionSink);
                 active.set(state);
                 scheduleRun(state);
                 return AcceptResult.accepted(runId, normalized, caseCount, planned, budgetLimit);
@@ -932,6 +949,7 @@ public final class EvalRunner implements EvalRunService {
             }
             return;
         }
+        deliverCompletionSummary(state, result, reportPath);
         if (baselineService == null) {
             return;
         }
@@ -942,6 +960,55 @@ public final class EvalRunner implements EvalRunService {
             }
         } catch (RuntimeException e) {
             warn("自动创建首个 full 基线异常，run_id=" + state.runId + "：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 把 COMPLETED 的完成摘要发回发起会话（§9.3.1、§9.4 第 4 步、G-11 / I-2）。
+     *
+     * <p>只在「报表已落盘 + 终态 CAS 已应用」之后调用：{@code canSummarize} 只认库中 COMPLETED 的
+     * run，CAS 之前装配的数据一定不满足，因此这里重新取一次报表数据。摘要文案全部由
+     * {@link EvalGroupSummaryFormatter#toPlainText} 生成，runner 不自行拼文案；sink 未登记、数据
+     * 不可用、生成或发送抛异常都只记 WARN，不改变终态与报表（§9.4 判定规则 7）。</p>
+     *
+     * @param reportPath 本次落盘的报表相对路径；为 null 说明报表写失败，摘要里的路径会失真，跳过发送
+     */
+    private void deliverCompletionSummary(final RunState state, final EvalRunLoop.Result result,
+                                          final String reportPath) {
+        EvalCompletionSink sink = state.completionSink;
+        if (sink == null) {
+            return;
+        }
+        if (reportPath == null) {
+            warn("报表未落盘，跳过发送完成摘要，run_id=" + state.runId);
+            return;
+        }
+        EvalReportData data;
+        try {
+            data = result.reportData(store);
+        } catch (RuntimeException e) {
+            warn("完成摘要数据装配失败，跳过发送，run_id=" + state.runId + "：" + e.getMessage());
+            return;
+        }
+        if (!EvalGroupSummaryFormatter.canSummarize(data)) {
+            warn("完成摘要数据不可用，跳过发送，run_id=" + state.runId);
+            return;
+        }
+        final String text;
+        try {
+            text = EvalGroupSummaryFormatter.toPlainText(data);
+        } catch (RuntimeException e) {
+            warn("完成摘要生成失败，跳过发送，run_id=" + state.runId + "：" + e.getMessage());
+            return;
+        }
+        if (text == null || text.trim().isEmpty()) {
+            warn("完成摘要为空，跳过发送，run_id=" + state.runId);
+            return;
+        }
+        try {
+            sink.send(text);
+        } catch (RuntimeException e) {
+            warn("完成摘要发送失败，不影响 run 终态与报表，run_id=" + state.runId + "：" + e.getMessage());
         }
     }
 
@@ -979,6 +1046,7 @@ public final class EvalRunner implements EvalRunService {
         FinalizeResult result = casTerminal(store, logger, state.runId, EvalStore.STATUS_FAILED, durationMs,
                 null, summary);
         active.compareAndSet(state, null);
+        info("run 以 FAILED 收口，不发送完成摘要（§9.8），run_id=" + state.runId + "，原因=" + summary);
         return result;
     }
 
@@ -1039,6 +1107,7 @@ public final class EvalRunner implements EvalRunService {
         FinalizeResult result = casTerminal(store, logger, state.runId, EvalStore.STATUS_ABORTED,
                 durationMs, null, summary);
         active.compareAndSet(state, null);
+        info("run 以 ABORTED 收口，不发送完成摘要（§9.8），run_id=" + state.runId + "，原因=" + summary);
         return result;
     }
 
@@ -1063,6 +1132,12 @@ public final class EvalRunner implements EvalRunService {
         return new RunSnapshot(row.getString("run_id"), tier, row.getString("status"),
                 row.getIntValue("calls_used"), row.getIntValue("calls_budget"),
                 row.getString("started_at"), planned, caseCount, -1L);
+    }
+
+    private void info(String message) {
+        if (logger != null) {
+            logger.sendInfo("[MBB-Eval] " + message);
+        }
     }
 
     private void warn(String message) {

@@ -13,12 +13,28 @@ package org.moboxlab.mbb.eval.runner;
 public interface EvalRunService {
 
     /**
-     * 受理一次 /eval run。
+     * 受理一次 /eval run（旧入口：不登记完成摘要回送目标）。
      *
      * @param tier {@code smoke}/{@code full}，null 取 {@code evalDefaultTier}
      * @return 受理结果；BUSY 时带上当前 runId 与进度，命令层据此回当前 runId，不排队、不新建行
      */
     EvalRunner.AcceptResult accept(String tier);
+
+    /**
+     * 受理一次 /eval run，并登记 COMPLETED 完成摘要的回送目标（§9.3.1、§9.4 第 4 步）。
+     *
+     * <p>命令层在受理时把「发起会话的发送能力」包成 {@link EvalCompletionSink} 传入；runner 在
+     * COMPLETED 收尾、报表落盘之后才调用一次 {@link EvalCompletionSink#send(String)}，命令线程
+     * 本身仍然立即返回。默认实现按 null 目标委派给 {@link #accept(String)}，让既有假实现与
+     * 旧调用保持行为不变。</p>
+     *
+     * @param tier             {@code smoke}/{@code full}，null 取 {@code evalDefaultTier}
+     * @param completionSink   完成摘要回送目标；null 表示不回送（例如自检、测试）
+     * @return 受理结果；BUSY 时带上当前 runId 与进度
+     */
+    default EvalRunner.AcceptResult accept(String tier, EvalCompletionSink completionSink) {
+        return accept(tier);
+    }
 
     /**
      * 中止当前 run（§9.6：终态 CAS，回执不等在途调用收尾）。

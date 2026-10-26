@@ -5,6 +5,7 @@ import org.moboxlab.mbb.eval.baseline.EvalBaselineService;
 import org.moboxlab.mbb.eval.config.EvalConfig;
 import org.moboxlab.mbb.eval.error.EvalFailure;
 import org.moboxlab.mbb.eval.error.EvalRejectionPresenter;
+import org.moboxlab.mbb.eval.runner.EvalCompletionSink;
 import org.moboxlab.mbb.eval.runner.EvalPreflight;
 import org.moboxlab.mbb.eval.runner.EvalPreflightPlan;
 import org.moboxlab.mbb.eval.runner.EvalRunService;
@@ -242,7 +243,9 @@ public final class EvalCommand extends BotCommand {
             sender.sendMessage(PREFIX + "参数错误：档位只能是 smoke 或 full（大小写敏感）；用法 /eval run [full|smoke]");
             return;
         }
-        EvalRunner.AcceptResult result = runner.accept(tier);
+        // 受理时登记完成摘要的回送目标（§9.3.1、§9.4 第 4 步）：命令线程只回受理回执后立即返回，
+        // 摘要由 runner 在 COMPLETED 收尾、报表落盘之后异步发出。
+        EvalRunner.AcceptResult result = runner.accept(tier, new CommandSenderCompletionSink(sender));
         switch (result.kind()) {
             case ACCEPTED:
                 sender.sendMessage(PREFIX + "已受理：" + result.runId());
@@ -326,5 +329,30 @@ public final class EvalCommand extends BotCommand {
                 + "run 当前仍为占位执行；"
                 + (write == null ? "baseline set 待后续切片接入"
                         : "写侧命令 baseline set / abort 由 OWNER 执行：baseline set 只接受 COMPLETED 的 full run"));
+    }
+
+    /**
+     * 把发起会话的发送能力包成完成摘要回送端口（§9.3.1、§9.4 第 4 步）。
+     *
+     * <p>摘要由 {@code EvalGroupSummaryFormatter#toPlainText} 生成，已经是 ≤15 行纯文本，这里整段
+     * 原样发送：不按行拆、不加 {@code [eval] } 前缀、不再补任何文案。群聊与私聊都由受理时的
+     * {@link CommandSender} 决定去向（G-11）；发送失败抛 RuntimeException，由 runner 记 WARN，
+     * 不改 run 终态与报表（§9.4 判定规则 7）。</p>
+     */
+    private static final class CommandSenderCompletionSink implements EvalCompletionSink {
+
+        private final CommandSender sender;
+
+        private CommandSenderCompletionSink(CommandSender sender) {
+            this.sender = sender;
+        }
+
+        @Override
+        public void send(String text) {
+            if (text == null || text.trim().isEmpty()) {
+                return;
+            }
+            sender.sendMessage(text);
+        }
     }
 }
