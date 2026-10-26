@@ -295,6 +295,87 @@ public final class EvalRunner implements EvalRunService {
         }
     }
 
+    /** 卸载收口结果的种类（§16.9 H-4）。 */
+    public enum ShutdownKind {
+        /** 本进程没有进行中的 run，无需写库。 */
+        NO_ACTIVE_RUN,
+        /** 该 RUNNING 行已是终态：本次 CAS 成功，或此前已由其他路径收口（幂等）。 */
+        ABORTED,
+        /** CAS 未执行（-1）：只记 WARN、不重试，留给下次启动的孤儿清理收敛。 */
+        CAS_NOT_APPLIED
+    }
+
+    /** 卸载收口结果；不承诺成功，调用方不得据此认为卸载一定干净。 */
+    public static final class ShutdownResult {
+        private final ShutdownKind kind;
+        private final String runId;
+        private final String reason;
+        private final FinalizeResult finalizeResult;
+        private final String message;
+
+        private ShutdownResult(ShutdownKind kind, String runId, String reason,
+                               FinalizeResult finalizeResult, String message) {
+            this.kind = kind;
+            this.runId = runId;
+            this.reason = reason;
+            this.finalizeResult = finalizeResult;
+            this.message = message;
+        }
+
+        public static ShutdownResult noActiveRun() {
+            return new ShutdownResult(ShutdownKind.NO_ACTIVE_RUN, null, null, null, null);
+        }
+
+        static ShutdownResult aborted(String runId, String reason, FinalizeResult finalizeResult,
+                                      String message) {
+            return new ShutdownResult(ShutdownKind.ABORTED, runId, reason, finalizeResult, message);
+        }
+
+        static ShutdownResult notApplied(String runId, String reason, FinalizeResult finalizeResult) {
+            return new ShutdownResult(ShutdownKind.CAS_NOT_APPLIED, runId, reason, finalizeResult,
+                    finalizeResult == null ? null : finalizeResult.message());
+        }
+
+        public ShutdownKind kind() {
+            return kind;
+        }
+
+        /** 本次涉及的 run_id；NO_ACTIVE_RUN 时为 null。 */
+        public String runId() {
+            return runId;
+        }
+
+        /** 写入 error_summary 的原因码；NO_ACTIVE_RUN 时为 null。 */
+        public String reason() {
+            return reason;
+        }
+
+        /** 对应的终态 CAS 结果；NO_ACTIVE_RUN 或未发 CAS 时为 null。 */
+        public FinalizeResult finalizeResult() {
+            return finalizeResult;
+        }
+
+        /** 补充说明；成功收口时为 null。 */
+        public String message() {
+            return message;
+        }
+
+        /** 本次是否真的把 RUNNING 行改写成 ABORTED（CAS 正数）。 */
+        public boolean casApplied() {
+            return finalizeResult != null && finalizeResult.applied();
+        }
+
+        /** 是否仍有 RUNNING 行留给下次启动的孤儿清理兜底。 */
+        public boolean needsOrphanRecovery() {
+            return kind == ShutdownKind.CAS_NOT_APPLIED;
+        }
+
+        /** 本次卸载是否涉及进行中的 run。 */
+        public boolean hasActiveRun() {
+            return kind != ShutdownKind.NO_ACTIVE_RUN;
+        }
+    }
+
     /** 单次 run 的内存状态；只有 active 指向它时才算本进程持有。 */
     private static final class RunState {
         private final String runId;
@@ -302,14 +383,17 @@ public final class EvalRunner implements EvalRunService {
         private final int caseCount;
         private final long startedAtMillis;
         private final EvalRunBudget budget;
+        private final EvalRunStopPoint stopPoint;
         private final AtomicBoolean finished = new AtomicBoolean(false);
 
-        private RunState(String runId, String tier, int caseCount, long startedAtMillis, EvalRunBudget budget) {
+        private RunState(String runId, String tier, int caseCount, long startedAtMillis, EvalRunBudget budget,
+                         EvalRunStopPoint stopPoint) {
             this.runId = runId;
             this.tier = tier;
             this.caseCount = caseCount;
             this.startedAtMillis = startedAtMillis;
             this.budget = budget;
+            this.stopPoint = stopPoint;
         }
     }
 
@@ -344,6 +428,17 @@ public final class EvalRunner implements EvalRunService {
                 return thread;
             }
         });
+    }
+
+    /** 构造只读终态探针：直接查库判断该 run 是否仍是 RUNNING（§13.4 以数据库为准）。 */
+    private EvalRunStopPoint.RunStatusProbe statusProbe(final String runId) {
+        return new EvalRunStopPoint.RunStatusProbe() {
+            @Override
+            public boolean terminal() {
+                JSONObject row = store.findRun(runId);
+                return row != null && !EvalStore.STATUS_RUNNING.equals(row.getString("status"));
+            }
+        };
     }
 
     /**
@@ -419,7 +514,8 @@ public final class EvalRunner implements EvalRunService {
                 long deadlineAtMillis = startedAtMillis
                         + (config == null ? 30L : config.runDeadlineMinutes()) * 60_000L;
                 RunState state = new RunState(runId, normalized, caseCount, startedAtMillis,
-                        new EvalRunBudget(planned, budgetLimit, deadlineAtMillis));
+                        new EvalRunBudget(planned, budgetLimit, deadlineAtMillis),
+                        new EvalRunStopPoint(runId, statusProbe(runId)));
                 active.set(state);
                 schedulePlaceholder(state);
                 return AcceptResult.accepted(runId, normalized, caseCount, planned, budgetLimit);
@@ -464,8 +560,10 @@ public final class EvalRunner implements EvalRunService {
                 return AbortResult.failed("终态写库未执行（§13.4 不重试），以数据库现行状态为准；"
                         + "重启后由下次启动的 init 回收");
             }
+            state.stopPoint.requestStop(EvalStore.ABORT_REASON_USER);
             state.budget.abort(EvalStore.ABORT_REASON_USER);
-            if (finishAbort(state, EvalStore.ABORT_REASON_USER)) {
+            FinalizeResult result = finishAbort(state, EvalStore.ABORT_REASON_USER);
+            if (result == null || !result.notExecuted()) {
                 return AbortResult.aborted(state.runId);
             }
             return AbortResult.failed("终态写库未执行（§13.4 不重试），以数据库现行状态为准；"
@@ -561,6 +659,16 @@ public final class EvalRunner implements EvalRunService {
         return new FinalizeResult(FinalizeKind.NOT_EXECUTED, runId, status, result, message);
     }
 
+    /**
+     * 当前 active run 的停止点；返回 null 表示本进程没有进行中的 run。
+     *
+     * <p>插件重启后库里的遗留 RUNNING 行不会重新进入执行，因此也没有停止点（§13.5：重启不续跑）。</p>
+     */
+    public EvalRunStopPoint stopPoint() {
+        RunState state = active.get();
+        return state == null ? null : state.stopPoint;
+    }
+
     /** 最近一次 run 的快照（优先内存中的 active）；没有任何记录返回 null。 */
     public RunSnapshot snapshot() {
         RunState state = active.get();
@@ -585,13 +693,32 @@ public final class EvalRunner implements EvalRunService {
      * 插件卸载时的收尾：标记中止并尽力把 RUNNING 行改成 ABORTED(shutdown)。
      * 写库失败只记 WARN，交给下一次启动的 init 回收（F 区），不阻塞卸载。
      */
-    public void shutdown() {
+    public ShutdownResult shutdown() {
         closing.set(true);
+        ShutdownResult result = ShutdownResult.noActiveRun();
         RunState state = active.get();
         if (state != null) {
+            state.stopPoint.requestStop(EvalStore.ABORT_REASON_SHUTDOWN);
             state.budget.abort(EvalStore.ABORT_REASON_SHUTDOWN);
-            if (!finishAbort(state, EvalStore.ABORT_REASON_SHUTDOWN)) {
-                warn("卸载时写入 ABORTED 失败，run_id=" + state.runId + "，将由下次启动的 init 回收");
+            FinalizeResult finalizeResult;
+            try {
+                finalizeResult = finishAbort(state, EvalStore.ABORT_REASON_SHUTDOWN);
+            } catch (RuntimeException e) {
+                warn("卸载时收口 ABORTED(shutdown) 异常，run_id=" + state.runId + "：" + e.getMessage());
+                finalizeResult = null;
+            }
+            if (finalizeResult == null) {
+                // finished 闸门已关：其他路径已经收口，以数据库为准，不再发 CAS。
+                result = ShutdownResult.aborted(state.runId, EvalStore.ABORT_REASON_SHUTDOWN, null,
+                        "该 run 已由其他路径收口，以数据库现行状态为准");
+                warn("卸载时该 run 已由其他路径收口，run_id=" + state.runId + "，以数据库现行状态为准");
+            } else if (finalizeResult.notExecuted()) {
+                result = ShutdownResult.notApplied(state.runId, EvalStore.ABORT_REASON_SHUTDOWN, finalizeResult);
+                warn("卸载时写入 ABORTED(shutdown) 未执行，run_id=" + state.runId
+                        + "，按 §13.4 不重试，将由下次启动的孤儿清理收敛");
+            } else {
+                result = ShutdownResult.aborted(state.runId, EvalStore.ABORT_REASON_SHUTDOWN,
+                        finalizeResult, null);
             }
         }
         executor.shutdownNow();
@@ -600,6 +727,7 @@ public final class EvalRunner implements EvalRunService {
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
         }
+        return result;
     }
 
     /**
@@ -622,8 +750,22 @@ public final class EvalRunner implements EvalRunService {
                     return;
                 }
                 if (state.budget.isAborted()) {
-                    // §13.4：CAS 失败只记 WARN、不重试，以数据库现行状态为准（遗留 RUNNING 由 init 回收）。
-                    finishAbort(state, state.budget.abortReason());
+                    // 预算/墙钟/AI 不可用的中止都先同步到停止点，保持「首因生效」。
+                    state.stopPoint.requestStop(state.budget.abortReason());
+                }
+                // 轮询用 poll()：内存中止标志立即生效，数据库探针每秒最多查一次，不压库。
+                EvalRunStopPoint.Decision decision = state.stopPoint.poll();
+                if (decision.stop()) {
+                    if (decision.kind() == EvalRunStopPoint.StopKind.TERMINAL_IN_STORE) {
+                        // 数据库已被其他路径收口：只释放内存持有，不再发 CAS，禁止用内存覆盖 DB。
+                        if (state.finished.compareAndSet(false, true)) {
+                            active.compareAndSet(state, null);
+                        }
+                        warn("run 已由其他路径收口，run_id=" + state.runId + "，本轮不再发终态 CAS");
+                    } else {
+                        // §13.4：CAS 失败只记 WARN、不重试，以数据库现行状态为准（遗留 RUNNING 由 init 回收）。
+                        finishAbort(state, decision.reason());
+                    }
                     return;
                 }
                 if (state.budget.deadlineExceeded(System.currentTimeMillis())) {
@@ -643,18 +785,18 @@ public final class EvalRunner implements EvalRunService {
      * <p>§13.4：CAS 返回 -1 或 0 都只记 WARN、不重试、不得用内存状态覆盖 DB；因此写库失败时
      * 只清掉内存中的 active（让后续命令以数据库为准），不重置 {@code finished}、不重发 CAS。</p>
      *
-     * @return true 表示该 run 已是终态（本次成功或此前已成功）；false 表示写库失败（不重试）
+     * @return 本次 CAS 结果；null 表示 finished 闸门已被其他路径抢先关闭，本次没有写库
      */
-    private boolean finishAbort(RunState state, String reason) {
+    private FinalizeResult finishAbort(RunState state, String reason) {
         if (!state.finished.compareAndSet(false, true)) {
-            return true;
+            return null;
         }
         long durationMs = Math.max(0L, System.currentTimeMillis() - state.startedAtMillis);
         String summary = reason == null ? "aborted" : reason;
         FinalizeResult result = casTerminal(store, logger, state.runId, EvalStore.STATUS_ABORTED,
                 durationMs, null, summary);
         active.compareAndSet(state, null);
-        return !result.notExecuted();
+        return result;
     }
 
     private RunSnapshot fromState(RunState state) {
