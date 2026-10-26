@@ -139,7 +139,8 @@ public class EvalPlugin extends Plugin {
                     EvalJudgePrompt.PROMPT_VERSION,
                     snapshot == null ? null : snapshot.personaId(),
                     snapshot == null ? null : snapshot.personaHash(),
-                    evalConfig.allowPersonaMismatch(), EvalBankResources.of(this), getLogger());
+                    evalConfig.allowPersonaMismatch(), EvalBankResources.of(this),
+                    EvalBankResources.of(this), getLogger());
             bankCache = dataBootstrap.bank();
             rubricCache = dataBootstrap.rubric();
             for (String warning : dataBootstrap.warnings()) {
