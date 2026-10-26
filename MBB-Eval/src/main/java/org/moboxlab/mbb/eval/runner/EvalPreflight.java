@@ -3,9 +3,9 @@ package org.moboxlab.mbb.eval.runner;
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import org.moboxlab.mbb.eval.config.EvalConfig;
+import org.moboxlab.mbb.eval.gateway.RoleplayEvalGateway;
 import org.moboxlab.moboxbot.API.Plugin;
 import org.moboxlab.moboxbot.API.PluginLogger;
-import org.moboxlab.moboxbot.API.PluginService;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -93,11 +93,22 @@ public final class EvalPreflight {
         }
     }
 
-    /** 生产装配：Roleplay 接口探测 + planned 预算（§9.5 首项与末项，其余检查待 B/C/D 区接入）。 */
+    /**
+     * 生产装配：Roleplay 接口探测 + planned 预算（§9.5 首项与末项，其余检查待 B/C/D 区接入）。
+     *
+     * <p>能力探测统一经 {@link RoleplayEvalGateway#fetchCapabilities()}，不在预检里直接
+     * 摸 {@code PluginManager}：取服务、调用动作与出参解析都收在网关内。</p>
+     */
     public static EvalPreflight forPlugin(Plugin plugin, EvalConfig config) {
-        return new EvalPreflight(Arrays.asList(
-                capabilitiesCheck(pluginServiceSource(plugin), plugin == null ? null : plugin.getLogger()),
-                budgetCheck(config)));
+        final PluginLogger logger = plugin == null ? null : plugin.getLogger();
+        final RoleplayEvalGateway gateway = new RoleplayEvalGateway(plugin, logger);
+        CapabilitiesSource source = new CapabilitiesSource() {
+            @Override
+            public JSONObject fetch() {
+                return gateway.fetchCapabilities();
+            }
+        };
+        return new EvalPreflight(Arrays.asList(capabilitiesCheck(source, logger), budgetCheck(config)));
     }
 
     /**
@@ -143,8 +154,8 @@ public final class EvalPreflight {
     private static Rejection validateCapabilities(JSONObject capabilities) {
         if (capabilities == null) {
             return new Rejection(null,
-                    "MBB-Roleplay 评测接口不可用（三选一：插件缺失 / 插件未启用 / 接口版本不匹配）",
-                    "请确认 MBB-Roleplay 已安装并启用；仍失败则升级 MBB-Roleplay 到支持 evalApiVersion=1 的版本后重试 /eval run");
+                    "MBB-Roleplay 插件缺失或未启用，评测接口不可用",
+                    "请安装并启用 MBB-Roleplay；已启用仍失败则升级到支持 evalApiVersion=1 的版本后重试 /eval run");
         }
         Object version = capabilities.get("evalApiVersion");
         if (!(version instanceof Number)) {
@@ -195,23 +206,6 @@ public final class EvalPreflight {
                         "预算不足：" + tier + " 档 planned " + planned + " 次（" + composition
                                 + "，另有重试余量）超过 evalCallBudget=" + budget + "（上限 100）",
                         way + "；本次未建 run、未产生任何 AI 调用");
-            }
-        };
-    }
-
-    /** 生产环境的 capabilities 来源：每次命令重新取服务，Roleplay 重载后不会持有旧实例。 */
-    public static CapabilitiesSource pluginServiceSource(final Plugin plugin) {
-        return new CapabilitiesSource() {
-            @Override
-            public JSONObject fetch() {
-                if (plugin == null || plugin.getServer() == null) {
-                    return null;
-                }
-                PluginService service = plugin.getServer().getPluginManager().getService("MBB-Roleplay");
-                if (service == null) {
-                    return null;
-                }
-                return service.call("capabilities", new JSONObject());
             }
         };
     }

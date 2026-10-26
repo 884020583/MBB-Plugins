@@ -3,13 +3,13 @@
 MoBoxBot 的离线评测与回归基线插件：用固定题库对 MBB-AI 做可重复的自动评测，由 LLM 判分并与基线对比。评测只在命令触发或后台调度时运行，**不参与线上对话回复**。
 
 - 规格：[docs/MBB-Eval.md](../docs/MBB-Eval.md)
-- 规格票：#50；实施票：#51（A-1 插件骨架与构建接入）、#53（A-2 四表建表、索引与 run_id/CAS 骨架）、#60（A-3 命令受理、预检桩与 runner 骨架）
+- 规格票：#50；实施票：#51（A-1 插件骨架与构建接入）、#53（A-2 四表建表、索引与 run_id/CAS 骨架）、#60（A-3 命令受理、预检桩与 runner 骨架）、#61（A-4 Roleplay 网关骨架）
 
 ## 当前阶段
 
-A-3 命令与 runner 骨架阶段：插件可构建、可被主程序加载、可读取并钳制配置；启用时幂等创建四张数据表与七个索引，并对老库只补列、不删除不重建；已注册 `/eval` 命令，具备逐子命令权限判定、预检与单 run 互斥、run_id 生成、RUNNING 行写入与终态 CAS。骨架期 `/eval run` 受理后只做占位执行（不读题库、不调用 AI、不写 case/call 行），用于验证受理与卸载中止路径；题库、rubric、判分、报表与基线由后续切片按规格 §16.2 接入。
+A-4 网关骨架阶段：插件可构建、可被主程序加载、可读取并钳制配置；启用时幂等创建四张数据表与七个索引，并对老库只补列、不删除不重建；已注册 `/eval` 命令，具备逐子命令权限判定、预检与单 run 互斥、run_id 生成、RUNNING 行写入与终态 CAS；对 MBB-Roleplay 的 `capabilities` / `eval-generate` 已有完整网关（入参拼装、出参必需字段校验、errorType 处置映射、sessionId 编码），预检据此判定接口版本与禁用状态。骨架期 `/eval run` 受理后只做占位执行（不读题库、不调用 AI、不写 case/call 行）；题库、rubric、判分、报表与基线由后续切片按规格 §16.2 接入。
 
-当前版本：`V0.1.0.0.1353`（apiVersion `0.3`）。
+当前版本：`V0.1.0.0.1426`（apiVersion `0.3`）。
 
 ## 配置
 
@@ -53,7 +53,16 @@ A-3 命令与 runner 骨架阶段：插件可构建、可被主程序加载、�
 
 已注册 `/eval`，逐子命令权限见规格 §9（与 `/eval help` 输出一致）：`/eval run`、`/eval abort`、`/eval baseline set` 需要 OWNER；`/eval status`、`/eval report`、`/eval list`、`/eval baseline`、`/eval baseline show` 需要 BOT_ADMIN；`/eval help` 对所有人开放。子命令与档位大小写敏感，冷却 3 秒，无 `reload`。
 
-骨架期已可用：`/eval help`、`/eval status`（最近一次或指定 run 的只读快照）、`/eval abort`（含插件重启后遗留 RUNNING 行的收尾）；`/eval run` 走接口能力与预算预检，受理后只做占位执行（不读题库、不产生 AI 调用）。题库、rubric、persona 等预检项待 B/C/D 区接入。`/eval report`、`/eval list`、`/eval baseline` 三组仅做权限判定后回「后续切片接入」。
+骨架期已可用：`/eval help`、`/eval status`（最近一次或指定 run 的只读快照）、`/eval abort`（含插件重启后遗留 RUNNING 行的收尾）；`/eval run` 走接口能力（`evalApiVersion`、`actions` 含 `eval-generate`、`evalApiEnable`）与 planned 预算预检，受理后只做占位执行（不读题库、不产生 AI 调用）。题库、rubric、persona 等预检项待 B/C/D 区接入。`/eval report`、`/eval list`、`/eval baseline` 三组仅做权限判定后回「后续切片接入」。
+
+## 跨插件接口
+
+MBB-Eval 不 import MBB-Roleplay 的任何内部类，只经主程序的服务接口调用其公开动作（规格 §10）：
+
+- `capabilities`：版本协商与能力探测，返回 `evalApiVersion`、`actions`、`evalApiEnable` 及 persona / profile / 历史窗口等只读快照；始终可调。
+- `eval-generate`：按一条用例生成一条回复，请求只带 `runId`、`caseId`、`sampleIndex`、`attempt`、`history`、`message` 与采样参数，不接受外部 `sessionId` / `selfID` / persona；`sessionId` 由本侧编码后由角色侧回显核对。
+
+`evalApiVersion` 必须为 `1` 且 `actions` 含 `eval-generate`，否则 `/eval run` 在预检阶段被拒并给出「版本不匹配 / 未启用 / 插件缺失」三类原因之一；角色侧接口缺失或未实现该动作时返回明确错误而不是静默降级。出参中的 `errorType` 只接受规格 §10.3 的封闭集合，重试与否只看角色侧 `retryable`，本侧不按错误码猜测。评测不写 Roleplay 的状态表与 trace 表，判分调用走 MBB-AI 的 chat 能力。
 
 ## 构建
 
