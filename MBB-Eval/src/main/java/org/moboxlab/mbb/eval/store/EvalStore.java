@@ -59,6 +59,8 @@ public final class EvalStore {
 
     /** 时间列格式：TEXT、可按字典序比较，init 回收与最近 N 排序都依赖它（§4.3）。 */
     private static final String TIME_FORMAT = "yyyy-MM-dd HH:mm:ss";
+    /** 内存中最多保留的降级警告条数，避免长跑无限增长。 */
+    private static final int WARN_LIMIT = 200;
 
     private static final String SQL_RUN_ID_EXISTS =
             "SELECT run_id FROM plugin_mbb_eval_run WHERE run_id = ?";
@@ -93,9 +95,101 @@ public final class EvalStore {
             + " SET status = 'ABORTED', ended_at = ?, duration_ms = ?, error_summary = ?"
             + " WHERE run_id = ? AND status = 'RUNNING'";
 
+    /**
+     * 用例结果插入：主键由门面按「run_id + 业务键」派生（§4.2 O7），(run_id, case_id) 唯一索引兜底。
+     *
+     * <p>走 update 而不是 insert：主键是 TEXT，insert 返回的 last_insert_rowid 对这类表没有意义，
+     * 0 无法区分「已存在」与「取键失败」（§4.1）。</p>
+     */
+    private static final String SQL_INSERT_CASE_RESULT = "INSERT INTO "
+            + EvalSchemaService.TABLE_CASE_RESULT
+            + " (case_result_id, run_id, case_id, dimension, status, score, max_score, label, scale,"
+            + " k_used, sample_count, cached_count, tokens_prompt, tokens_completion, tokens_total,"
+            + " duration_ms, evidence, detail_json, created_at)"
+            + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+    private static final String SQL_FIND_CASE_RESULT = "SELECT * FROM "
+            + EvalSchemaService.TABLE_CASE_RESULT + " WHERE run_id = ? AND case_id = ?";
+
+    private static final String SQL_FIND_CASE_RESULTS = "SELECT * FROM "
+            + EvalSchemaService.TABLE_CASE_RESULT + " WHERE run_id = ? ORDER BY case_id";
+
+    private static final String SQL_COUNT_CASE_RESULTS = "SELECT COUNT(*) AS total FROM "
+            + EvalSchemaService.TABLE_CASE_RESULT + " WHERE run_id = ?";
+
+    /** 单次调用插入：call_id 由 run_id + case_id + stage + 序号派生，每次尝试天然独立（§4.4）。 */
+    private static final String SQL_INSERT_CALL = "INSERT INTO " + EvalSchemaService.TABLE_CALL
+            + " (call_id, run_id, case_id, stage, sample_index, attempt, status, error_type, retryable,"
+            + " cached, profile, model, usage_prompt, usage_completion, usage_total, usage_cached,"
+            + " elapsed_ms, finish_reason, response_chars, created_at)"
+            + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+    private static final String SQL_FIND_CALL = "SELECT * FROM " + EvalSchemaService.TABLE_CALL
+            + " WHERE call_id = ?";
+
+    private static final String SQL_FIND_CALLS = "SELECT * FROM " + EvalSchemaService.TABLE_CALL
+            + " WHERE run_id = ? ORDER BY created_at, call_id";
+
+    private static final String SQL_COUNT_CALLS = "SELECT COUNT(*) AS total FROM "
+            + EvalSchemaService.TABLE_CALL + " WHERE run_id = ?";
+
+    /** 基线插入：active 由调用方给定，默认 1；唯一索引 idx_eval_baseline_active 兜底。 */
+    private static final String SQL_INSERT_BASELINE = "INSERT INTO "
+            + EvalSchemaService.TABLE_BASELINE
+            + " (baseline_id, run_id, active, dimension_scores_json, total_score, valid_case_count,"
+            + " perf_ref_json, bank_hash, rubric_version, persona_hash, config_fingerprint, eval_profile,"
+            + " judge_profile, judge_model, generation_model, eval_api_version, created_at, created_by,"
+            + " reason, superseded_by)"
+            + " VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+    private static final String SQL_FIND_ACTIVE_BASELINE =
+            "SELECT * FROM " + EvalSchemaService.TABLE_BASELINE + " WHERE active = 1 LIMIT 1";
+
+    private static final String SQL_FIND_BASELINE =
+            "SELECT * FROM " + EvalSchemaService.TABLE_BASELINE + " WHERE baseline_id = ?";
+
+    private static final String SQL_FIND_BASELINES = "SELECT * FROM "
+            + EvalSchemaService.TABLE_BASELINE + " ORDER BY created_at DESC, baseline_id DESC LIMIT ?";
+
+    /** 切换第 ② 步：旧 active 行退役并记录被谁取代（§8.1）。 */
+    private static final String SQL_SUPERSEDE_ACTIVE = "UPDATE " + EvalSchemaService.TABLE_BASELINE
+            + " SET active = 0, superseded_by = ? WHERE active = 1";
+
+    /** 切换第 ③ 步：把已写好 active=0 的新行激活。 */
+    private static final String SQL_ACTIVATE_BASELINE = "UPDATE " + EvalSchemaService.TABLE_BASELINE
+            + " SET active = 1 WHERE baseline_id = ? AND active = 0";
+
+    private static final String SQL_BASELINE_BY_RUN =
+            "SELECT baseline_id FROM " + EvalSchemaService.TABLE_BASELINE + " WHERE run_id = ? LIMIT 1";
+
+    /** 保留窗口之外的终态行（最新 N 条以外的旧行），最新在前；RUNNING 不在删除范围。 */
+    private static final String SQL_TERMINAL_RUNS_BEYOND = "SELECT * FROM plugin_mbb_eval_run"
+            + " WHERE status IN ('COMPLETED', 'FAILED', 'ABORTED')"
+            + " ORDER BY started_at DESC, run_id DESC LIMIT -1 OFFSET ?";
+
+    private static final String SQL_STALE_RUNNING = "SELECT * FROM plugin_mbb_eval_run"
+            + " WHERE status = 'RUNNING' AND started_at < ? ORDER BY started_at, run_id";
+
+    private static final String SQL_RECENT_RUNS = "SELECT * FROM plugin_mbb_eval_run"
+            + " ORDER BY started_at DESC, run_id DESC LIMIT ?";
+
+    private static final String SQL_DELETE_CASE_RESULTS =
+            "DELETE FROM " + EvalSchemaService.TABLE_CASE_RESULT + " WHERE run_id = ?";
+
+    private static final String SQL_DELETE_CALLS =
+            "DELETE FROM " + EvalSchemaService.TABLE_CALL + " WHERE run_id = ?";
+
+    /** 只删终态行，且被任何基线引用的 run 永不删除（§4.5）。 */
+    private static final String SQL_DELETE_RUN = "DELETE FROM plugin_mbb_eval_run"
+            + " WHERE run_id = ? AND status IN ('COMPLETED', 'FAILED', 'ABORTED')"
+            + " AND NOT EXISTS (SELECT 1 FROM " + EvalSchemaService.TABLE_BASELINE
+            + " WHERE run_id = ?)";
+
     private final StorageService storage;
     private final PluginLogger logger;
     private final Random random;
+    /** 本次运行期间累计的降级警告；测试据此断言 -1 / 部分行 / 非法 JSON 都被显式记录。 */
+    private final List<String> warnings = Collections.synchronizedList(new ArrayList<String>());
 
     public EvalStore(StorageService storage, PluginLogger logger) {
         if (storage == null) {
@@ -216,11 +310,353 @@ public final class EvalStore {
         return queryOne(SQL_FIND_LATEST);
     }
 
+    /**
+     * 写入一条用例结果行（§4.4）。
+     *
+     * <p>唯一索引 (run_id, case_id) 兜底：同一 run 的同一 case 二次插入返回 {@link WriteResult#NO_MATCH}
+     * 并记 WARN，旧行保持原样，调用方按「该 case 已有结果」跳过。缺 case_result_id 时按
+     * {@link #deriveCaseResultId} 派生。</p>
+     *
+     * @throws IllegalArgumentException 缺少 run_id / case_id / dimension / status
+     */
+    public WriteResult insertCaseResult(JSONObject row) {
+        if (row == null) {
+            throw new IllegalArgumentException("用例结果行不能为空");
+        }
+        String runId = requireText(row, "run_id", "用例结果");
+        String caseId = requireText(row, "case_id", "用例结果");
+        String dimension = requireText(row, "dimension", "用例结果");
+        String status = requireText(row, "status", "用例结果");
+        String caseResultId = optionalText(row, "case_result_id");
+        if (caseResultId == null) {
+            caseResultId = deriveCaseResultId(runId, caseId);
+        }
+        String createdAt = optionalText(row, "created_at");
+        return write("用例结果插入（case_result_id=" + caseResultId + "）", SQL_INSERT_CASE_RESULT,
+                caseResultId, runId, caseId, dimension, status,
+                row.getDouble("score"), Double.valueOf(defaultDouble(row, "max_score", 100.0D)),
+                optionalText(row, "label"), optionalText(row, "scale"),
+                row.getInteger("k_used"), row.getInteger("sample_count"), row.getInteger("cached_count"),
+                row.getInteger("tokens_prompt"), row.getInteger("tokens_completion"),
+                row.getInteger("tokens_total"), row.getLong("duration_ms"),
+                optionalText(row, "evidence"), optionalText(row, "detail_json"),
+                createdAt == null ? nowText() : createdAt);
+    }
+
+    /** 按 (run_id, case_id) 查询用例结果行；没有或查询异常返回 null（异常已记 WARN）。 */
+    public JSONObject findCaseResult(String runId, String caseId) {
+        if (isBlank(runId) || isBlank(caseId)) {
+            return null;
+        }
+        return queryOne(SQL_FIND_CASE_RESULT, runId, caseId);
+    }
+
+    /**
+     * 查询某次 run 的全部用例结果行，并与 COUNT(*) 比对识别部分行（ST8）。
+     *
+     * <p>部分行时 {@link RowSet#isComplete()} 为 false：调用方必须把缺失 case 标成「数据缺失」，
+     * 不得按 0 分计入维度统计（§15.6 F12）。</p>
+     */
+    public RowSet findCaseResults(String runId) {
+        if (isBlank(runId)) {
+            return RowSet.empty();
+        }
+        return queryRows("用例结果查询", SQL_FIND_CASE_RESULTS, SQL_COUNT_CASE_RESULTS, runId);
+    }
+
+    /**
+     * 写入一条单次调用行（§4.4：每次尝试即落库，失败与 cached 调用都要留行）。
+     *
+     * <p>缺 call_id 时按 {@link #deriveCallId} 派生；同一次尝试重复写入返回
+     * {@link WriteResult#NO_MATCH}，不覆盖既有调用记录。</p>
+     *
+     * @throws IllegalArgumentException 缺少 run_id / stage / status
+     */
+    public WriteResult insertCall(JSONObject row) {
+        if (row == null) {
+            throw new IllegalArgumentException("调用行不能为空");
+        }
+        String runId = requireText(row, "run_id", "调用行");
+        String stage = requireText(row, "stage", "调用行");
+        String status = requireText(row, "status", "调用行");
+        String caseId = optionalText(row, "case_id");
+        Integer sampleIndex = row.getInteger("sample_index");
+        Integer attempt = row.getInteger("attempt");
+        String callId = optionalText(row, "call_id");
+        if (callId == null) {
+            callId = deriveCallId(runId, caseId, stage, sampleIndex, attempt);
+        }
+        String createdAt = optionalText(row, "created_at");
+        return write("调用行插入（call_id=" + callId + "）", SQL_INSERT_CALL,
+                callId, runId, caseId, stage, sampleIndex, attempt, status,
+                optionalText(row, "error_type"), row.getInteger("retryable"), row.getInteger("cached"),
+                optionalText(row, "profile"), optionalText(row, "model"),
+                row.getInteger("usage_prompt"), row.getInteger("usage_completion"),
+                row.getInteger("usage_total"), row.getInteger("usage_cached"),
+                row.getLong("elapsed_ms"), optionalText(row, "finish_reason"),
+                row.getInteger("response_chars"), createdAt == null ? nowText() : createdAt);
+    }
+
+    /** 按 call_id 查询单次调用行；没有或查询异常返回 null（异常已记 WARN）。 */
+    public JSONObject findCall(String callId) {
+        if (isBlank(callId)) {
+            return null;
+        }
+        return queryOne(SQL_FIND_CALL, callId);
+    }
+
+    /**
+     * 查询某次 run 的全部调用行，并与 COUNT(*) 比对识别部分行。
+     *
+     * <p>失败调用（status=error）与 cached 调用（cached=1）都是正常行，不做过滤。</p>
+     */
+    public RowSet findCalls(String runId) {
+        if (isBlank(runId)) {
+            return RowSet.empty();
+        }
+        return queryRows("调用行查询", SQL_FIND_CALLS, SQL_COUNT_CALLS, runId);
+    }
+
+    /**
+     * 写入一条基线行（§8.1）。
+     *
+     * <p>active=1 的行同时只能有一条（部分唯一索引 idx_eval_baseline_active）：第二条返回失败，
+     * 旧基线保持 active。切换流程无事务，分三步：① 新行以 active=0 插入；②
+     * {@link #supersedeActiveBaseline}；③ {@link #activateBaseline}。任一步失败时调用方核对
+     * active=1 行数，按「保留最近 created_at」修复后重跑，整个过程可重跑。</p>
+     *
+     * @throws IllegalArgumentException 缺少 baseline_id / run_id，或 active 不是 0/1
+     */
+    public WriteResult insertBaseline(JSONObject row) {
+        if (row == null) {
+            throw new IllegalArgumentException("基线行不能为空");
+        }
+        String baselineId = requireText(row, "baseline_id", "基线行");
+        String runId = requireText(row, "run_id", "基线行");
+        Integer active = row.getInteger("active");
+        if (active == null) {
+            active = Integer.valueOf(1);
+        }
+        if (active.intValue() != 0 && active.intValue() != 1) {
+            throw new IllegalArgumentException("基线 active 只能是 0 或 1：" + active);
+        }
+        String createdAt = optionalText(row, "created_at");
+        return write("基线插入（baseline_id=" + baselineId + "）", SQL_INSERT_BASELINE,
+                baselineId, runId, active,
+                optionalText(row, "dimension_scores_json"), row.getDouble("total_score"),
+                row.getInteger("valid_case_count"), optionalText(row, "perf_ref_json"),
+                optionalText(row, "bank_hash"), optionalText(row, "rubric_version"),
+                optionalText(row, "persona_hash"), optionalText(row, "config_fingerprint"),
+                optionalText(row, "eval_profile"), optionalText(row, "judge_profile"),
+                optionalText(row, "judge_model"), optionalText(row, "generation_model"),
+                optionalText(row, "eval_api_version"),
+                createdAt == null ? nowText() : createdAt,
+                optionalText(row, "created_by"), optionalText(row, "reason"),
+                optionalText(row, "superseded_by"));
+    }
+
+    /** 当前生效基线（active=1）；没有或查询异常返回 null（异常已记 WARN）。 */
+    public JSONObject findActiveBaseline() {
+        return queryOne(SQL_FIND_ACTIVE_BASELINE);
+    }
+
+    /** 按 baseline_id 查询基线行；没有或查询异常返回 null。 */
+    public JSONObject findBaseline(String baselineId) {
+        if (isBlank(baselineId)) {
+            return null;
+        }
+        return queryOne(SQL_FIND_BASELINE, baselineId);
+    }
+
+    /**
+     * 历史基线列表，按 created_at 倒序。
+     *
+     * <p>limit 是展示用截断，不做完整行数校验；基线行永不清理（§4.5）。</p>
+     *
+     * @throws IllegalArgumentException limit 不是正数
+     */
+    public List<JSONObject> findBaselines(int limit) {
+        if (limit <= 0) {
+            throw new IllegalArgumentException("查询条数必须为正数：" + limit);
+        }
+        return queryList("基线查询", SQL_FIND_BASELINES, Integer.valueOf(limit));
+    }
+
+    /**
+     * 基线切换第 ② 步：把当前 active=1 行退役为 active=0 并写 superseded_by（§8.1）。
+     *
+     * @return APPLIED 表示旧 active 行已退役；NO_MATCH 表示当前没有 active 行（可能已切换过），
+     * 调用方核对 active=1 行数后决定是否重跑；NOT_EXECUTED 表示语句未执行
+     */
+    public WriteResult supersedeActiveBaseline(String newBaselineId) {
+        if (isBlank(newBaselineId)) {
+            throw new IllegalArgumentException("新 baseline_id 不能为空");
+        }
+        return write("基线退役（superseded_by=" + newBaselineId + "）",
+                SQL_SUPERSEDE_ACTIVE, newBaselineId);
+    }
+
+    /**
+     * 基线切换第 ③ 步：把已写好 active=0 的新行置为 active=1（§8.1）。
+     *
+     * @return APPLIED 表示已激活；NO_MATCH 表示目标行不存在或已是 active
+     */
+    public WriteResult activateBaseline(String baselineId) {
+        if (isBlank(baselineId)) {
+            throw new IllegalArgumentException("baseline_id 不能为空");
+        }
+        return write("基线激活（baseline_id=" + baselineId + "）", SQL_ACTIVATE_BASELINE, baselineId);
+    }
+
+    /**
+     * run 是否被任何基线行引用（§4.5 豁免依据）。
+     *
+     * <p>查询失败按「已引用」保守处理：宁可少删，不可删掉基线锚定的 run。</p>
+     */
+    public boolean isRunReferencedByBaseline(String runId) {
+        if (isBlank(runId)) {
+            return false;
+        }
+        try {
+            JSONObject row = storage.queryOne(SQL_BASELINE_BY_RUN, runId);
+            return row != null && !row.isEmpty();
+        } catch (RuntimeException e) {
+            warn("查询基线引用失败，按已引用保守处理（run_id=" + runId + "）：" + e.getMessage());
+            return true;
+        }
+    }
+
+    /** 最近 limit 条运行行（含 RUNNING），按 started_at 倒序；仅供展示与诊断。 */
+    public List<JSONObject> findRecentRuns(int limit) {
+        if (limit <= 0) {
+            throw new IllegalArgumentException("查询条数必须为正数：" + limit);
+        }
+        return queryList("最近运行行查询", SQL_RECENT_RUNS, Integer.valueOf(limit));
+    }
+
+    /**
+     * 清理候选：保留窗口之外的终态行，最新在前（§4.5）。
+     *
+     * <p>只算终态行（RUNNING 不在删除范围）；是否被基线引用由 {@link #isRunReferencedByBaseline}
+     * 与 {@link #deleteRun} 兜底，本方法不替调用方豁免，便于 F-3 记录跳过原因。</p>
+     *
+     * @param keepRuns 保留的最近终态行数（evalKeepRuns）
+     * @throws IllegalArgumentException keepRuns 为负数
+     */
+    public List<JSONObject> findTerminalRunsBeyond(int keepRuns) {
+        if (keepRuns < 0) {
+            throw new IllegalArgumentException("保留条数不能为负数：" + keepRuns);
+        }
+        return queryList("终态运行行查询", SQL_TERMINAL_RUNS_BEYOND, Integer.valueOf(keepRuns));
+    }
+
+    /**
+     * 早于阈值的 RUNNING 行（§4.5 init 回收候选）。
+     *
+     * <p>只提供查询：置 ABORTED 复用 {@link #casAborted}，回收策略与 35 分钟阈值归 F-2/F-3。</p>
+     *
+     * @throws IllegalArgumentException 阈值文本为空
+     */
+    public List<JSONObject> findRunningRunsStartedBefore(String startedBefore) {
+        if (isBlank(startedBefore)) {
+            throw new IllegalArgumentException("时间阈值不能为空");
+        }
+        return queryList("早期 RUNNING 行查询", SQL_STALE_RUNNING, startedBefore);
+    }
+
+    /**
+     * 删除某 run 的全部用例结果行（§4.5 删除顺序的第一步）。
+     *
+     * @return APPLIED 表示有行被删；NO_MATCH 表示 0 行（调用方按「中止本轮清理并记 WARN」处理）；
+     * NOT_EXECUTED 表示语句未执行
+     */
+    public WriteResult deleteCaseResults(String runId) {
+        if (isBlank(runId)) {
+            throw new IllegalArgumentException("run_id 不能为空");
+        }
+        return write("用例结果删除（run_id=" + runId + "）", SQL_DELETE_CASE_RESULTS, runId);
+    }
+
+    /** 删除某 run 的全部调用行（§4.5 删除顺序的第一步）；返回值语义同 {@link #deleteCaseResults}。 */
+    public WriteResult deleteCalls(String runId) {
+        if (isBlank(runId)) {
+            throw new IllegalArgumentException("run_id 不能为空");
+        }
+        return write("调用行删除（run_id=" + runId + "）", SQL_DELETE_CALLS, runId);
+    }
+
+    /**
+     * 删除一条终态 run 行（§4.5 删除顺序的第二步）。
+     *
+     * <p>只删 COMPLETED / FAILED / ABORTED；被任何基线引用的 run、仍 RUNNING 的行都返回
+     * NO_MATCH 且不删除。删除后调用方须复核行已不存在，避免半清理状态。</p>
+     */
+    public WriteResult deleteRun(String runId) {
+        if (isBlank(runId)) {
+            throw new IllegalArgumentException("run_id 不能为空");
+        }
+        if (isRunReferencedByBaseline(runId)) {
+            warn("运行行被基线引用，拒绝删除（run_id=" + runId + "）");
+            return WriteResult.NO_MATCH;
+        }
+        int result;
+        try {
+            result = storage.update(SQL_DELETE_RUN, runId, runId);
+        } catch (RuntimeException e) {
+            warn("运行行删除异常（run_id=" + runId + "）：" + e.getMessage());
+            return WriteResult.NOT_EXECUTED;
+        }
+        if (result < 0) {
+            warn("运行行删除未执行（run_id=" + runId + "，update=" + result + "）");
+            return WriteResult.NOT_EXECUTED;
+        }
+        if (result == 0) {
+            warn("运行行未删除（不存在、仍 RUNNING 或已被基线引用，run_id=" + runId + "）");
+            return WriteResult.NO_MATCH;
+        }
+        return WriteResult.APPLIED;
+    }
+
+    /**
+     * 解析 case 行的 detail_json（§4.4、ST9）。
+     *
+     * <p>非法 JSON 或空值按空对象降级并记 WARN，行本身仍可读；调用方照常生成报表，
+     * 只是该 case 没有样本明细。</p>
+     */
+    public JSONObject parseDetailJson(JSONObject caseRow) {
+        String text = caseRow == null ? null : caseRow.getString("detail_json");
+        if (text == null || text.trim().isEmpty()) {
+            return new JSONObject();
+        }
+        try {
+            JSONObject parsed = JSONObject.parseObject(text);
+            return parsed == null ? new JSONObject() : parsed;
+        } catch (RuntimeException e) {
+            String runId = caseRow == null ? null : caseRow.getString("run_id");
+            String caseId = caseRow == null ? null : caseRow.getString("case_id");
+            warn("detail_json 非法，按空对象降级（run_id=" + runId + "，case_id=" + caseId + "）："
+                    + e.getMessage());
+            return new JSONObject();
+        }
+    }
+
+    /** 用例结果主键派生规则（§4.2 O7）：run_id + 业务键；调用方可在写入前用同一规则预生成。 */
+    public static String deriveCaseResultId(String runId, String caseId) {
+        return runId + ":case:" + caseId;
+    }
+
+    /** 调用主键派生规则（§4.2 O7）：run_id + case_id + stage + 样本序号 + 尝试序号，每次尝试独立。 */
+    public static String deriveCallId(String runId, String caseId, String stage,
+                                      Integer sampleIndex, Integer attempt) {
+        return runId + ":call:" + (caseId == null ? "-" : caseId) + ":" + stage + ":"
+                + (sampleIndex == null ? "-" : sampleIndex) + ":" + (attempt == null ? "-" : attempt);
+    }
+
     private JSONObject queryOne(String sql, Object... params) {
         try {
             return storage.queryOne(sql, params);
         } catch (RuntimeException e) {
-            warn("查询运行行失败：" + e.getMessage());
+            warn("查询失败：" + e.getMessage());
             return null;
         }
     }
@@ -300,14 +736,196 @@ public final class EvalStore {
         return result;
     }
 
+    /** update / insert 返回值的三态收敛（§4.1）。 */
+    public enum WriteResult {
+        /** 返回正数：语句已执行并命中行。 */
+        APPLIED,
+        /** 返回 0：没有写入或没有匹配行；INSERT 时多为唯一键 / 主键冲突（§4.4 按「已有结果」跳过）。 */
+        NO_MATCH,
+        /**
+         * 返回 -1：语句未执行，效果未知；调用方下一轮重试，不得当作成功。
+         *
+         * <p>SQLite 的唯一键 / 主键冲突会被驱动上报成语句失败，因此 INSERT 冲突既可能是
+         * {@link #NO_MATCH} 也可能是本值；两者都表示「未写入」，调用方一律按已有行跳过。</p>
+         */
+        NOT_EXECUTED;
+    }
+
+    /**
+     * 查询结果集与其应有行数。
+     *
+     * <p>主程序把 query 异常吞成「已读到的部分行」，只看行数无法发现缺行；本类额外执行
+     * {@code COUNT(*)}，两者不一致即判部分行（ST8）。</p>
+     */
+    public static final class RowSet {
+        private static final RowSet EMPTY =
+                new RowSet(Collections.<JSONObject>emptyList(), 0, false);
+
+        private final List<JSONObject> rows;
+        private final int expectedCount;
+        private final boolean queryFailed;
+
+        RowSet(List<JSONObject> rows, int expectedCount, boolean queryFailed) {
+            this.rows = Collections.unmodifiableList(new ArrayList<JSONObject>(rows));
+            this.expectedCount = expectedCount;
+            this.queryFailed = queryFailed;
+        }
+
+        static RowSet empty() {
+            return EMPTY;
+        }
+
+        /** 实际读到的行（只读）。 */
+        public List<JSONObject> rows() {
+            return rows;
+        }
+
+        public int size() {
+            return rows.size();
+        }
+
+        /** 库中应有的行数；计数失败为 -1。 */
+        public int expectedCount() {
+            return expectedCount;
+        }
+
+        /** query 或计数本身失败（已记 WARN）。 */
+        public boolean isQueryFailed() {
+            return queryFailed;
+        }
+
+        /**
+         * 行数完整且查询未失败。
+         *
+         * <p>为 false 时调用方必须把缺失项标成「数据缺失」，不得按 0 分计入维度统计。</p>
+         */
+        public boolean isComplete() {
+            return !queryFailed && expectedCount >= 0 && rows.size() == expectedCount;
+        }
+    }
+
     /** 本类可能执行的 SQL（只读，供 A8 自检）。 */
     public static List<String> sqlStatements() {
         return Collections.unmodifiableList(new ArrayList<String>(Arrays.asList(
                 SQL_RUN_ID_EXISTS, SQL_INSERT_RUN, SQL_FIND_RUN, SQL_FIND_RUNNING, SQL_FIND_LATEST,
-                SQL_CAS_COMPLETED, SQL_CAS_FAILED, SQL_CAS_ABORTED)));
+                SQL_CAS_COMPLETED, SQL_CAS_FAILED, SQL_CAS_ABORTED,
+                SQL_INSERT_CASE_RESULT, SQL_FIND_CASE_RESULT, SQL_FIND_CASE_RESULTS,
+                SQL_COUNT_CASE_RESULTS, SQL_INSERT_CALL, SQL_FIND_CALL, SQL_FIND_CALLS,
+                SQL_COUNT_CALLS, SQL_INSERT_BASELINE, SQL_FIND_ACTIVE_BASELINE, SQL_FIND_BASELINE,
+                SQL_FIND_BASELINES, SQL_SUPERSEDE_ACTIVE, SQL_ACTIVATE_BASELINE, SQL_BASELINE_BY_RUN,
+                SQL_TERMINAL_RUNS_BEYOND, SQL_STALE_RUNNING, SQL_RECENT_RUNS, SQL_DELETE_CASE_RESULTS,
+                SQL_DELETE_CALLS, SQL_DELETE_RUN)));
+    }
+
+    /** 把 update / insert 的 -1 / 0 / 正数收敛成三态并记录警告。 */
+    private WriteResult write(String label, String sql, Object... params) {
+        int result;
+        try {
+            result = storage.update(sql, params);
+        } catch (RuntimeException e) {
+            warn(label + "异常：" + e.getMessage());
+            return WriteResult.NOT_EXECUTED;
+        }
+        if (result < 0) {
+            warn(label + "未执行（update=" + result + "），效果未知，下一轮重试");
+            return WriteResult.NOT_EXECUTED;
+        }
+        if (result == 0) {
+            warn(label + "未写入任何行（update=0），按已有行跳过，不覆盖旧行");
+            return WriteResult.NO_MATCH;
+        }
+        return WriteResult.APPLIED;
+    }
+
+    /** 查询行集并核对 COUNT(*)，识别部分行（ST8）。 */
+    private RowSet queryRows(String label, String sql, String countSql, Object... params) {
+        List<JSONObject> rows;
+        try {
+            rows = storage.query(sql, params);
+        } catch (RuntimeException e) {
+            warn(label + "异常：" + e.getMessage());
+            return new RowSet(Collections.<JSONObject>emptyList(), -1, true);
+        }
+        if (rows == null) {
+            rows = new ArrayList<JSONObject>();
+        }
+        int expected = countRows(label, countSql, params);
+        if (expected < 0) {
+            return new RowSet(rows, -1, true);
+        }
+        if (rows.size() != expected) {
+            warn(label + "只读到 " + rows.size() + " / " + expected + " 行（部分行），"
+                    + "缺失项按数据缺失处理，不计 0 分");
+        }
+        return new RowSet(rows, expected, false);
+    }
+
+    /** 查询列表（不做完整行数校验）；异常或 null 返回空列表并记 WARN。 */
+    private List<JSONObject> queryList(String label, String sql, Object... params) {
+        try {
+            List<JSONObject> rows = storage.query(sql, params);
+            return rows == null ? new ArrayList<JSONObject>() : rows;
+        } catch (RuntimeException e) {
+            warn(label + "异常：" + e.getMessage());
+            return new ArrayList<JSONObject>();
+        }
+    }
+
+    private int countRows(String label, String countSql, Object... params) {
+        try {
+            JSONObject row = storage.queryOne(countSql, params);
+            if (row == null) {
+                warn(label + "计数为空，无法判断是否部分行");
+                return -1;
+            }
+            Long total = row.getLong("total");
+            if (total == null) {
+                warn(label + "计数结果缺少 total 列，无法判断是否部分行");
+                return -1;
+            }
+            return total.intValue();
+        } catch (RuntimeException e) {
+            warn(label + "计数失败：" + e.getMessage());
+            return -1;
+        }
+    }
+
+    private static String requireText(JSONObject row, String key, String label) {
+        String value = optionalText(row, key);
+        if (value == null) {
+            throw new IllegalArgumentException(label + "缺少必填列：" + key);
+        }
+        return value;
+    }
+
+    private static String optionalText(JSONObject row, String key) {
+        String value = row.getString(key);
+        return value == null || value.isEmpty() ? null : value;
+    }
+
+    private static boolean isBlank(String value) {
+        return value == null || value.trim().isEmpty();
+    }
+
+    private static double defaultDouble(JSONObject row, String key, double fallback) {
+        Double value = row.getDouble(key);
+        return value == null ? fallback : value.doubleValue();
+    }
+
+    /** 本次会话累计的降级警告（只读副本，供报告与测试断言）。 */
+    public List<String> warnings() {
+        synchronized (warnings) {
+            return Collections.unmodifiableList(new ArrayList<String>(warnings));
+        }
     }
 
     private void warn(String message) {
+        synchronized (warnings) {
+            if (warnings.size() >= WARN_LIMIT) {
+                warnings.remove(0);
+            }
+            warnings.add(message);
+        }
         if (logger != null) {
             logger.sendWarn("[MBB-Eval] " + message);
         }
