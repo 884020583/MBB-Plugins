@@ -106,6 +106,12 @@ public final class EvalBankLocator {
             }
         }
 
+        // §5.8.2：旧 roleplay-evals.json 一律不读；只判文件名，不打开内容。
+        if (valid && !configBlank && EvalLegacyFileGuard.isLegacyFileName(configured)) {
+            valid = false;
+            invalidReason = EvalLegacyFileGuard.check(configured).message();
+        }
+
         boolean exists = valid && bankFile != null && bankFile.isFile();
         return new EvalBankLocation(dataFolder, pluginsRoot, evalsDirectory, bankFile, bankFileName, invalidReason,
                 fromBuiltin, absoluteConfigured, valid, configBlank, exists, status, warnings);
@@ -114,6 +120,11 @@ public final class EvalBankLocator {
     /** 字符串便捷重载，供 onEnable 直接传入 Plugin.getDataFolder()。 */
     public static EvalBankLocation locate(String dataFolder, String evalBankFile) {
         return locate(isBlank(dataFolder) ? null : new File(dataFolder), evalBankFile, BUILTIN_BANK_VERSION);
+    }
+
+    /** 配置值是否指向旧题库文件（roleplay-evals.json，§5.8.2 不读）；只判文件名，不读内容。 */
+    public static boolean isLegacyBankFile(String evalBankFile) {
+        return EvalLegacyFileGuard.isLegacyFileName(evalBankFile);
     }
 
     /** 默认题库文件名：bank-&lt;version&gt;.json。 */
