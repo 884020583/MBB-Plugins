@@ -9,6 +9,8 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
+import java.util.Arrays;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 
@@ -35,6 +37,27 @@ public final class EvalReportWriter {
     private static final String HEADING_8 = "## 8. 校准与告警";
     private static final String HEADING_9 = "## 9. 附录";
     private static final String TREND_HEADING = "### 最近 10 次 run 总分趋势表";
+
+    /**
+     * 隐私口径允许写出的字段清单（I-2：§16.10、§15.9 I2）。
+     *
+     * <p>只含 run 标识、分数、性能、告警与报表路径；顺序固定，供测试与自查引用。</p>
+     */
+    public static final List<String> PRIVACY_FIELDS = Collections.unmodifiableList(Arrays.asList(
+            "run_id", "tier", "status", "started_at", "ended_at", "duration_ms",
+            "total_score", "baseline", "dimension_scores", "performance", "warnings",
+            "report_path"));
+
+    /**
+     * 隐私口径明确排除的字段与内容（I-2：§16.10、§15.9 I2）。
+     *
+     * <p>history / trend 指历史 run 与趋势表；prompt / reply / message / content 指完整
+     * 提示词与模型回复；persona 指 persona 原文与标识；昵称、userID 等个人信息一律不写。</p>
+     */
+    public static final List<String> PRIVACY_EXCLUDED_FIELDS = Collections.unmodifiableList(
+            Arrays.asList("history", "trend", "case_detail", "evidence", "detail_json",
+                    "config_snapshot_json", "calibration_json", "error_summary",
+                    "prompt", "reply", "message", "content", "nickname", "persona", "user_id"));
 
     /** §8.3 第 2 节固定标注：git commit 不在 v1 采集范围。 */
     private static final String GIT_COMMIT_NOTE = "未采集";
@@ -74,6 +97,107 @@ public final class EvalReportWriter {
         appendCalibration(sb, report);
         appendAppendix(sb, report);
         return sb.toString();
+    }
+
+    /**
+     * 渲染隐私口径摘要（I-2：§16.10、§15.9 I2）。
+     *
+     * <p>只写 run 标识、分数、性能、告警与报表相对路径；不写快照、persona、题级明细、
+     * evidence、趋势历史、校准 JSON 与错误摘要。既有 {@link #render(EvalReportData)}
+     * 的九节输出保持不变。</p>
+     *
+     * @param data 装配结果；null 时按数据缺失渲染
+     * @return 以换行结尾的 Markdown 文本
+     */
+    public static String renderPrivacy(EvalReportData data) {
+        EvalReportData report = data == null
+                ? EvalReportData.missing("", "未装配报表数据") : data;
+        StringBuilder sb = new StringBuilder(2048);
+        sb.append("# MBB-Eval 评测摘要（隐私口径）").append("\n\n");
+        appendPrivacyHeader(sb, report);
+        appendPrivacyDimensions(sb, report);
+        appendPrivacyPerformance(sb, report);
+        appendPrivacyWarnings(sb, report);
+        appendPrivacyPath(sb, report);
+        return sb.toString();
+    }
+
+    /** 隐私口径第 1 节：run 标识、时间、总分与基线点值。 */
+    private static void appendPrivacyHeader(StringBuilder sb, EvalReportData data) {
+        sb.append("## 1. 结果").append('\n');
+        appendBullet(sb, "run_id", orMissing(data.runId()));
+        sb.append("- 起止时间：").append(orMissing(data.startedAt())).append(" → ")
+                .append(orMissing(data.endedAt())).append('\n');
+        sb.append("- 总时长：").append(secondsOrMissing(data.durationMs())).append('\n');
+        sb.append("- tier：").append(orMissing(data.tier())).append('\n');
+        sb.append("- status：").append(orMissing(data.status())).append('\n');
+        sb.append("- 总分：").append(numOrMissing(data.totalScore())).append('\n');
+        sb.append("- 基线：").append(privacyBaselineText(data)).append('\n');
+        sb.append("- 说明：本口径只写分数、性能、告警与报表路径，不含 prompt、回复、昵称与 persona 原文")
+                .append('\n');
+        sb.append('\n');
+    }
+
+    private static String privacyBaselineText(EvalReportData data) {
+        EvalReportData.BaselineView baseline = data.baseline();
+        if (baseline == null || !baseline.present()) {
+            return "无（不可比）";
+        }
+        if (!baseline.comparable()) {
+            return orMissing(baseline.runId()) + "：不可比（" + orMissing(baseline.reason()) + "）";
+        }
+        if (data.totalScore() == null || baseline.totalScore() == null) {
+            return orMissing(baseline.runId()) + "：不可比（总分缺失）";
+        }
+        return orMissing(baseline.runId()) + "：" + signed(data.totalScore().doubleValue()
+                - baseline.totalScore().doubleValue()) + "（点值，不判显著性）";
+    }
+
+    /** 隐私口径第 2 节：五维得分，不写样本、case 与 evidence。 */
+    private static void appendPrivacyDimensions(StringBuilder sb, EvalReportData data) {
+        sb.append("## 2. 五维").append('\n');
+        sb.append("| 维度 | 得分 |\n");
+        sb.append("| --- | --- |\n");
+        for (EvalReportData.Dimension dimension : data.dimensions()) {
+            sb.append("| ").append(dimension.id()).append(' ').append(dimension.label())
+                    .append(" | ").append(numOrMissing(dimension.score())).append(" |\n");
+        }
+        sb.append('\n');
+    }
+
+    /** 隐私口径第 3 节：复用第 7 节性能渲染，只把标题编号改为 3。 */
+    private static void appendPrivacyPerformance(StringBuilder sb, EvalReportData data) {
+        String performance = EvalReportPerformanceRenderer.render(data);
+        if (performance.startsWith(EvalReportPerformanceRenderer.HEADING)) {
+            sb.append("## 3. 性能")
+                    .append(performance.substring(EvalReportPerformanceRenderer.HEADING.length()));
+        } else {
+            sb.append(performance);
+        }
+    }
+
+    /** 隐私口径第 4 节：与九节报表同一份 §8.5 告警。 */
+    private static void appendPrivacyWarnings(StringBuilder sb, EvalReportData data) {
+        sb.append("## 4. 告警").append('\n');
+        List<String> warnings = warningTexts(data);
+        if (warnings.isEmpty()) {
+            sb.append("- 告警：无").append('\n');
+        } else {
+            sb.append("- 告警：").append('\n');
+            for (String warning : warnings) {
+                sb.append("  - ").append(warning).append('\n');
+            }
+        }
+        sb.append('\n');
+    }
+
+    /** 隐私口径第 5 节：只写报表相对路径。 */
+    private static void appendPrivacyPath(StringBuilder sb, EvalReportData data) {
+        sb.append("## 5. 报表路径").append('\n');
+        sb.append("- 报表路径：")
+                .append(data.runFound() ? relativeReportPath(data.runId()) : "reports/数据缺失")
+                .append('\n');
+        sb.append('\n');
     }
 
     /** §8.3 第 1 节：run_id、起止时间、tier、status、一句话结论。 */
@@ -353,6 +477,19 @@ public final class EvalReportWriter {
         return "run-" + runId + ".md";
     }
 
+    /**
+     * 群内摘要与隐私口径使用的报表相对路径（§8.6 固定文案）。
+     *
+     * @param runId run 标识；缺失时返回 {@code reports/数据缺失}
+     * @return 形如 {@code reports/run-<run_id>.md} 的相对路径
+     */
+    public static String relativeReportPath(String runId) {
+        if (runId == null || runId.isEmpty()) {
+            return "reports/" + EvalReportData.MISSING;
+        }
+        return "reports/" + fileName(runId);
+    }
+
     private static void moveAtomically(File source, File target) throws IOException {
         try {
             Files.move(source.toPath(), target.toPath(), StandardCopyOption.ATOMIC_MOVE);
@@ -448,6 +585,18 @@ public final class EvalReportWriter {
             warnings.add("指标未装配，性能与预算不可判定（§8.3 第 7 节）");
         }
         return warnings;
+    }
+
+    /**
+     * 供群内摘要等复用 §8.5 告警判定，避免摘要与报表两处口径漂移。
+     *
+     * @param data 报表数据；null 按数据缺失处理
+     * @return 可直接展示的中文告警文案；顺序固定
+     */
+    static List<String> warningTexts(EvalReportData data) {
+        EvalReportData report = data == null
+                ? EvalReportData.missing("", "未装配报表数据") : data;
+        return warnings(report);
     }
 
     private static String validCaseText(EvalReportData data) {

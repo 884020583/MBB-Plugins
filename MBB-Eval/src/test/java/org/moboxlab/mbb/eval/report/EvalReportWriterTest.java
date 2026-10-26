@@ -15,6 +15,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 
 import static org.junit.Assert.assertEquals;
@@ -246,6 +247,73 @@ public class EvalReportWriterTest {
         // config_snapshot_json 只在 §2 以指纹前 8 位出现
         assertTrue(text.contains("12345678"));
         assertFalse(text.contains("1234567890abcdef1234"));
+    }
+
+    @Test
+    public void privacyRenderShouldOnlyCarryScorePerformanceWarningsAndPath() {
+        EvalReportData data = seedSnapshot();
+        String text = EvalReportWriter.renderPrivacy(data);
+
+        assertTrue(text.startsWith("# MBB-Eval 评测摘要（隐私口径）\n"));
+        assertTrue(text.contains("## 1. 结果"));
+        assertTrue(text.contains("## 2. 五维"));
+        assertTrue(text.contains("## 3. 性能"));
+        assertTrue(text.contains("## 4. 告警"));
+        assertTrue(text.contains("## 5. 报表路径"));
+        assertTrue(text.contains("- run_id：" + RUN));
+        assertTrue(text.contains("- 总分：74.0"));
+        assertTrue(text.contains("- 基线：" + BASE_RUN + "：+5.0（点值，不判显著性）"));
+        assertTrue(text.contains("| persona 人设一致性 | 80.0 |"));
+        assertFalse(text.contains("## 2. 快照"));
+        assertFalse(text.contains("## 6. 题级明细"));
+        assertFalse(text.contains("## 7. 性能"));
+        assertFalse(text.contains("## 9. 附录"));
+        assertFalse(text.contains("趋势"));
+        assertFalse(text.contains("人设贴合"));
+        assertFalse(text.contains("case-1"));
+        assertFalse(text.contains("roleplay-default"));
+        assertFalse(text.contains("p-hash-1"));
+        assertFalse(text.contains("sk-secret-9f2"));
+        assertFalse(text.contains("小明"));
+        assertFalse(text.contains("完整提示词"));
+        assertFalse(text.contains("模型回复原文"));
+        assertFalse(text.contains("user_id"));
+        assertFalse(text.contains(CONFIG_FINGERPRINT));
+        assertTrue(text.contains("- 报表路径：reports/run-" + RUN + ".md"));
+        assertTrue(text.endsWith("\n"));
+    }
+
+    @Test
+    public void privacyFieldListsShouldBeFixedAndDisjoint() {
+        assertEquals(Arrays.asList("run_id", "tier", "status", "started_at", "ended_at",
+                "duration_ms", "total_score", "baseline", "dimension_scores", "performance",
+                "warnings", "report_path"), EvalReportWriter.PRIVACY_FIELDS);
+        assertTrue(EvalReportWriter.PRIVACY_EXCLUDED_FIELDS.containsAll(Arrays.asList(
+                "history", "trend", "case_detail", "evidence", "detail_json",
+                "config_snapshot_json", "calibration_json", "error_summary", "prompt", "reply",
+                "message", "content", "nickname", "persona", "user_id")));
+        for (String field : EvalReportWriter.PRIVACY_FIELDS) {
+            assertFalse("白名单与排除清单不得重叠：" + field,
+                    EvalReportWriter.PRIVACY_EXCLUDED_FIELDS.contains(field));
+        }
+        try {
+            EvalReportWriter.PRIVACY_FIELDS.add("extra");
+            fail("白名单应不可变");
+        } catch (UnsupportedOperationException expected) {
+            // 预期：只读清单
+        }
+    }
+
+    @Test
+    public void relativeReportPathShouldUseRunNamedFile() {
+        assertEquals("reports/run-" + RUN + ".md", EvalReportWriter.relativeReportPath(RUN));
+        assertEquals("reports/数据缺失", EvalReportWriter.relativeReportPath(""));
+        assertEquals("reports/数据缺失", EvalReportWriter.relativeReportPath(null));
+
+        String missing = EvalReportWriter.renderPrivacy(EvalReportData.assemble(store,
+                "r-20260101000000-full-zzzz"));
+        assertTrue(missing.contains("- 报表路径：reports/数据缺失"));
+        assertFalse(missing.contains("sk-secret-9f2"));
     }
 
     @Test
