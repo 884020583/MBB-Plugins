@@ -7,6 +7,7 @@ import java.nio.file.Files;
 import java.util.LinkedHashSet;
 import java.util.Set;
 
+import org.moboxlab.mbb.eval.bank.EvalRubricReleaser;
 import org.moboxlab.mbb.eval.judge.EvalJudgePrompt;
 import org.moboxlab.mbb.eval.rubric.EvalRubricLoader;
 
@@ -26,6 +27,8 @@ import com.alibaba.fastjson.parser.Feature;
 public final class TestEvalAssets {
 
     public static final String BANK_FILE_NAME = "bank-1.0.0.json";
+    /** 内置 rubric 文件名，与释放器常量保持同一口径。 */
+    public static final String RUBRIC_FILE_NAME = EvalRubricReleaser.BUILTIN_RUBRIC_FILE_NAME;
 
     private TestEvalAssets() {
     }
@@ -41,6 +44,37 @@ public final class TestEvalAssets {
 
     public static JSONObject builtinBank() throws IOException {
         return parse(new String(builtinBankBytes(), StandardCharsets.UTF_8));
+    }
+
+    /** 构建产物中的内置 rubric 字节；找不到时直接失败，避免静默跳过。 */
+    public static byte[] builtinRubricBytes() throws IOException {
+        File file = new File(classesDirectory(), "bank/" + RUBRIC_FILE_NAME);
+        if (!file.isFile()) {
+            throw new AssertionError("rubric 资产不存在，请先执行 build.ps1：" + file.getAbsolutePath());
+        }
+        return Files.readAllBytes(file.toPath());
+    }
+
+    public static JSONObject builtinRubric() throws IOException {
+        return parse(new String(builtinRubricBytes(), StandardCharsets.UTF_8));
+    }
+
+    /**
+     * 按改动后的内容重封 version 后缀（语义版本保持不变），返回写入的文件。
+     *
+     * <p>B28 要求改 rubric 副本后仍能被加载器接受，因此先改内容再重算 sha256 前 8 位。</p>
+     */
+    public static File writeResealedRubric(File evalsDirectory, JSONObject rubric) throws IOException {
+        String version = rubric.getString("version");
+        String semanticVersion = "1.1.0";
+        if (version != null) {
+            int dash = version.indexOf('-');
+            semanticVersion = dash < 0 ? version : version.substring(0, dash);
+        }
+        String sha8 = EvalRubricLoader.contentSha8(rubric.toJSONString());
+        String sealed = semanticVersion + "-" + sha8;
+        rubric.put("version", sealed);
+        return write(evalsDirectory, "rubric-" + sealed + ".json", rubric.toJSONString());
     }
 
     /** 按 §5.1 建临时插件数据目录：<root>/MoBoxBot/plugins/MBB-Eval。 */

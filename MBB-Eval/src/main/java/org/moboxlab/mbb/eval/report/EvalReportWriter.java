@@ -1,5 +1,6 @@
 package org.moboxlab.mbb.eval.report;
 
+import org.moboxlab.mbb.eval.baseline.EvalDeltaResult;
 import org.moboxlab.mbb.eval.metrics.EvalMetrics;
 import org.moboxlab.mbb.eval.store.EvalStore;
 
@@ -83,6 +84,20 @@ public final class EvalReportWriter {
      * @return 以单个换行结尾的 Markdown 文本，UTF-8 无 BOM
      */
     public static String render(EvalReportData data) {
+        return render(data, null);
+    }
+
+    /**
+     * 渲染九节 Markdown，并在第 5 节消费 F-6 的 {@link EvalDeltaResult}（§8.4）。
+     *
+     * <p>传入 delta 时，第 5 节使用配对 delta、维度置信区间、显著性四态、题级翻转、
+     * 不可信变更与标注；delta 为 null 时保留「未计算」占位，供仅有装配结果的调用方使用。</p>
+     *
+     * @param data  装配结果；null 时按「数据缺失」渲染
+     * @param delta 基线比较结果；null 时第 5 节按未计算口径渲染
+     * @return 以单个换行结尾的 Markdown 文本
+     */
+    public static String render(EvalReportData data, EvalDeltaResult delta) {
         EvalReportData report = data == null
                 ? EvalReportData.missing("", "未装配报表数据") : data;
         StringBuilder sb = new StringBuilder(4096);
@@ -91,7 +106,7 @@ public final class EvalReportWriter {
         appendSnapshot(sb, report);
         appendDimensions(sb, report);
         appendTotal(sb, report);
-        appendBaseline(sb, report);
+        appendBaseline(sb, report, delta);
         appendCases(sb, report);
         appendPerformance(sb, report);
         appendCalibration(sb, report);
@@ -290,8 +305,108 @@ public final class EvalReportWriter {
         sb.append('\n');
     }
 
-    /** §8.3 第 5 节：与基线对比；不可比时只列差异字段，不出 delta。 */
-    private static void appendBaseline(StringBuilder sb, EvalReportData data) {
+    /**
+     * §8.3 第 5 节：有 F-6 delta 时用 delta 渲染，否则退回「未计算」占位。
+     *
+     * <p>报表只读装配结果与 delta，不自行判定显著性；有 delta 时所有维度区间、结论、
+     * 题级翻转与不可信变更都直接取自 {@link EvalDeltaResult}，避免报表另算一套口径。</p>
+     */
+    private static void appendBaseline(StringBuilder sb, EvalReportData data, EvalDeltaResult delta) {
+        if (delta == null) {
+            appendBaselineLegacy(sb, data);
+            return;
+        }
+        sb.append(HEADING_5).append('\n');
+        EvalReportData.BaselineView baseline = data.baseline();
+        String baselineRunId = baseline != null && baseline.present()
+                ? baseline.runId() : delta.baselineRunId();
+        sb.append("- 基线：").append(orMissing(baselineRunId));
+        if (baseline != null && baseline.present()) {
+            sb.append("（").append(orMissing(baseline.createdAt())).append("）");
+        }
+        sb.append('\n');
+        if (!delta.available()) {
+            sb.append("- 判定：不可比（").append(orMissing(delta.note())).append("）").append('\n');
+            sb.append("- 差异字段：").append(listOrNone(delta.differingKeys())).append('\n');
+            sb.append("- delta：不可比（不出 delta 与显著性）").append('\n');
+            appendDeltaAnnotations(sb, delta);
+            sb.append('\n');
+            return;
+        }
+        sb.append("- 判定：").append(delta.comparable() ? "可比（九键一致）"
+                : "不可比（" + orMissing(delta.comparabilityReason()) + "）").append('\n');
+        sb.append("- 差异字段：").append(listOrNone(delta.differingKeys())).append('\n');
+        if (delta.totalDelta() == null) {
+            sb.append("- 总分 delta：不可比（").append(delta.rubricChanged()
+                    ? "rubric 已变" : "基线或本次总分缺失").append("）").append('\n');
+        } else {
+            sb.append("- 总分 delta：").append(signed(delta.totalDelta().doubleValue()))
+                    .append("（点值，不判显著性）").append('\n');
+        }
+        sb.append("- 两侧可信度：基线 ").append(delta.baselineCredible() ? "可信" : "不可信")
+                .append(" / 本次 ").append(delta.currentCredible() ? "可信" : "不可信")
+                .append("；结论 ").append(delta.conclusion()).append('\n');
+        sb.append("| 维度 | 基线分 | 本次分 | delta | ci_low | ci_high | 结论 |\n");
+        sb.append(TABLE_SEPARATOR_7).append('\n');
+        for (EvalReportData.Dimension dimension : data.dimensions()) {
+            EvalDeltaResult.DimensionDelta dimensionDelta = delta.dimension(dimension.id());
+            boolean unavailable = dimensionDelta == null;
+            sb.append("| ").append(dimension.id()).append(' ').append(dimension.label())
+                    .append(" | ").append(unavailable ? EvalReportData.MISSING
+                            : numOrMissing(dimensionDelta.baselineScore()))
+                    .append(" | ").append(unavailable ? EvalReportData.MISSING
+                            : numOrMissing(dimensionDelta.currentScore()))
+                    .append(" | ").append(unavailable ? EvalReportData.MISSING
+                            : signedOrMissing(dimensionDelta.delta()))
+                    .append(" | ").append(unavailable ? EvalReportData.MISSING
+                            : numOrMissing(dimensionDelta.ciLow()))
+                    .append(" | ").append(unavailable ? EvalReportData.MISSING
+                            : numOrMissing(dimensionDelta.ciHigh()))
+                    .append(" | ").append(unavailable ? "不可比"
+                            : dimensionDelta.significance().label())
+                    .append(" |\n");
+        }
+        sb.append("- 注：维度区间与显著性由 bootstrap 计算（1000 次、种子 41；§8.4）").append('\n');
+        sb.append("- 题级：变好 ").append(delta.betterCount())
+                .append(" / 变差 ").append(delta.worseCount())
+                .append(" / 持平 ").append(delta.sameCount())
+                .append(" / 翻转 ").append(delta.flippedCaseIds().size())
+                .append("/").append(delta.flippedTotal()).append('\n');
+        sb.append("- 不可信变更：ok→error ").append(delta.okToErrorCount())
+                .append("；ok→invalid ").append(delta.okToInvalidCount())
+                .append("（§8.4）").append('\n');
+        for (EvalDeltaResult.CaseChange change : delta.untrustedChanges()) {
+            sb.append("  - ").append(orMissing(change.caseId()))
+                    .append("（").append(orMissing(change.dimensionId())).append("） ")
+                    .append(change.label()).append('\n');
+        }
+        appendDeltaAnnotations(sb, delta);
+        sb.append('\n');
+    }
+
+    /** F-6 标注逐条落到第 5 节，保证「不可信」不只出现在摘要里（§8.5、H11）。 */
+    private static void appendDeltaAnnotations(StringBuilder sb, EvalDeltaResult delta) {
+        List<String> annotations = delta.annotations();
+        if (annotations.isEmpty()) {
+            sb.append("- 标注：无").append('\n');
+            return;
+        }
+        sb.append("- 标注：").append('\n');
+        for (String annotation : annotations) {
+            sb.append("  - ").append(orMissing(annotation)).append('\n');
+        }
+    }
+
+    private static String signedOrMissing(Double value) {
+        return value == null ? EvalReportData.MISSING : signed(value.doubleValue());
+    }
+
+    private static String listOrNone(List<String> values) {
+        return values == null || values.isEmpty() ? "无" : join(values, "、");
+    }
+
+    /** 旧口径：没有 F-6 delta 时保留「未计算」占位，避免其它调用方拿到半份对比。 */
+    private static void appendBaselineLegacy(StringBuilder sb, EvalReportData data) {
         sb.append(HEADING_5).append('\n');
         EvalReportData.BaselineView baseline = data.baseline();
         if (baseline == null || !baseline.present()) {
@@ -444,6 +559,20 @@ public final class EvalReportWriter {
      * @throws IOException 目录创建或写入失败，交由命令层记录与重试
      */
     public static File writeToFile(EvalReportData data, File reportsDir) throws IOException {
+        return writeToFile(data, reportsDir, null);
+    }
+
+    /**
+     * 写报表文件，并让第 5 节使用给定的 F-6 delta（§8.3、§8.4）。
+     *
+     * @param data       装配结果
+     * @param reportsDir 报表目录（{@code getDataFolder()/reports}）
+     * @param delta      基线比较结果；null 时第 5 节保留「未计算」占位
+     * @return 写入的文件
+     * @throws IOException 目录创建或写入失败；旧文件不被破坏
+     */
+    public static File writeToFile(EvalReportData data, File reportsDir, EvalDeltaResult delta)
+            throws IOException {
         if (data == null) {
             throw new IllegalArgumentException("报表数据不能为空");
         }
@@ -461,7 +590,7 @@ public final class EvalReportWriter {
         File temp = File.createTempFile(fileName(runId) + ".", ".tmp", reportsDir);
         boolean moved = false;
         try {
-            Files.write(temp.toPath(), render(data).getBytes(StandardCharsets.UTF_8));
+            Files.write(temp.toPath(), render(data, delta).getBytes(StandardCharsets.UTF_8));
             moveAtomically(temp, target);
             moved = true;
         } finally {

@@ -1,11 +1,13 @@
 package org.moboxlab.mbb.eval;
 
+import java.io.File;
 import java.lang.management.ManagementFactory;
 
 import org.moboxlab.moboxbot.API.Plugin;
 import org.moboxlab.moboxbot.API.Storage.StorageService;
 import org.moboxlab.mbb.eval.bank.EvalBankCache;
 import org.moboxlab.mbb.eval.bank.EvalBankResources;
+import org.moboxlab.mbb.eval.baseline.EvalBaselineService;
 import org.moboxlab.mbb.eval.command.EvalCommand;
 import org.moboxlab.mbb.eval.config.EvalConfig;
 import org.moboxlab.mbb.eval.gateway.EvalCapabilityClient;
@@ -18,6 +20,8 @@ import org.moboxlab.mbb.eval.runner.EvalPreflightSources.CapabilitiesStatusSourc
 import org.moboxlab.mbb.eval.runner.EvalRunRecovery;
 import org.moboxlab.mbb.eval.runner.EvalRunner;
 import org.moboxlab.mbb.eval.runner.EvalStageSources;
+import org.moboxlab.mbb.eval.score.EvalDimensionWeights;
+import org.moboxlab.mbb.eval.store.EvalReadOnlyBoundary;
 import org.moboxlab.mbb.eval.store.EvalSchemaService;
 import org.moboxlab.mbb.eval.store.EvalStore;
 
@@ -139,7 +143,8 @@ public class EvalPlugin extends Plugin {
                     EvalJudgePrompt.PROMPT_VERSION,
                     snapshot == null ? null : snapshot.personaId(),
                     snapshot == null ? null : snapshot.personaHash(),
-                    evalConfig.allowPersonaMismatch(), EvalBankResources.of(this), getLogger());
+                    evalConfig.allowPersonaMismatch(), EvalBankResources.of(this),
+                    EvalBankResources.of(this), getLogger());
             bankCache = dataBootstrap.bank();
             rubricCache = dataBootstrap.rubric();
             for (String warning : dataBootstrap.warnings()) {
@@ -190,8 +195,34 @@ public class EvalPlugin extends Plugin {
         }
         EvalPreflight preflight = builder.build();
         evalRunner = new EvalRunner(evalStore, evalConfig, preflight, getLogger(), getVersion());
-        getServer().getPluginManager().registerCommand(this, new EvalCommand(evalRunner, evalConfig));
-        getLogger().sendInfo("[MBB-Eval] 已注册 /eval 命令（骨架阶段，run 为占位执行，不发起 AI 调用）");
+        // 只读命令只注入库、题库缓存与报表目录，不注入 runner（§9.7、§16.8 G-3）。
+        EvalReadOnlyBoundary boundary = new EvalReadOnlyBoundary(new File(getDataFolder()));
+        EvalBaselineService baselineService = buildBaselineService();
+        getServer().getPluginManager().registerCommand(this, new EvalCommand(
+                evalRunner, evalConfig, evalStore, baselineService, bankCache, boundary.reportsDirectory()));
+        getLogger().sendInfo("[MBB-Eval] 已注册 /eval 命令（run 为占位执行；status/report/list/baseline "
+                + "为只读命令，不写库、不建 run、不发起 AI 调用；baseline set / abort 为写侧命令"
+                + (baselineService == null ? "，基线服务因 rubric 权重不可用未接线" : "") + "）");
+    }
+
+    /**
+     * 按 rubric 五维权重构造基线服务（§8.1、§16.8 G-4）。
+     *
+     * <p>rubric 未就绪或权重非法时返回 null：baseline set 只回「写侧基线服务未接线」，
+     * 不影响只读命令与 abort，也不阻止插件启用；原因写入日志便于排查。</p>
+     */
+    private EvalBaselineService buildBaselineService() {
+        if (rubricCache == null || !rubricCache.ok()) {
+            getLogger().sendWarn("[MBB-Eval] rubric 未就绪，baseline set 不可用（不影响只读命令与 abort）");
+            return null;
+        }
+        try {
+            EvalDimensionWeights weights = EvalDimensionWeights.from(rubricCache.rubric());
+            return new EvalBaselineService(weights, getLogger());
+        } catch (RuntimeException e) {
+            getLogger().sendWarn("[MBB-Eval] 构造基线服务失败，baseline set 不可用：" + e.getMessage());
+            return null;
+        }
     }
 
     @Override
