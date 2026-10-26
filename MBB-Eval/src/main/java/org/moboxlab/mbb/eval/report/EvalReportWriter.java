@@ -36,9 +36,6 @@ public final class EvalReportWriter {
     private static final String HEADING_9 = "## 9. 附录";
     private static final String TREND_HEADING = "### 最近 10 次 run 总分趋势表";
 
-    /** §8.3 第 7 节固定标注：吞吐类指标 v1 不采集。 */
-    private static final String THROUGHPUT_NOTE = "TTFT/ITL/TPS/RPS：不可得或不适用";
-
     /** §8.3 第 2 节固定标注：git commit 不在 v1 采集范围。 */
     private static final String GIT_COMMIT_NOTE = "未采集";
 
@@ -248,91 +245,9 @@ public final class EvalReportWriter {
         sb.append('\n');
     }
 
-    /** §8.3 第 7 节：延迟、调用、样本、缓存、token 与固定的不可得标注。 */
+    /** §8.3 第 7 节：委托性能渲染器，保持九节顺序与固定不可得标注。 */
     private static void appendPerformance(StringBuilder sb, EvalReportData data) {
-        sb.append(HEADING_7).append('\n');
-        EvalMetrics metrics = data.metrics();
-        if (metrics == null) {
-            sb.append("- 生成延迟：数据缺失（指标未装配）").append('\n');
-            sb.append("- p95：数据缺失").append('\n');
-            sb.append("- 调用：数据缺失").append('\n');
-            sb.append("- 样本：数据缺失").append('\n');
-            sb.append("- 缓存命中率：数据缺失").append('\n');
-            sb.append("- 总 token：数据缺失").append('\n');
-            sb.append("- error_type 分布：数据缺失").append('\n');
-        } else {
-            appendLatency(sb, metrics.latency());
-            appendCalls(sb, metrics);
-            appendSamples(sb, metrics.samples());
-            appendTokens(sb, metrics);
-            appendErrorTypes(sb, metrics.calls());
-        }
-        sb.append("- 延迟可信度：中（非首 token，含排队）").append('\n');
-        sb.append("- 吞吐可信度：低（非 ITL/TPOT）").append('\n');
-        sb.append("- ").append(THROUGHPUT_NOTE).append('\n');
-        sb.append('\n');
-    }
-
-    private static void appendLatency(StringBuilder sb, EvalMetrics.Latency latency) {
-        long n = latency.n();
-        if (n <= 0) {
-            sb.append("- 生成延迟：数据缺失（无样本）").append('\n');
-        } else if (n < 20) {
-            sb.append("- 生成延迟：mean ").append(seconds(latency.mean()))
-                    .append("；p50/p90/max：").append(sampleShort(n, 20)).append('\n');
-        } else {
-            sb.append("- 生成延迟：mean ").append(seconds(latency.mean()))
-                    .append("；p50 ").append(seconds(latency.p50()))
-                    .append("；p90 ").append(seconds(latency.p90()))
-                    .append("；max ").append(seconds(latency.max())).append('\n');
-        }
-        if (n >= 60) {
-            sb.append("- p95：").append(seconds(latency.p95())).append('\n');
-        } else if (n <= 0) {
-            sb.append("- p95：数据缺失").append('\n');
-        } else {
-            sb.append("- p95：").append(sampleShort(n, 60)).append('\n');
-        }
-    }
-
-    private static void appendCalls(StringBuilder sb, EvalMetrics metrics) {
-        EvalMetrics.Calls calls = metrics.calls();
-        EvalMetrics.Budget budget = metrics.budget();
-        sb.append("- 调用：").append(budget.used()).append("/").append(budget.budget())
-                .append("（").append(percent(budget.ratio())).append("）；调用级成功率 ")
-                .append(percent(calls.successRate())).append('\n');
-    }
-
-    private static void appendSamples(StringBuilder sb, EvalMetrics.Samples samples) {
-        sb.append("- 样本：total ").append(samples.total())
-                .append("；样本级成功率 ").append(percent(samples.successRate()))
-                .append("；重试率 ").append(percent(samples.retryRate()))
-                .append("；平均尝试 ").append(numOrMissing(samples.averageAttempts()))
-                .append('\n');
-    }
-
-    private static void appendTokens(StringBuilder sb, EvalMetrics metrics) {
-        EvalMetrics.Tokens tokens = metrics.tokens();
-        sb.append("- 缓存命中率：").append(percent(metrics.calls().cacheHitRate()))
-                .append("（cached 单列 ").append(tokens.cached().sum()).append("）").append('\n');
-        sb.append("- 总 token：prompt ").append(tokens.prompt().sum())
-                .append("；completion ").append(tokens.completion().sum())
-                .append("；total ").append(tokens.total().sum()).append('\n');
-    }
-
-    private static void appendErrorTypes(StringBuilder sb, EvalMetrics.Calls calls) {
-        List<String> parts = new ArrayList<String>();
-        for (String errorType : new String[] {
-            "disabled", "invalid-param", "history-too-long", "profile-invalid",
-            "ai-missing", "busy", "timeout", "internal"
-        }) {
-            Long count = calls.errorTypes().get(errorType);
-            if (count != null && count.longValue() > 0L) {
-                parts.add(errorType + " " + count.longValue());
-            }
-        }
-        sb.append("- error_type 分布：").append(parts.isEmpty() ? "无" : join(parts, "；"))
-                .append('\n');
+        sb.append(EvalReportPerformanceRenderer.render(data));
     }
 
     /** §8.3 第 8 节：校准结果、预算消耗与 §8.5 全部告警。 */
@@ -506,20 +421,7 @@ public final class EvalReportWriter {
                 && baseline.differingKeys().contains("rubric_version")) {
             warnings.add("rubric 已变：基线 rubric_version 与本次不同，不与历史直接比（§8.5）");
         }
-        if (data.metrics() != null) {
-            EvalMetrics.Calls calls = data.metrics().calls();
-            Double cacheHitRate = calls.cacheHitRate();
-            if (calls.cached() > 0L && cacheHitRate != null && cacheHitRate.doubleValue() > 0D) {
-                warnings.add(String.format(Locale.ROOT,
-                        "缓存命中率 %s 不为 0，缓存键疑似配置错误，性能与 token 不可用（§8.5）",
-                        percent(cacheHitRate)));
-            }
-            if (data.callsBudget() > 0 && data.callsUsed() >= data.callsBudget()) {
-                warnings.add(String.format(Locale.ROOT,
-                        "预算耗尽：calls_used=%d / calls_budget=%d，样本不完整（§8.5）",
-                        Integer.valueOf(data.callsUsed()), Integer.valueOf(data.callsBudget())));
-            }
-        }
+        warnings.addAll(EvalReportPerformanceRenderer.performanceWarnings(data));
         List<String> partial = new ArrayList<String>();
         List<String> missing = new ArrayList<String>();
         for (EvalReportData.Dimension dimension : data.dimensions()) {
