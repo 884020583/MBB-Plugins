@@ -1,5 +1,9 @@
 package org.moboxlab.mbb.eval.runner;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
+
 import org.moboxlab.mbb.eval.config.EvalConfig;
 import org.moboxlab.mbb.eval.gateway.EvalCapabilityClient;
 
@@ -58,31 +62,41 @@ public final class EvalPreflightSources {
         private final String code;
         private final String message;
         private final String hint;
+        private final List<String> details;
 
-        private StageReport(Outcome outcome, String code, String message, String hint) {
+        private StageReport(Outcome outcome, String code, String message, String hint,
+                List<String> details) {
             this.outcome = outcome;
             this.code = code;
             this.message = message;
             this.hint = hint;
+            this.details = Collections.unmodifiableList(new ArrayList<String>(
+                    details == null ? Collections.<String>emptyList() : details));
         }
 
         public static StageReport pass(String message) {
-            return new StageReport(Outcome.PASS, "", message, "");
+            return new StageReport(Outcome.PASS, "", message, "", null);
         }
 
         public static StageReport warn(String code, String message, String hint) {
-            return new StageReport(Outcome.WARN, code, message, hint);
+            return new StageReport(Outcome.WARN, code, message, hint, null);
         }
 
         /** 尚未接线的显式状态：消息固定为「&lt;项&gt; 尚未接线，跳过预检」。 */
         public static StageReport pending(Stage stage) {
             return new StageReport(Outcome.PENDING, "",
                     stage.label() + " 尚未接线，跳过预检",
-                    "该项由后续切片替换为真实检查；接线前按通过处理");
+                    "该项由后续切片替换为真实检查；接线前按通过处理", null);
         }
 
         public static StageReport reject(String code, String message, String hint) {
-            return new StageReport(Outcome.REJECT, code, message, hint);
+            return new StageReport(Outcome.REJECT, code, message, hint, null);
+        }
+
+        /** 拒绝并附带逐条明细（最多 5 条，已按稳定顺序排好）；供命令层原样回显。 */
+        public static StageReport reject(String code, String message, String hint,
+                List<String> details) {
+            return new StageReport(Outcome.REJECT, code, message, hint, details);
         }
 
         public Outcome outcome() {
@@ -99,6 +113,11 @@ public final class EvalPreflightSources {
 
         public String hint() {
             return hint;
+        }
+
+        /** 逐条明细，例如题库的前 5 条「错误码（JSON path）：中文说明」；无明细时为空列表。 */
+        public List<String> details() {
+            return details;
         }
 
         public boolean isReject() {

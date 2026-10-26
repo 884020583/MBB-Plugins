@@ -4,11 +4,20 @@ import java.lang.management.ManagementFactory;
 
 import org.moboxlab.moboxbot.API.Plugin;
 import org.moboxlab.moboxbot.API.Storage.StorageService;
+import org.moboxlab.mbb.eval.bank.EvalBankCache;
+import org.moboxlab.mbb.eval.bank.EvalBankResources;
 import org.moboxlab.mbb.eval.command.EvalCommand;
 import org.moboxlab.mbb.eval.config.EvalConfig;
+import org.moboxlab.mbb.eval.gateway.EvalCapabilityClient;
+import org.moboxlab.mbb.eval.gateway.RoleplayEvalGateway;
+import org.moboxlab.mbb.eval.judge.EvalJudgePrompt;
+import org.moboxlab.mbb.eval.rubric.EvalRubricCache;
+import org.moboxlab.mbb.eval.runner.EvalDataBootstrap;
 import org.moboxlab.mbb.eval.runner.EvalPreflight;
+import org.moboxlab.mbb.eval.runner.EvalPreflightSources.CapabilitiesStatusSource;
 import org.moboxlab.mbb.eval.runner.EvalRunRecovery;
 import org.moboxlab.mbb.eval.runner.EvalRunner;
+import org.moboxlab.mbb.eval.runner.EvalStageSources;
 import org.moboxlab.mbb.eval.store.EvalSchemaService;
 import org.moboxlab.mbb.eval.store.EvalStore;
 
@@ -19,13 +28,19 @@ import org.moboxlab.mbb.eval.store.EvalStore;
  * 启用时幂等创建四张数据表与索引，失败则禁用评测写路径但不重建、不删表；
  * 随后装配 {@link EvalPreflight} 与 {@link EvalRunner} 并注册 /eval 命令。
  * 停用时先让 runner 尽力把 RUNNING 行收尾为 ABORTED(shutdown)，再释放引用。
- * 题库、rubric、报表与判决由后续切片接入；当前 run 为占位执行，不读题库、不发起 AI 调用。</p>
+ * 题库与 rubric 在 onEnable 一次性定位、校验并缓存（B-5），运行期不热重载；缓存失败只记录
+ * 状态并拒绝 /eval run，不影响插件启用与只读命令。报表与判决由后续切片接入。</p>
  */
 public class EvalPlugin extends Plugin {
 
     private EvalConfig evalConfig;
     private EvalStore evalStore;
     private EvalRunner evalRunner;
+    private EvalCapabilityClient capabilityClient;
+    private CapabilitiesStatusSource capabilitiesSource;
+    private EvalDataBootstrap dataBootstrap;
+    private EvalBankCache bankCache;
+    private EvalRubricCache rubricCache;
     private boolean schemaReady;
 
     @Override
@@ -44,6 +59,7 @@ public class EvalPlugin extends Plugin {
                 + " 项，默认档位 " + evalConfig.defaultTier());
         initStorage();
         recoverOrphans();
+        initEvalData();
         initRunner();
         getLogger().sendInfo("[MBB-Eval] 已启用，版本 " + getVersion());
     }
@@ -99,6 +115,59 @@ public class EvalPlugin extends Plugin {
     }
 
     /**
+     * 装配题库与 rubric 缓存（§5.7.4、§5.8）。
+     *
+     * <p>顺序：capabilities 快照（取 personaId/personaHash）→ rubric → 题库（缺失时释放内置
+     * 并钉版本）。全部失败只记日志、置缓存状态，不抛异常、不阻止插件启用；/eval report 等
+     * 只读命令不受影响。</p>
+     */
+    private void initEvalData() {
+        try {
+            RoleplayEvalGateway gateway = new RoleplayEvalGateway(this, getLogger());
+            capabilityClient = new EvalCapabilityClient(gateway, getLogger());
+            final EvalCapabilityClient client = capabilityClient;
+            capabilitiesSource = new CapabilitiesStatusSource() {
+                @Override
+                public EvalCapabilityClient.Snapshot snapshot() {
+                    return client.snapshot();
+                }
+            };
+            EvalCapabilityClient.Snapshot snapshot = capabilityClient.snapshot();
+            String dataFolderPath = getDataFolder();
+            java.io.File dataFolder = dataFolderPath == null ? null : new java.io.File(dataFolderPath);
+            dataBootstrap = EvalDataBootstrap.load(dataFolder, evalConfig.bankFile(),
+                    EvalJudgePrompt.PROMPT_VERSION,
+                    snapshot == null ? null : snapshot.personaId(),
+                    snapshot == null ? null : snapshot.personaHash(),
+                    evalConfig.allowPersonaMismatch(), EvalBankResources.of(this), getLogger());
+            bankCache = dataBootstrap.bank();
+            rubricCache = dataBootstrap.rubric();
+            for (String warning : dataBootstrap.warnings()) {
+                getLogger().sendWarn("[评测] " + warning);
+            }
+            if (!dataBootstrap.pinFileName().isEmpty()) {
+                pinBankFile(dataBootstrap.pinFileName());
+            }
+        } catch (RuntimeException e) {
+            // 缓存初始化异常只禁用 run 预检，不影响插件启用与只读命令（§13.1.1 规则 4）。
+            getLogger().sendError("[MBB-Eval] 评测数据初始化异常，/eval run 将被预检拒绝；"
+                    + "/eval report 仍可用：" + e.getMessage());
+        }
+    }
+
+    /** 首次释放内置题库后把 evalBankFile 钉成该版本文件名，避免下次启动回退到默认名。 */
+    private void pinBankFile(String fileName) {
+        try {
+            getConfig().set("evalBankFile", fileName);
+            getConfig().save();
+            getLogger().sendInfo("[评测] 已将 evalBankFile 固定为 " + fileName);
+        } catch (RuntimeException e) {
+            getLogger().sendWarn("[评测] 写回 evalBankFile 失败，请在 config.yml 手动填写 "
+                    + fileName + "：" + e.getMessage());
+        }
+    }
+
+    /**
      * 装配预检与 runner，并注册 /eval 命令。
      *
      * <p>即使数据表未就绪也要注册命令：/eval status、/eval help 仍应可用，run 由预检回
@@ -109,7 +178,17 @@ public class EvalPlugin extends Plugin {
             getLogger().sendError("[MBB-Eval] 服务器未就绪，未注册 /eval 命令");
             return;
         }
-        EvalPreflight preflight = EvalPreflight.forPlugin(this, evalConfig);
+        EvalPreflight.Builder builder = EvalPreflight.builder()
+                .config(evalConfig)
+                .logger(getLogger())
+                .bank(EvalStageSources.bank(bankCache))
+                .rubric(EvalStageSources.rubric(rubricCache))
+                .persona(EvalStageSources.persona(bankCache, capabilitiesSource,
+                        evalConfig.allowPersonaMismatch()));
+        if (capabilitiesSource != null) {
+            builder.capabilities(capabilitiesSource);
+        }
+        EvalPreflight preflight = builder.build();
         evalRunner = new EvalRunner(evalStore, evalConfig, preflight, getLogger(), getVersion());
         getServer().getPluginManager().registerCommand(this, new EvalCommand(evalRunner, evalConfig));
         getLogger().sendInfo("[MBB-Eval] 已注册 /eval 命令（骨架阶段，run 为占位执行，不发起 AI 调用）");
@@ -123,6 +202,11 @@ public class EvalPlugin extends Plugin {
         }
         evalConfig = null;
         evalStore = null;
+        capabilityClient = null;
+        capabilitiesSource = null;
+        dataBootstrap = null;
+        bankCache = null;
+        rubricCache = null;
         schemaReady = false;
         getLogger().sendInfo("[MBB-Eval] 已停用");
     }
@@ -146,5 +230,20 @@ public class EvalPlugin extends Plugin {
      */
     public boolean schemaReady() {
         return schemaReady;
+    }
+
+    /** onEnable 的题库/rubric 装配结果；未启用时为 {@code null}。 */
+    public EvalDataBootstrap dataBootstrap() {
+        return dataBootstrap;
+    }
+
+    /** 只读题库缓存；加载失败时仍非 null（带错误码与明细），未启用时为 {@code null}。 */
+    public EvalBankCache bankCache() {
+        return bankCache;
+    }
+
+    /** 只读 rubric 缓存；未启用时为 {@code null}。 */
+    public EvalRubricCache rubricCache() {
+        return rubricCache;
     }
 }
