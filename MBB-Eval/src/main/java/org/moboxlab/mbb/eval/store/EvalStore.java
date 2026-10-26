@@ -142,6 +142,10 @@ public final class EvalStore {
     private static final String SQL_COUNT_CALLS = "SELECT COUNT(*) AS total FROM "
             + EvalSchemaService.TABLE_CALL + " WHERE run_id = ?";
 
+    /** 每次 AI 调用前把 calls_used 原子加一（§4.4、§9.5）；只依赖 run_id，由调用方保证在跑。 */
+    private static final String SQL_INCREMENT_CALLS_USED = "UPDATE plugin_mbb_eval_run"
+            + " SET calls_used = calls_used + 1 WHERE run_id = ?";
+
     /** 基线插入：active 由调用方给定，默认 1；唯一索引 idx_eval_baseline_active 兜底。 */
     private static final String SQL_INSERT_BASELINE = "INSERT INTO "
             + EvalSchemaService.TABLE_BASELINE
@@ -450,6 +454,22 @@ public final class EvalStore {
                 row.getInteger("usage_total"), row.getInteger("usage_cached"),
                 row.getLong("elapsed_ms"), optionalText(row, "finish_reason"),
                 row.getInteger("response_chars"), createdAt == null ? nowText() : createdAt);
+    }
+
+    /**
+     * 把某次运行的 calls_used 原子加一（§4.4、§9.5）。
+     *
+     * <p>每次 AI 调用前执行，重试与缓存重采都各记一次。规格给的语句只带 run_id；
+     * 终态之后不应再发起调用，因此不额外加 status 条件。update 语义沿用
+     * {@link #write}：-1 记 WARN（效果未知）、0 表示 run_id 不存在。</p>
+     *
+     * @throws IllegalArgumentException run_id 为空
+     */
+    public WriteResult incrementCallsUsed(String runId) {
+        if (isBlank(runId)) {
+            throw new IllegalArgumentException("run_id 不能为空");
+        }
+        return write("calls_used 自增（run_id=" + runId + "）", SQL_INCREMENT_CALLS_USED, runId);
     }
 
     /** 按 call_id 查询单次调用行；没有或查询异常返回 null（异常已记 WARN）。 */
@@ -866,7 +886,8 @@ public final class EvalStore {
                 SQL_CAS_COMPLETED, SQL_CAS_FAILED, SQL_CAS_ABORTED,
                 SQL_INSERT_CASE_RESULT, SQL_FIND_CASE_RESULT, SQL_FIND_CASE_RESULTS,
                 SQL_COUNT_CASE_RESULTS, SQL_INSERT_CALL, SQL_FIND_CALL, SQL_FIND_CALLS,
-                SQL_COUNT_CALLS, SQL_INSERT_BASELINE, SQL_FIND_ACTIVE_BASELINE, SQL_FIND_BASELINE,
+                SQL_COUNT_CALLS, SQL_INCREMENT_CALLS_USED, SQL_INSERT_BASELINE,
+                SQL_FIND_ACTIVE_BASELINE, SQL_FIND_BASELINE,
                 SQL_FIND_BASELINES, SQL_SUPERSEDE_ACTIVE, SQL_ACTIVATE_BASELINE, SQL_BASELINE_BY_RUN,
                 SQL_TERMINAL_RUNS_BEYOND, SQL_STALE_RUNNING, SQL_RECENT_RUNS, SQL_DELETE_CASE_RESULTS,
                 SQL_DELETE_CALLS, SQL_DELETE_RUN)));
