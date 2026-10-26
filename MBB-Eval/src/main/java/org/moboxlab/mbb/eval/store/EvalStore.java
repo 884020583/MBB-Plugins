@@ -66,15 +66,24 @@ public final class EvalStore {
             "SELECT run_id FROM plugin_mbb_eval_run WHERE run_id = ?";
 
     /**
-     * 受理时的最小建行：只写受理即可确定的列。
+     * 受理时的完整建行（§4.4）：一次写齐九键快照、config_snapshot_json、baseline_id_at_run、
+     * calls_budget 与 started_at；status 固定 'RUNNING'，report_path 保持 null。
      *
-     * <p>§4.4 要求的九键快照、config_snapshot_json、baseline_id_at_run 依赖题库 / persona /
-     * rubric 与配置指纹，属 F-2（§16.2「run 生命周期：建行 RUNNING…」）的建行内容；A-3 只
-     * 需要一条能参与单飞互斥与终态 CAS 的 RUNNING 行，F-2 接入时替换本语句。</p>
+     * <p>列顺序只影响参数下标：前五个参数固定为 run_id、tier、started_at、calls_budget、
+     * eval_plugin_version，供 6 参兼容重载复用；其余快照列缺省写 null，不伪造。</p>
      */
     private static final String SQL_INSERT_RUN = "INSERT INTO plugin_mbb_eval_run"
-            + " (run_id, tier, started_at, status, calls_budget, eval_plugin_version)"
-            + " VALUES (?, ?, ?, 'RUNNING', ?, ?)";
+            + " (run_id, tier, started_at, status, calls_budget, eval_plugin_version,"
+            + " bank_file, bank_version, bank_hash, persona_id, persona_version, persona_hash,"
+            + " rubric_version, eval_api_version, roleplay_plugin_version, java_version, os,"
+            + " eval_profile, judge_profile, judge_model, generation_model, config_fingerprint,"
+            + " config_snapshot_json, sample_k, baseline_id_at_run)"
+            + " VALUES (?, ?, ?, 'RUNNING', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)";
+
+    /** calls_budget 缺省值（§4.2）。 */
+    private static final int DEFAULT_CALLS_BUDGET = 100;
+    /** sample_k 缺省值（§4.2）。 */
+    private static final int DEFAULT_SAMPLE_K = 1;
 
     private static final String SQL_FIND_RUN =
             "SELECT * FROM plugin_mbb_eval_run WHERE run_id = ?";
@@ -256,26 +265,51 @@ public final class EvalStore {
     }
 
     /**
-     * 写入一条 status='RUNNING' 的运行行（§4.4）。
+     * 写入一条 status='RUNNING' 的完整运行行（§4.4、§8.2）。
      *
-     * <p>主键冲突时返回 false，由调用方重新生成 run_id 后重试，不得覆盖既有行（§4.3）；
-     * 其余写库异常同样返回 false 并记 WARN。</p>
+     * <p>一次写齐受理时已确定的列：run_id、tier、started_at、九键快照（bank_hash、
+     * rubric_version、persona_hash、config_fingerprint、eval_profile、judge_profile、
+     * judge_model、generation_model、eval_api_version）、config_snapshot_json、
+     * baseline_id_at_run、calls_budget 与同组快照列（bank_file/bank_version/persona_id/
+     * persona_version 等）。status 固定写 'RUNNING'，report_path 留 null。</p>
      *
-     * @param pluginVersion 写入 eval_plugin_version 的插件版本，可为 null
+     * <p>缺省：calls_budget=100、sample_k=1（§4.2）；其余缺失列写 null，由基线比较判
+     * 「数据缺失」，不得用假值冒充快照。主键冲突时返回 false，由调用方重新生成 run_id
+     * 后重试，不得覆盖既有行（§4.3）；其余写库异常同样返回 false 并记 WARN。</p>
+     *
+     * @param row 建行数据，至少包含 run_id、tier、started_at
      * @return 写入成功返回 true
-     * @throws IllegalArgumentException run_id 不满足格式，或档位不是 smoke/full
+     * @throws IllegalArgumentException row 为空、run_id 不满足格式，或档位不是 smoke/full
      */
-    public boolean insertRunning(String runId, String tier, String startedAt, int callsBudget,
-                                 String pluginVersion) {
+    public boolean insertRunning(JSONObject row) {
+        if (row == null) {
+            throw new IllegalArgumentException("建行数据不能为空");
+        }
+        String runId = row.getString("run_id");
+        String tier = row.getString("tier");
         if (!isValidRunId(runId)) {
             throw new IllegalArgumentException("run_id 不满足格式约束：" + runId);
         }
         if (!TIER_SMOKE.equals(tier) && !TIER_FULL.equals(tier)) {
             throw new IllegalArgumentException("未知评测档位：" + tier);
         }
+        int callsBudget = row.containsKey("calls_budget")
+                ? row.getIntValue("calls_budget") : DEFAULT_CALLS_BUDGET;
+        int sampleK = row.containsKey("sample_k") ? row.getIntValue("sample_k") : DEFAULT_SAMPLE_K;
         try {
-            int result = storage.update(SQL_INSERT_RUN, runId, tier, startedAt,
-                    Integer.valueOf(callsBudget), pluginVersion);
+            int result = storage.update(SQL_INSERT_RUN,
+                    runId, tier, row.getString("started_at"),
+                    Integer.valueOf(callsBudget), row.getString("eval_plugin_version"),
+                    row.getString("bank_file"), row.getString("bank_version"),
+                    row.getString("bank_hash"), row.getString("persona_id"),
+                    row.getString("persona_version"), row.getString("persona_hash"),
+                    row.getString("rubric_version"), row.getString("eval_api_version"),
+                    row.getString("roleplay_plugin_version"), row.getString("java_version"),
+                    row.getString("os"), row.getString("eval_profile"),
+                    row.getString("judge_profile"), row.getString("judge_model"),
+                    row.getString("generation_model"), row.getString("config_fingerprint"),
+                    row.getString("config_snapshot_json"), Integer.valueOf(sampleK),
+                    row.getString("baseline_id_at_run"));
             if (result <= 0) {
                 warn("写入 RUNNING 行未生效（run_id=" + runId + "，update=" + result + "）");
                 return false;
@@ -285,6 +319,27 @@ public final class EvalStore {
             warn("写入 RUNNING 行异常（run_id=" + runId + "）：" + e.getMessage());
             return false;
         }
+    }
+
+    /**
+     * 最小建行的兼容重载：只写受理即可确定的列，快照列留 null 等后续切片补齐。
+     *
+     * <p>F-2 起生产调用走 {@link #insertRunning(JSONObject)}；本重载保留给既有调用方与用例，
+     * 参数次序与语义不变。</p>
+     *
+     * @param pluginVersion 写入 eval_plugin_version 的插件版本，可为 null
+     * @return 写入成功返回 true
+     * @throws IllegalArgumentException run_id 不满足格式，或档位不是 smoke/full
+     */
+    public boolean insertRunning(String runId, String tier, String startedAt, int callsBudget,
+                                 String pluginVersion) {
+        JSONObject row = new JSONObject();
+        row.put("run_id", runId);
+        row.put("tier", tier);
+        row.put("started_at", startedAt);
+        row.put("calls_budget", Integer.valueOf(callsBudget));
+        row.put("eval_plugin_version", pluginVersion);
+        return insertRunning(row);
     }
 
     /** 按 run_id 查询运行行；不存在或查询异常返回 null（异常已记 WARN）。 */

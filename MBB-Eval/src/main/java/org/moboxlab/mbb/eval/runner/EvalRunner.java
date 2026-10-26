@@ -167,6 +167,64 @@ public final class EvalRunner {
         }
     }
 
+    /** 终态收口结果的种类（§4.4、§13.4）。 */
+    public enum FinalizeKind {
+        /** CAS 返回正数：本次把 RUNNING 行改写成终态。 */
+        APPLIED,
+        /** CAS 返回 0：没有 RUNNING 行（已是终态），按幂等成功处理，不重复生成报表。 */
+        ALREADY_TERMINAL,
+        /** CAS 返回 -1：语句未执行（已记 WARN），按 §13.4 不重试，以数据库现行状态为准。 */
+        NOT_EXECUTED
+    }
+
+    /** 终态收口结果；updateReturn 原样带回 CAS 的 -1 / 0 / 正数。 */
+    public static final class FinalizeResult {
+        private final FinalizeKind kind;
+        private final String runId;
+        private final String status;
+        private final int updateReturn;
+        private final String message;
+
+        private FinalizeResult(FinalizeKind kind, String runId, String status, int updateReturn,
+                               String message) {
+            this.kind = kind;
+            this.runId = runId;
+            this.status = status;
+            this.updateReturn = updateReturn;
+            this.message = message;
+        }
+
+        public FinalizeKind kind() {
+            return kind;
+        }
+
+        public String runId() {
+            return runId;
+        }
+
+        public String status() {
+            return status;
+        }
+
+        public int updateReturn() {
+            return updateReturn;
+        }
+
+        /** 告警文案；成功时为 null。 */
+        public String message() {
+            return message;
+        }
+
+        public boolean applied() {
+            return kind == FinalizeKind.APPLIED;
+        }
+
+        /** -1 表示语句未执行：行仍是 RUNNING，留给下次启动的 init 回收（§13.4）。 */
+        public boolean notExecuted() {
+            return kind == FinalizeKind.NOT_EXECUTED;
+        }
+    }
+
     /** /eval status 的展示快照。 */
     public static final class RunSnapshot {
         private final String runId;
@@ -338,8 +396,19 @@ public final class EvalRunner {
                     return AcceptResult.failed(normalized, "生成 run_id 失败：" + e.getMessage());
                 }
                 long startedAtMillis = System.currentTimeMillis();
-                boolean inserted = store.insertRunning(runId, normalized, EvalStore.formatTime(startedAtMillis),
-                        budgetLimit, evalPluginVersion);
+                JSONObject runRow = new JSONObject();
+                runRow.put("run_id", runId);
+                runRow.put("tier", normalized);
+                runRow.put("started_at", EvalStore.formatTime(startedAtMillis));
+                runRow.put("calls_budget", Integer.valueOf(budgetLimit));
+                runRow.put("eval_plugin_version", evalPluginVersion);
+                if (config != null) {
+                    // 受理时已能确定的快照列先落库；题库/persona/rubric 九键由后续切片补入。
+                    runRow.put("eval_profile", config.profile());
+                    runRow.put("judge_profile", config.judgeProfile());
+                    runRow.put("bank_file", config.bankFile());
+                }
+                boolean inserted = store.insertRunning(runRow);
                 if (!inserted) {
                     warn("写入 RUNNING 行失败，重新生成 run_id 后重试（第 " + (attempt + 1) + " 次）");
                     continue;
@@ -380,8 +449,9 @@ public final class EvalRunner {
                     return AbortResult.none();
                 }
                 String runId = leftover.getString("run_id");
-                int result = store.casAborted(runId, EvalStore.nowText(), 0L, EvalStore.ABORT_REASON_USER);
-                if (result >= 0) {
+                FinalizeResult result = finalizeRun(runId, EvalStore.STATUS_ABORTED, 0L, null,
+                        EvalStore.ABORT_REASON_USER);
+                if (!result.notExecuted()) {
                     return AbortResult.aborted(runId);
                 }
                 return AbortResult.failed("终态写库未执行（§13.4 不重试），以数据库现行状态为准；"
@@ -394,6 +464,94 @@ public final class EvalRunner {
             return AbortResult.failed("终态写库未执行（§13.4 不重试），以数据库现行状态为准；"
                     + "重启后由下次启动的 init 回收");
         }
+    }
+
+    /**
+     * 把指定 run 的 RUNNING 行收口为终态（§4.4、§13.4）。
+     *
+     * <p>返回语义：CAS 正数 → {@link FinalizeKind#APPLIED}；0 → 已是终态，按幂等成功处理，
+     * 不重复生成报表；-1 → 只记 WARN、不重试，行按数据库现行状态保留，留给下次启动的
+     * init 回收。无论哪种结果都不得用内存状态覆盖数据库。</p>
+     *
+     * @param runId        已存在的 run_id
+     * @param status       {@code COMPLETED} / {@code FAILED} / {@code ABORTED}
+     * @param durationMs   运行时长毫秒，负数按 0 落库
+     * @param reportPath   COMPLETED 的报表路径；FAILED / ABORTED 传 null
+     * @param errorSummary FAILED / ABORTED 的失败或原因摘要；COMPLETED 传 null
+     * @throws IllegalArgumentException 存储未就绪、run_id 为空或终态未知
+     */
+    public FinalizeResult finalizeRun(String runId, String status, long durationMs, String reportPath,
+                                      String errorSummary) {
+        return casTerminal(store, logger, runId, status, durationMs, reportPath, errorSummary);
+    }
+
+    /**
+     * 把本进程持有的 active run 收口为终态（§4.4）。
+     *
+     * <p>用 {@code finished} 做一次性闸门：重复调用或已由占位循环收口时返回 null，不再发 CAS，
+     * 避免覆盖已写入的终态。收口后释放单飞锁，无论数据库是否写成功（§13.4 以 DB 为准）。</p>
+     *
+     * @return 本次收口结果；没有 active 或已被收口时返回 null
+     */
+    public FinalizeResult finalizeActive(String status, String reportPath, String errorSummary) {
+        RunState state = active.get();
+        if (state == null) {
+            return null;
+        }
+        if (!state.finished.compareAndSet(false, true)) {
+            return null;
+        }
+        long durationMs = Math.max(0L, System.currentTimeMillis() - state.startedAtMillis);
+        FinalizeResult result = casTerminal(store, logger, state.runId, status, durationMs, reportPath, errorSummary);
+        active.compareAndSet(state, null);
+        return result;
+    }
+
+    /**
+     * 终态 CAS 的唯一实现（含 init 孤儿回收）：把 -1 / 0 / 正数收敛成三态并记 WARN。
+     *
+     * <p>包内可见，供 {@link EvalRunRecovery} 复用同一套语义，避免两处对 -1 / 0 的处理漂移。</p>
+     */
+    static FinalizeResult casTerminal(EvalStore store, PluginLogger logger, String runId, String status,
+                                      long durationMs, String reportPath, String errorSummary) {
+        if (store == null) {
+            throw new IllegalArgumentException("存储未就绪，无法收口终态");
+        }
+        if (runId == null || runId.trim().isEmpty()) {
+            throw new IllegalArgumentException("run_id 不能为空");
+        }
+        if (!EvalStore.STATUS_COMPLETED.equals(status) && !EvalStore.STATUS_FAILED.equals(status)
+                && !EvalStore.STATUS_ABORTED.equals(status)) {
+            throw new IllegalArgumentException("未知终态：" + status);
+        }
+        long duration = Math.max(0L, durationMs);
+        String endedAt = EvalStore.nowText();
+        int result;
+        try {
+            if (EvalStore.STATUS_COMPLETED.equals(status)) {
+                result = store.casCompleted(runId, endedAt, duration, reportPath);
+            } else if (EvalStore.STATUS_FAILED.equals(status)) {
+                result = store.casFailed(runId, endedAt, duration, errorSummary);
+            } else {
+                result = store.casAborted(runId, endedAt, duration, errorSummary);
+            }
+        } catch (RuntimeException e) {
+            warn(logger, "终态 CAS 异常（" + status + "，run_id=" + runId + "）：" + e.getMessage());
+            result = -1;
+        }
+        if (result > 0) {
+            return new FinalizeResult(FinalizeKind.APPLIED, runId, status, result, null);
+        }
+        if (result == 0) {
+            String message = "终态 CAS 未命中 RUNNING 行（" + status + "，run_id=" + runId
+                    + "），按幂等成功处理（§13.4），不重复生成报表";
+            warn(logger, message);
+            return new FinalizeResult(FinalizeKind.ALREADY_TERMINAL, runId, status, result, message);
+        }
+        String message = "终态 CAS 未执行（" + status + "，run_id=" + runId
+                + "），按 §13.4 记 WARN、不重试，以数据库现行状态为准";
+        warn(logger, message);
+        return new FinalizeResult(FinalizeKind.NOT_EXECUTED, runId, status, result, message);
     }
 
     /** 最近一次 run 的快照（优先内存中的 active）；没有任何记录返回 null。 */
@@ -486,21 +644,10 @@ public final class EvalRunner {
         }
         long durationMs = Math.max(0L, System.currentTimeMillis() - state.startedAtMillis);
         String summary = reason == null ? "aborted" : reason;
-        int result;
-        try {
-            result = store.casAborted(state.runId, EvalStore.nowText(), durationMs, summary);
-        } catch (RuntimeException e) {
-            warn("终态 CAS 异常（ABORTED，run_id=" + state.runId + "）：" + e.getMessage());
-            result = -1;
-        }
-        if (result < 0) {
-            active.compareAndSet(state, null);
-            warn("终态 CAS 未执行（ABORTED，run_id=" + state.runId
-                    + "），按 §13.4 记告警、不重试，以数据库现行状态为准");
-            return false;
-        }
+        FinalizeResult result = casTerminal(store, logger, state.runId, EvalStore.STATUS_ABORTED,
+                durationMs, null, summary);
         active.compareAndSet(state, null);
-        return true;
+        return !result.notExecuted();
     }
 
     private RunSnapshot fromState(RunState state) {
@@ -527,6 +674,10 @@ public final class EvalRunner {
     }
 
     private void warn(String message) {
+        warn(logger, message);
+    }
+
+    private static void warn(PluginLogger logger, String message) {
         if (logger != null) {
             logger.sendWarn("[MBB-Eval] " + message);
         }
