@@ -21,6 +21,7 @@ import org.junit.Test;
 import org.junit.rules.TemporaryFolder;
 import org.moboxlab.mbb.eval.command.EvalCommand;
 import org.moboxlab.mbb.eval.config.EvalConfig;
+import org.moboxlab.mbb.eval.runner.EvalCompletionSink;
 import org.moboxlab.mbb.eval.runner.EvalPreflightPlan;
 import org.moboxlab.mbb.eval.runner.EvalRunService;
 import org.moboxlab.mbb.eval.runner.EvalRunner;
@@ -268,6 +269,31 @@ public class EvalRunServiceTest {
         assertEquals(0, fake.snapshots);
     }
 
+    /**
+     * SUM-1 / §9.3.1 / §9.4 第 4 步 / G-11：命令层必须把发起会话登记为完成摘要的回送目标，
+     * 摘要整段原样发送，不加 {@code [eval] } 前缀、不按行拆。
+     */
+    @Test
+    public void commandShouldPassCompletionSinkSendingToOriginSender() {
+        FakeRunService fake = new FakeRunService();
+        fake.acceptResult = EvalRunner.AcceptResult.accepted("r-20261026003412-smoke-a1b2",
+                EvalStore.TIER_SMOKE, 12, 25, 100);
+        RecordingSender sender = new RecordingSender(CommandPermission.OWNER, false);
+
+        assertTrue(new EvalCommand(fake, config).execute(sender, new String[] { "eval", "run", "smoke" }));
+
+        assertEquals("受理只委派一次", 1, fake.accepts);
+        assertNotNull("命令层必须登记完成摘要回送目标", fake.completionSink);
+
+        String summary = "【MBB-Eval】r-20261026003412-smoke-a1b2（smoke，10-26 00:34）"
+                + "\n报表 reports/run-r-20261026003412-smoke-a1b2.md";
+        fake.completionSink.send(summary);
+
+        assertEquals("回执三行 + 完成摘要一行：" + sender.messages, 4, sender.messages.size());
+        assertEquals("完成摘要必须整段原样发回发起会话", summary, sender.messages.get(3));
+        assertFalse("完成摘要不得加 [eval] 前缀", sender.messages.get(3).startsWith("[eval] "));
+    }
+
     /** §9.6：abort 只委派一次，回执直接取自服务结果，不等 runner 线程。 */
     @Test
     public void abortShouldDelegateExactlyOnce() {
@@ -295,6 +321,7 @@ public class EvalRunServiceTest {
         private Thread abortThread;
         private EvalRunner.AcceptResult acceptResult;
         private EvalRunner.AbortResult abortResult = EvalRunner.AbortResult.none();
+        private EvalCompletionSink completionSink;
 
         @Override
         public EvalRunner.AcceptResult accept(String tier) {
@@ -302,6 +329,12 @@ public class EvalRunServiceTest {
             lastTier = tier;
             acceptThread = Thread.currentThread();
             return acceptResult;
+        }
+
+        @Override
+        public EvalRunner.AcceptResult accept(String tier, EvalCompletionSink sink) {
+            this.completionSink = sink;
+            return accept(tier);
         }
 
         @Override

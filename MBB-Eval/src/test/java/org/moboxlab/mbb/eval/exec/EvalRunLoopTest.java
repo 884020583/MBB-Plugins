@@ -14,6 +14,8 @@ import java.util.ArrayList;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.CountDownLatch;
+import java.util.concurrent.TimeUnit;
 
 import org.junit.After;
 import org.junit.Before;
@@ -25,10 +27,12 @@ import org.moboxlab.mbb.eval.gateway.EvalGenerateResult;
 import org.moboxlab.mbb.eval.judge.EvalJudgeResult;
 import org.moboxlab.mbb.eval.metrics.EvalAiUsageDay;
 import org.moboxlab.mbb.eval.metrics.EvalAiUsageSource;
+import org.moboxlab.mbb.eval.report.EvalGroupSummaryFormatter;
 import org.moboxlab.mbb.eval.report.EvalReportData;
 import org.moboxlab.mbb.eval.rubric.EvalRubric;
 import org.moboxlab.mbb.eval.rubric.EvalRubricLoadResult;
 import org.moboxlab.mbb.eval.rubric.EvalRubricLoader;
+import org.moboxlab.mbb.eval.runner.EvalCompletionSink;
 import org.moboxlab.mbb.eval.runner.EvalRunBudget;
 import org.moboxlab.mbb.eval.runner.EvalRunner;
 import org.moboxlab.mbb.eval.runner.EvalRunStopPoint;
@@ -256,6 +260,116 @@ public final class EvalRunLoopTest {
         runner.shutdown();
     }
 
+
+    /**
+     * SUM-1 / §9.3.1 / §9.4 第 4 步 / G-11 / I-2：COMPLETED 收尾、报表落盘后，把 ≤15 行纯文本摘要
+     * 发回登记的回送目标；摘要含 run_id 与报表相对路径，不带 Markdown 与 emoji。
+     */
+    @Test
+    public void completedRunShouldSendPlainTextSummaryToSink() throws Exception {
+        File reportsDir = new File(tempDir, "reports");
+        EvalRunLoop loop = newLoop(new FakeGeneratePort(), new FakeJudgePort(), reportsDir);
+        EvalRunner runner = new EvalRunner(store, EvalConfig.load(null), null, logger,
+                "V0.1.0.0.0000", loop);
+        // 先收口 setUp 里预置的 RUNNING 行，避免单飞检查按「遗留 RUNNING」返回 BUSY。
+        assertEquals(1, store.casAborted(RUN_ID, EvalStore.nowText(), 0L, "test-cleanup"));
+        RecordingSink sink = new RecordingSink();
+        EvalRunner.AcceptResult accepted = runner.accept(EvalStore.TIER_SMOKE, sink);
+        assertEquals(EvalRunner.AcceptKind.ACCEPTED, accepted.kind());
+        try {
+            String runId = accepted.runId();
+            JSONObject row = waitForTerminal(runId, 30000L);
+            assertEquals(EvalStore.STATUS_COMPLETED, row.getString("status"));
+
+            String text = sink.await(10000L);
+            assertNotNull("COMPLETED 必须发送完成摘要", text);
+            assertTrue("摘要必须含 run_id：" + text, text.contains(runId));
+            assertTrue("摘要必须含报表相对路径：reports/run-" + runId + ".md，实际：" + text,
+                    text.contains("reports/run-" + runId + ".md"));
+            assertTrue("摘要行数不得超过 15 行：" + text,
+                    text.split("\n", -1).length <= EvalGroupSummaryFormatter.MAX_LINES);
+            assertFalse("摘要不得含 Markdown 强调标记：" + text, text.contains("**"));
+            assertFalse("摘要不得含 Markdown 标题标记：" + text, text.contains("#"));
+            assertFalse("摘要不得含 emoji：" + text, containsEmoji(text));
+            assertTrue("摘要应以固定回执头开始：" + text, text.startsWith("【MBB-Eval】"));
+        } finally {
+            runner.shutdown();
+        }
+    }
+
+    /** SUM-1 / §9.8：ABORTED 不发送完成摘要，只记一行原因。 */
+    @Test
+    public void abortedRunShouldNotSendSummary() throws Exception {
+        File reportsDir = new File(tempDir, "reports");
+        BlockingGeneratePort generate = new BlockingGeneratePort();
+        EvalRunLoop loop = newLoop(generate, new FakeJudgePort(), reportsDir);
+        EvalRunner runner = new EvalRunner(store, EvalConfig.load(null), null, logger,
+                "V0.1.0.0.0000", loop);
+        assertEquals(1, store.casAborted(RUN_ID, EvalStore.nowText(), 0L, "test-cleanup"));
+        RecordingSink sink = new RecordingSink();
+        EvalRunner.AcceptResult accepted = runner.accept(EvalStore.TIER_SMOKE, sink);
+        assertEquals(EvalRunner.AcceptKind.ACCEPTED, accepted.kind());
+        try {
+            assertTrue("主循环应已进入执行阶段", generate.awaitEntered(10000L));
+            assertEquals(EvalRunner.AbortKind.ABORTED, runner.abort().kind());
+            JSONObject row = waitForTerminal(accepted.runId(), 30000L);
+            assertEquals(EvalStore.STATUS_ABORTED, row.getString("status"));
+            generate.release();
+            assertNull("ABORTED 不得发送完成摘要", sink.await(1500L));
+        } finally {
+            generate.release();
+            runner.shutdown();
+        }
+    }
+
+    /** SUM-1 / §9.4 判定规则 7：摘要发送失败只记 WARN，不改 run 终态，也不影响报表落盘。 */
+    @Test
+    public void sinkFailureShouldNotChangeTerminalStateOrReport() throws Exception {
+        File reportsDir = new File(tempDir, "reports");
+        EvalRunLoop loop = newLoop(new FakeGeneratePort(), new FakeJudgePort(), reportsDir);
+        EvalRunner runner = new EvalRunner(store, EvalConfig.load(null), null, logger,
+                "V0.1.0.0.0000", loop);
+        assertEquals(1, store.casAborted(RUN_ID, EvalStore.nowText(), 0L, "test-cleanup"));
+        RecordingSink sink = new RecordingSink();
+        sink.failure = new RuntimeException("发送通道已断开");
+        EvalRunner.AcceptResult accepted = runner.accept(EvalStore.TIER_SMOKE, sink);
+        assertEquals(EvalRunner.AcceptKind.ACCEPTED, accepted.kind());
+        try {
+            String runId = accepted.runId();
+            JSONObject row = waitForTerminal(runId, 30000L);
+            assertEquals(EvalStore.STATUS_COMPLETED, row.getString("status"));
+            File report = new File(reportsDir, "run-" + runId + ".md");
+            assertTrue("发送失败不得影响报表：" + report.getAbsolutePath(), report.isFile());
+            assertTrue("发送失败应记 WARN：" + logger.warns, awaitWarn("完成摘要发送失败", 10000L));
+            assertEquals("发送失败不得改写终态", EvalStore.STATUS_COMPLETED,
+                    store.findRun(runId).getString("status"));
+        } finally {
+            runner.shutdown();
+        }
+    }
+
+    /** SUM-1 兼容：旧 accept(tier) 不登记回送目标，终态与报表行为与改动前一致。 */
+    @Test
+    public void legacyAcceptWithoutSinkShouldKeepTerminalStateAndReport() throws Exception {
+        File reportsDir = new File(tempDir, "reports");
+        EvalRunLoop loop = newLoop(new FakeGeneratePort(), new FakeJudgePort(), reportsDir);
+        EvalRunner runner = new EvalRunner(store, EvalConfig.load(null), null, logger,
+                "V0.1.0.0.0000", loop);
+        assertEquals(1, store.casAborted(RUN_ID, EvalStore.nowText(), 0L, "test-cleanup"));
+        EvalRunner.AcceptResult accepted = runner.accept(EvalStore.TIER_SMOKE);
+        assertEquals(EvalRunner.AcceptKind.ACCEPTED, accepted.kind());
+        try {
+            String runId = accepted.runId();
+            JSONObject row = waitForTerminal(runId, 30000L);
+            assertEquals(EvalStore.STATUS_COMPLETED, row.getString("status"));
+            assertEquals("reports/run-" + runId + ".md", row.getString("report_path"));
+            assertTrue(new File(reportsDir, "run-" + runId + ".md").isFile());
+            assertFalse("旧入口不得发送完成摘要：" + logger.warns, hasWarn("完成摘要发送失败"));
+        } finally {
+            runner.shutdown();
+        }
+    }
+
     private EvalRunLoop newLoop(EvalCaseGeneratePort generate, EvalCaseJudgePort judge, File reportsDir) {
         return new EvalRunLoop(new EvalRunLoop.Deps()
                 .store(store)
@@ -289,6 +403,42 @@ public final class EvalRunLoopTest {
                 return row != null && !EvalStore.STATUS_RUNNING.equals(row.getString("status"));
             }
         });
+    }
+
+    /** 等待日志里出现包含关键字的 WARN，摘要发送在终态之后异步发生，不能只看终态。 */
+    private boolean awaitWarn(String keyword, long timeoutMillis) throws InterruptedException {
+        long deadline = System.currentTimeMillis() + timeoutMillis;
+        while (System.currentTimeMillis() < deadline) {
+            if (hasWarn(keyword)) {
+                return true;
+            }
+            Thread.sleep(50L);
+        }
+        return hasWarn(keyword);
+    }
+
+    private boolean hasWarn(String keyword) {
+        for (String message : logger.warns) {
+            if (message.contains(keyword)) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /** 规格 §8.6：摘要不得含 emoji；覆盖常见表情区与变体选择符。 */
+    private static boolean containsEmoji(String text) {
+        for (int i = 0; i < text.length(); ) {
+            int codePoint = text.codePointAt(i);
+            if (codePoint == 0xFE0F || codePoint == 0x200D
+                    || (codePoint >= 0x1F000 && codePoint <= 0x1FAFF)
+                    || (codePoint >= 0x2600 && codePoint <= 0x27BF)
+                    || (codePoint >= 0x2B00 && codePoint <= 0x2BFF)) {
+                return true;
+            }
+            i += Character.charCount(codePoint);
+        }
+        return false;
     }
 
     private JSONObject waitForTerminal(String runId, long timeoutMillis) throws InterruptedException {
@@ -342,8 +492,54 @@ public final class EvalRunLoopTest {
         }
     }
 
+    /** 记录完成摘要的测试桩；可配置发送抛异常，模拟回送通道断开。 */
+    private static final class RecordingSink implements EvalCompletionSink {
+        private final CountDownLatch sent = new CountDownLatch(1);
+        private final List<String> texts = new ArrayList<String>();
+        private RuntimeException failure;
+
+        @Override
+        public void send(String text) {
+            texts.add(text);
+            if (failure != null) {
+                throw failure;
+            }
+            sent.countDown();
+        }
+
+        /** 等到摘要发出并返回正文；超时或发送抛异常返回 null。 */
+        private String await(long timeoutMillis) throws InterruptedException {
+            return sent.await(timeoutMillis, TimeUnit.MILLISECONDS) ? texts.get(0) : null;
+        }
+    }
+
+    /** 阻塞首题生成的假端口：让测试在收口前确定主循环已进入执行阶段。 */
+    private static final class BlockingGeneratePort extends FakeGeneratePort {
+        private final CountDownLatch entered = new CountDownLatch(1);
+        private final CountDownLatch release = new CountDownLatch(1);
+
+        @Override
+        public EvalGenerateResult generate(EvalGenerateRequest request) {
+            entered.countDown();
+            try {
+                release.await(10L, TimeUnit.SECONDS);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            return super.generate(request);
+        }
+
+        private boolean awaitEntered(long timeoutMillis) throws InterruptedException {
+            return entered.await(timeoutMillis, TimeUnit.MILLISECONDS);
+        }
+
+        private void release() {
+            release.countDown();
+        }
+    }
+
     /** 假生成端口：返回一条固定成功出参，不联网。 */
-    private static final class FakeGeneratePort implements EvalCaseGeneratePort {
+    private static class FakeGeneratePort implements EvalCaseGeneratePort {
         private final List<EvalGenerateRequest> requests = new ArrayList<EvalGenerateRequest>();
 
         @Override
