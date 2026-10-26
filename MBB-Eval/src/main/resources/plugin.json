@@ -1,6 +1,6 @@
 {
   "name": "MBB-Eval",
-  "version": "V0.1.0.0.2325",
+  "version": "V0.1.0.0.0105",
   "apiVersion": "0.3",
   "main": "org.moboxlab.mbb.eval.EvalPlugin",
   "author": "MoBoxLab",
