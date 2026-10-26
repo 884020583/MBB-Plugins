@@ -75,10 +75,17 @@ public final class EvalCommand extends BotCommand {
         String key = EvalPermission.resolveKey(args);
         if (key == null) {
             if (args == null || args.length < 2) {
-                sender.sendMessage(PREFIX + "用法：/eval <子命令>；发送 /eval help 查看全部命令");
+                sender.sendMessage(PREFIX + "用法：/eval <子命令>；可用命令：" + availableCommands()
+                        + "；发送 /eval help 查看各命令最低权限");
             } else {
-                sender.sendMessage(PREFIX + "未知子命令：" + args[1] + "；发送 /eval help 查看全部命令");
+                sender.sendMessage(PREFIX + "未知子命令：" + args[1] + "；可用命令：" + availableCommands()
+                        + "；发送 /eval help 查看各命令最低权限");
             }
+            return true;
+        }
+        if ("baseline".equals(key) && args.length > 2) {
+            sender.sendMessage(PREFIX + "未知子命令：baseline " + args[2] + "；可用命令：" + availableCommands()
+                    + "；发送 /eval help 查看各命令最低权限");
             return true;
         }
         CommandPermission required = EvalPermission.required(key);
@@ -202,6 +209,18 @@ public final class EvalCommand extends BotCommand {
             default:
                 sender.sendMessage(PREFIX + "中止失败：" + result.message());
         }
+    }
+
+    /** 按 §9.1 顺序拼出可用子命令，供未知/无子命令时的用法提示（G13）。 */
+    private static String availableCommands() {
+        StringBuilder text = new StringBuilder();
+        for (String key : EvalPermission.matrix().keySet()) {
+            if (text.length() > 0) {
+                text.append(" / ");
+            }
+            text.append(key);
+        }
+        return text.toString();
     }
 
     private void sendHelp(CommandSender sender) {
