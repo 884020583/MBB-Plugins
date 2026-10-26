@@ -50,6 +50,7 @@ public class EvalPreflightWiringTest {
     private RecordingLogger logger;
     private EvalDataBootstrap bootstrap;
     private CapabilitiesStatusSource capabilitiesSource;
+    private File dataFolder;
 
     @Before
     public void setUp() throws Exception {
@@ -61,7 +62,7 @@ public class EvalPreflightWiringTest {
         config = EvalConfig.load(null);
         capabilitiesSource = capabilitiesSource();
 
-        File dataFolder = TestEvalAssets.dataFolder(temporaryFolder.newFolder());
+        dataFolder = TestEvalAssets.dataFolder(temporaryFolder.newFolder());
         File evals = TestEvalAssets.ensureEvalsDirectory(dataFolder);
         JSONObject bank = TestEvalAssets.builtinBank();
         TestEvalAssets.writeValidRubric(evals, bank);
@@ -133,7 +134,9 @@ public class EvalPreflightWiringTest {
 
     @Test
     public void readonlyReportShouldStayAvailableWhenBankFails() {
-        EvalCommand command = new EvalCommand(runner, config);
+        // G-3：report 走只读处理器，只依赖库与报表目录；题库失败不影响它给明确回执。
+        EvalCommand command = new EvalCommand(runner, config, store, bootstrap.bank(),
+                new File(dataFolder, "reports"));
         RecordingSender sender = new RecordingSender();
         assertTrue(command.execute(sender, new String[] { "eval", "report",
                 "r-20260101000000-smoke-abcd" }));
@@ -142,7 +145,7 @@ public class EvalPreflightWiringTest {
         String message = sender.messages.get(0);
         assertTrue("report 不应被题库失败禁用：" + message, message.startsWith("[eval] "));
         assertFalse("report 不得回落成预检失败：" + message, message.contains("预检失败"));
-        assertTrue("report 仍是明确占位：" + message, message.contains("后续切片"));
+        assertTrue("report 由只读处理器处理（该 run 不存在）：" + message, message.contains("无此 run"));
     }
 
     @Test

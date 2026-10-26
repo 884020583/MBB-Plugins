@@ -120,13 +120,17 @@ public class EvalCommandTest {
     }
 
     @Test
-    public void placeholdersShouldBeExplicitForPendingSubcommands() {
+    public void pendingSubcommandsShouldBeExplicit() {
         RecordingSender sender = new RecordingSender(CommandPermission.BOT_ADMIN);
         assertTrue(command().execute(sender, new String[] { "eval", "report", "r-20260101000000-smoke-abcd" }));
-
-        assertEquals(1, sender.messages.size());
         String message = sender.messages.get(0);
-        assertTrue("未接入的子命令必须明确说明：" + message, message.contains("后续切片"));
+        assertTrue("只读依赖未接线时必须明确说明：" + message, message.contains("只读命令依赖未接线"));
+
+        sender = new RecordingSender(CommandPermission.OWNER);
+        assertTrue(command().execute(sender, new String[] { "eval", "baseline", "set",
+                "r-20260101000000-full-abcd", "理由" }));
+        message = sender.messages.get(0);
+        assertTrue("baseline set 仍待后续切片：" + message, message.contains("后续切片"));
         assertAllPrefixed(sender);
     }
 
