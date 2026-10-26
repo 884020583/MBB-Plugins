@@ -2,8 +2,14 @@ package org.moboxlab.mbb.eval.report;
 
 import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
+import org.moboxlab.mbb.eval.baseline.EvalDeltaResult;
+import org.moboxlab.mbb.eval.baseline.EvalDeltaService;
+import org.moboxlab.mbb.eval.metrics.EvalAiUsageEvidence;
+import org.moboxlab.mbb.eval.metrics.EvalAiUsageEvidenceService;
+import org.moboxlab.mbb.eval.metrics.EvalAiUsageSource;
 import org.moboxlab.mbb.eval.metrics.EvalMetrics;
 import org.moboxlab.mbb.eval.metrics.EvalMetricsService;
+import org.moboxlab.mbb.eval.score.EvalDimensionWeights;
 import org.moboxlab.mbb.eval.store.EvalStore;
 
 import java.util.ArrayList;
@@ -122,6 +128,10 @@ public final class EvalReportData {
     private final int validCaseCount;
     private final List<TrendEntry> trend;
     private final BaselineView baseline;
+    /** 基线与本 run 的配对比较（F-6）；装配失败或未接入数据源时为 null。 */
+    private final EvalDeltaResult delta;
+    /** L3 用量旁证（E-4）；未注入数据源时为 null，渲染按「不可得」处理。 */
+    private final EvalAiUsageEvidence aiUsage;
     private final Map<String, Double> weights;
 
     private EvalReportData(Builder builder) {
@@ -167,6 +177,8 @@ public final class EvalReportData {
         this.validCaseCount = builder.validCaseCount;
         this.trend = Collections.unmodifiableList(new ArrayList<TrendEntry>(builder.trend));
         this.baseline = builder.baseline;
+        this.delta = builder.delta;
+        this.aiUsage = builder.aiUsage;
     }
 
     /**
@@ -177,7 +189,7 @@ public final class EvalReportData {
      * @return 永不返回 null，也永不抛出读库异常
      */
     public static EvalReportData assemble(EvalStore store, String runId) {
-        return assemble(store, runId, null);
+        return assemble(store, runId, null, null);
     }
 
     /**
@@ -187,6 +199,22 @@ public final class EvalReportData {
      */
     public static EvalReportData assemble(EvalStore store, String runId,
                                          Map<String, Double> weightOverride) {
+        return assemble(store, runId, weightOverride, null);
+    }
+
+    /**
+     * 同上，并注入 L3 用量旁证的数据源（E-4：规格 §7.5、§15.5 E11）。
+     *
+     * <p>数据源为 null 时不采集旁证（{@link #aiUsage()} 为 null，性能节保留固定「L3 旁证」
+     * 口径行）；数据源读表失败或无行时由 {@link EvalAiUsageEvidenceService} 收敛成
+     * 「不可得」结果，不抛异常、不阻断报表装配。基线与 delta 仍由库中激活基线计算。</p>
+     *
+     * @param weightOverride 维度 → 权重；null 或空时用 §6.1 缺省值
+     * @param usageSource    L3 只读数据源；null 表示本次不采集旁证
+     */
+    public static EvalReportData assemble(EvalStore store, String runId,
+                                         Map<String, Double> weightOverride,
+                                         EvalAiUsageSource usageSource) {
         String safeRunId = runId == null ? "" : runId.trim();
         Map<String, Double> weights = mergeWeights(weightOverride);
         if (store == null) {
@@ -200,7 +228,7 @@ public final class EvalReportData {
             if (run == null) {
                 return missing(safeRunId, "库中无该 run 的运行行");
             }
-            return assembleFound(store, run, weights);
+            return assembleFound(store, run, weights, usageSource);
         } catch (RuntimeException e) {
             return missing(safeRunId, "报表数据装配失败：" + describe(e));
         }
@@ -219,7 +247,8 @@ public final class EvalReportData {
     }
 
     private static EvalReportData assembleFound(EvalStore store, JSONObject run,
-                                                Map<String, Double> weights) {
+                                                Map<String, Double> weights,
+                                                EvalAiUsageSource usageSource) {
         String runId = text(run, "run_id");
         EvalStore.RowSet caseSet = store.findCaseResults(runId);
         EvalStore.RowSet callSet = store.findCalls(runId);
@@ -299,7 +328,61 @@ public final class EvalReportData {
 
         builder.trend.addAll(buildTrend(store, runId, run, builder.totalScore, weights));
         builder.baseline = buildBaseline(store, run, builder.totalScore);
+        builder.delta = computeDelta(store, runId, weights);
+        builder.aiUsage = collectAiUsage(usageSource, run);
         return new EvalReportData(builder);
+    }
+
+    /**
+     * 计算基线与本 run 的配对 delta（F-6：§8.4、§8.5）。
+     *
+     * <p>只读库中激活基线；计算失败（权重异常、bootstrap 异常等）返回 null，不影响
+     * 九节其余数据的装配，渲染侧回退「未计算」占位。</p>
+     */
+    private static EvalDeltaResult computeDelta(EvalStore store, String runId,
+                                                Map<String, Double> weights) {
+        try {
+            return new EvalDeltaService(store, EvalDimensionWeights.of(weights))
+                    .compareToActiveBaseline(runId);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /**
+     * 采集 L3 用量旁证（E-4：§7.5）；缺数据源、run 无 profile 或日期不可解析时返回 null。
+     *
+     * <p>日期取 run 的 started_at 至 ended_at 的日粒度区间；服务内部已把读表失败收敛成
+     * 「不可得」，这里只兜住参数异常，不记日志、不写库。</p>
+     */
+    private static EvalAiUsageEvidence collectAiUsage(EvalAiUsageSource usageSource, JSONObject run) {
+        if (usageSource == null) {
+            return null;
+        }
+        String profile = text(run, "eval_profile");
+        String startDate = dayOf(text(run, "started_at"));
+        if (profile.isEmpty() || startDate.isEmpty()) {
+            return null;
+        }
+        String endDate = dayOf(text(run, "ended_at"));
+        try {
+            return new EvalAiUsageEvidenceService(usageSource)
+                    .collect(profile, startDate, endDate.isEmpty() ? startDate : endDate);
+        } catch (RuntimeException e) {
+            return null;
+        }
+    }
+
+    /** 从 {@code yyyy-MM-dd HH:mm:ss} 取日期部分；格式不符返回空串。 */
+    private static String dayOf(String timestamp) {
+        if (timestamp == null || timestamp.length() < 10) {
+            return "";
+        }
+        String day = timestamp.substring(0, 10);
+        if (day.charAt(4) != '-' || day.charAt(7) != '-') {
+            return "";
+        }
+        return day;
     }
 
     private static Map<String, Double> mergeWeights(Map<String, Double> override) {
@@ -804,6 +887,26 @@ public final class EvalReportData {
         return baseline;
     }
 
+    /**
+     * 基线与本 run 的配对比较结果（F-6：§8.4、§8.5）。
+     *
+     * <p>没有激活基线时仍返回「不可比」结果（{@code available=false}），渲染可据此写原因；
+     * 装配失败或未计算时为 null，第 5 节回退「未计算」占位。</p>
+     */
+    public EvalDeltaResult delta() {
+        return delta;
+    }
+
+    /**
+     * L3 用量旁证（E-4：§7.5）；未注入数据源或日期不可解析时为 null。
+     *
+     * <p>不为 null 时，可用性由 {@link EvalAiUsageEvidence#available()} 判定；不可用时
+     * 渲染写「不可得」与原因，不补数、不换算。</p>
+     */
+    public EvalAiUsageEvidence aiUsage() {
+        return aiUsage;
+    }
+
     /** 装配用可变构造器：只在类内使用，避免 40 个参数的长构造方法。 */
     private static final class Builder {
         private String runId = "";
@@ -847,6 +950,8 @@ public final class EvalReportData {
         private int validCaseCount;
         private final List<TrendEntry> trend = new ArrayList<TrendEntry>();
         private BaselineView baseline = BaselineView.none();
+        private EvalDeltaResult delta;
+        private EvalAiUsageEvidence aiUsage;
         private final Map<String, Double> weights = new LinkedHashMap<String, Double>();
     }
 

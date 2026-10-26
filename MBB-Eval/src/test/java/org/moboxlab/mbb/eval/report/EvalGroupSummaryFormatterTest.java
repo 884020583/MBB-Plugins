@@ -58,7 +58,7 @@ public class EvalGroupSummaryFormatterTest {
         assertTrue("摘要至少包含 run 标识到报表路径", lines.length >= 6);
         assertEquals("【MBB-Eval】" + RUN + "（full，10-25 23:00）", lines[0]);
         assertTrue(text.contains("总分 74.0"));
-        assertTrue(text.contains("基线 " + BASE_RUN + "：+5.0（显著性未计算）"));
+        assertTrue(text.contains("基线 " + BASE_RUN + "：+5.0（点值，不判显著性）"));
         assertTrue(text.contains("人设 80.0↑ 记忆 70.0↑ 边界 90.0↑ 知识 50.0↑ 风格 60.0↑"));
         assertTrue(text.contains("题级"));
         assertTrue(text.contains("变好"));

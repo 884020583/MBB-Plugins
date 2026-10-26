@@ -1,6 +1,7 @@
 package org.moboxlab.mbb.eval.report;
 
 import com.alibaba.fastjson.JSONObject;
+import org.moboxlab.mbb.eval.metrics.EvalAiUsageEvidence;
 import org.moboxlab.mbb.eval.metrics.EvalMetrics;
 
 import java.util.ArrayList;
@@ -79,9 +80,30 @@ public final class EvalReportPerformanceRenderer {
         sb.append("- TTFT/ITL/TPS/RPS：不可得或不适用").append('\n');
         appendFixedLimits(sb);
         sb.append("- L3 旁证：仅比数量级；不同口径，不可换算").append('\n');
+        appendAiUsage(sb, data);
         sb.append("- 口径隔离：性能与成本不进总分、不设门禁（E14）").append('\n');
         sb.append('\n');
         return sb.toString();
+    }
+
+    /**
+     * L3 用量旁证（E-4：规格 §7.5）：有采集结果时原样缩进挂出。
+     *
+     * <p>数据源未接入时不追加任何行（保留上方固定口径行）；数据源读表失败或无行时
+     * 由 {@link EvalAiUsageEvidence#text()} 自己写「不可得」与原因，不补数、不换算。</p>
+     */
+    private static void appendAiUsage(StringBuilder sb, EvalReportData data) {
+        EvalAiUsageEvidence evidence = data == null ? null : data.aiUsage();
+        if (evidence == null) {
+            return;
+        }
+        String[] lines = evidence.text().split("\n", -1);
+        for (String line : lines) {
+            if (line.trim().isEmpty()) {
+                continue;
+            }
+            sb.append("  ").append(line).append('\n');
+        }
     }
 
     /**

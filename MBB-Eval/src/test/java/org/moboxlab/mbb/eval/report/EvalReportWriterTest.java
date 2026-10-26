@@ -128,16 +128,19 @@ public class EvalReportWriterTest {
             "- 判定：可比（九键一致）",
             "- 差异字段：无",
             "- 总分 delta：+5.0（点值，不判显著性）",
+            "- 两侧可信度：基线 可信 / 本次 可信；结论 持平",
             "| 维度 | 基线分 | 本次分 | delta | ci_low | ci_high | 结论 |",
             "| --- | --- | --- | --- | --- | --- | --- |",
-            "| persona 人设一致性 | 75.0 | 80.0 | +5.0 | 未计算 | 未计算 | 未计算 |",
-            "| boundary 边界安全 | 85.0 | 90.0 | +5.0 | 未计算 | 未计算 | 未计算 |",
-            "| memory 记忆召回 | 65.0 | 70.0 | +5.0 | 未计算 | 未计算 | 未计算 |",
-            "| knowledge 知识正确性 | 45.0 | 50.0 | +5.0 | 未计算 | 未计算 | 未计算 |",
-            "| style 风格匹配 | 55.0 | 60.0 | +5.0 | 未计算 | 未计算 | 未计算 |",
-            "- 注：维度区间与显著性由 bootstrap 计算，未接入时写「未计算」（§8.4）",
-            "- 题级：未计算（题级翻转对比未接入）",
-            "- 不可信变更：ok→error 未计算；ok→invalid 未计算（§8.4）",
+            "| persona 人设一致性 | 75.0 | 80.0 | +5.0 | 数据缺失 | 数据缺失 | 不可比 |",
+            "| boundary 边界安全 | 85.0 | 90.0 | +5.0 | 数据缺失 | 数据缺失 | 不可比 |",
+            "| memory 记忆召回 | 65.0 | 70.0 | +5.0 | 数据缺失 | 数据缺失 | 不可比 |",
+            "| knowledge 知识正确性 | 45.0 | 50.0 | +5.0 | 数据缺失 | 数据缺失 | 不可比 |",
+            "| style 风格匹配 | 55.0 | 60.0 | +5.0 | 数据缺失 | 数据缺失 | 不可比 |",
+            "- 注：维度区间与显著性由 bootstrap 计算（1000 次、种子 41；§8.4）",
+            "- 题级：变好 5 / 变差 0 / 持平 0 / 翻转 0/0",
+            "- 不可信变更：ok→error 0；ok→invalid 0（§8.4）",
+            "- 标注：",
+            "  - 样本不足：配对 n=5 少于 20，不出置信区间",
             "",
             "## 6. 题级明细",
             "| case_result_id | case_id | dimension | status | score | label | evidence 摘要 |",
@@ -357,9 +360,8 @@ public class EvalReportWriterTest {
         assertTrue(text.contains("- 结论：不可比（九键不同）"));
         assertTrue(text.contains("- 判定：不可比（九键不同）"));
         assertTrue(text.contains("- 差异字段：rubric_version"));
-        assertTrue(text.contains("- delta：不可比（口径不同，不出 delta 与显著性）"));
+        assertTrue(text.contains("- 总分 delta：不可比（rubric 已变）"));
         assertTrue(text.contains("rubric 已变：基线 rubric_version 与本次不同，不与历史直接比（§8.5）"));
-        assertFalse(text.contains("总分 delta"));
     }
 
     @Test
@@ -404,8 +406,10 @@ public class EvalReportWriterTest {
         assertEquals(file.getAbsoluteFile(), rewritten.getAbsoluteFile());
         assertEquals(EvalReportWriter.render(data),
                 new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
+        File summary = new File(reportsDir, EvalReportWriter.summaryFileName(RUN));
+        assertTrue("群摘要附属文件必须写出：" + summary, summary.isFile());
         File[] children = reportsDir.listFiles();
-        assertTrue(children != null && children.length == 1);
+        assertTrue(children != null && children.length == 2);
     }
 
     @Test
