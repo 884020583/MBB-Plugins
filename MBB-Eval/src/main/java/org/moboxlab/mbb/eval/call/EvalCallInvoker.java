@@ -380,7 +380,8 @@ public final class EvalCallInvoker {
      * <p>校准的 3 次调用计入同一预算与 calls_used，因此预算触顶时同样返回
      * {@link JudgeKind#BUDGET_STOPPED}，由调用方中止校准步骤而不是中止 run。</p>
      *
-     * @param attempt 同一 run 内校准行的行序号，由调用方保证唯一
+     * @param sampleIndex 校准样本序号；当前调用方固定传 0，行唯一性由 case_id 保证
+     * @param attempt 同一样本的重试序号；当前调用方固定传 0，行唯一性由 case_id 保证
      * @return 判分结果；预算止步时 result 为 null 且 kind 为 BUDGET_STOPPED
      */
     public JudgeOutcome judgeCalibration(String runId, String caseId, int sampleIndex, int attempt,

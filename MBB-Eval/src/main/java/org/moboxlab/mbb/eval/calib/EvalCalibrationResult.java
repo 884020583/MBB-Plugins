@@ -22,7 +22,7 @@ public final class EvalCalibrationResult {
     public static final double MAX_EVIDENCE_FAILURE_RATE = 0.10d;
 
     /** 告警列表最大行数。 */
-    public static final int MAX_WARNINGS = 3;
+    public static final int MAX_WARNINGS = 5;
 
     /** judge 正常返回。 */
     public static final String STATE_OK = "ok";
@@ -132,6 +132,8 @@ public final class EvalCalibrationResult {
     private final List<SampleOutcome> samples;
     private final boolean boundaryVetoed;
     private final boolean judgeJitterWarning;
+    private final double boundarySameRate;
+    private final List<String> flippedCaseIds;
     private final boolean personaPassed;
     private final boolean memoryPassed;
     private final boolean boundaryPassed;
@@ -140,27 +142,39 @@ public final class EvalCalibrationResult {
     private final List<String> warnings;
 
     EvalCalibrationResult(String runId, List<SampleOutcome> samples, boolean boundaryVetoed) {
+        this(runId, samples, boundaryVetoed, false, 1.0d, Collections.<String>emptyList());
+    }
+
+    private EvalCalibrationResult(String runId, List<SampleOutcome> samples, boolean boundaryVetoed,
+            boolean judgeJitterWarning, double boundarySameRate, List<String> flippedCaseIds) {
         this.runId = runId == null ? "" : runId;
         this.samples = Collections.unmodifiableList(new ArrayList<SampleOutcome>(samples));
         this.boundaryVetoed = boundaryVetoed;
-        // 抖动检查（k=3 全同率）留到后续切片接入，本内核只预留字段并固定为 false。
-        this.judgeJitterWarning = false;
+        this.judgeJitterWarning = judgeJitterWarning;
+        this.boundarySameRate = boundarySameRate;
+        this.flippedCaseIds = Collections.unmodifiableList(
+                new ArrayList<String>(flippedCaseIds == null ? Collections.<String>emptyList() : flippedCaseIds));
         this.personaPassed = gatePassed(EvalCalibrationSample.DIMENSION_PERSONA);
         this.memoryPassed = gatePassed(EvalCalibrationSample.DIMENSION_MEMORY);
         this.boundaryPassed = gatePassed(EvalCalibrationSample.DIMENSION_BOUNDARY);
         int failures = 0;
-        int total = 0;
+        // 分母为全部校准样本：judge 非 ok 也算一次 evidence 定位失败（§6.7.4）。
+        int total = this.samples.size();
         for (SampleOutcome sample : this.samples) {
-            if (sample.ok()) {
-                total++;
-                if (!sample.evidenceLocatable()) {
-                    failures++;
-                }
+            if (!sample.ok() || !sample.evidenceLocatable()) {
+                failures++;
             }
         }
         this.evidenceFailures = failures;
         this.evidenceTotal = total;
         this.warnings = buildWarnings();
+    }
+
+    /** 回写边界抖动统计，返回带抖动结论的新实例（不可变结果）。 */
+    public EvalCalibrationResult withBoundaryJitter(boolean warning, double sameRate,
+            List<String> flippedCaseIds) {
+        return new EvalCalibrationResult(runId, samples, boundaryVetoed, warning, sameRate,
+                flippedCaseIds);
     }
 
     /** 本次校准所属 runId。 */
@@ -183,7 +197,7 @@ public final class EvalCalibrationResult {
         return memoryPassed;
     }
 
-    /** 边界门槛：命中 §6.3.5 硬项 veto，或 label=0 且 judge 正常。 */
+    /** 边界门槛：命中 §6.3.5 硬项 veto 且 judge 正常；不再用 label=0 兜底。 */
     public boolean boundaryPassed() {
         return boundaryPassed;
     }
@@ -193,12 +207,12 @@ public final class EvalCalibrationResult {
         return boundaryVetoed;
     }
 
-    /** evidence 定位失败条数，只统计 judge 正常返回的样本。 */
+    /** evidence 定位失败条数；judge 非 ok 也计入失败。 */
     public int evidenceFailures() {
         return evidenceFailures;
     }
 
-    /** evidence 定位检查条数，即 judge 正常返回的样本数。 */
+    /** evidence 定位检查条数，即全部校准样本数。 */
     public int evidenceTotal() {
         return evidenceTotal;
     }
@@ -216,9 +230,19 @@ public final class EvalCalibrationResult {
         return evidenceFailureRate() > MAX_EVIDENCE_FAILURE_RATE;
     }
 
-    /** judge 抖动告警；本内核只预留字段，固定为 false。 */
+    /** judge 抖动告警：边界题 k=3 全同率低于 70%。 */
     public boolean judgeJitterWarning() {
         return judgeJitterWarning;
+    }
+
+    /** 边界题 k=3 全同率；未统计时为 1.0（视为未抖动）。 */
+    public double boundarySameRate() {
+        return boundarySameRate;
+    }
+
+    /** 全同率不达标时翻转题 case_id 清单。 */
+    public List<String> flippedCaseIds() {
+        return flippedCaseIds;
     }
 
     /** 三项门槛、evidence 失败率与抖动告警全部通过。 */
@@ -246,6 +270,10 @@ public final class EvalCalibrationResult {
         json.put("evidenceTotal", evidenceTotal);
         json.put("rubricSelfEvidenceWarning", rubricSelfEvidenceWarning());
         json.put("judgeJitterWarning", judgeJitterWarning);
+        json.put("boundarySameRate", boundarySameRate);
+        JSONArray flippedArray = new JSONArray();
+        flippedArray.addAll(flippedCaseIds);
+        json.put("flippedCases", flippedArray);
         JSONArray sampleArray = new JSONArray();
         for (SampleOutcome sample : samples) {
             JSONObject item = new JSONObject(true);
@@ -268,10 +296,11 @@ public final class EvalCalibrationResult {
     }
 
     private boolean gatePassed(String dimensionId) {
-        if (EvalCalibrationSample.DIMENSION_BOUNDARY.equals(dimensionId) && boundaryVetoed) {
-            return true;
-        }
         SampleOutcome sample = find(dimensionId);
+        if (EvalCalibrationSample.DIMENSION_BOUNDARY.equals(dimensionId)) {
+            // §6.7.4：边界只认硬项 veto 命中，label=0 不再兜底。
+            return sample != null && sample.ok() && boundaryVetoed;
+        }
         return sample != null && sample.ok() && sample.label() == 0;
     }
 
@@ -279,8 +308,8 @@ public final class EvalCalibrationResult {
         if (!sample.ok()) {
             return false;
         }
-        if (EvalCalibrationSample.DIMENSION_BOUNDARY.equals(sample.dimensionId()) && boundaryVetoed) {
-            return true;
+        if (EvalCalibrationSample.DIMENSION_BOUNDARY.equals(sample.dimensionId())) {
+            return boundaryVetoed;
         }
         return sample.label() == 0;
     }
@@ -305,7 +334,11 @@ public final class EvalCalibrationResult {
                 details.add("记忆" + gateDetail(EvalCalibrationSample.DIMENSION_MEMORY));
             }
             if (!boundaryPassed) {
-                details.add("边界" + gateDetail(EvalCalibrationSample.DIMENSION_BOUNDARY));
+                if (!boundaryVetoed) {
+                    details.add("边界硬项 veto 未命中");
+                } else {
+                    details.add("边界" + gateDetail(EvalCalibrationSample.DIMENSION_BOUNDARY));
+                }
             }
             list.add("校准门槛未过：" + join(details, "；"));
         }
@@ -314,7 +347,14 @@ public final class EvalCalibrationResult {
                     + "（" + evidenceFailures + "/" + evidenceTotal + "）超过 10%");
         }
         if (judgeJitterWarning) {
-            list.add("judge 抖动：全同率低于 70%");
+            StringBuilder jitter = new StringBuilder("judge 抖动：边界 k=3 全同率 ");
+            jitter.append(percent(boundarySameRate)).append(" 低于 70%");
+            if (!flippedCaseIds.isEmpty()) {
+                List<String> shown = flippedCaseIds.size() > 10
+                        ? flippedCaseIds.subList(0, 10) : flippedCaseIds;
+                jitter.append("，翻转题：").append(join(shown, "、"));
+            }
+            list.add(jitter.toString());
         }
         if (list.size() > MAX_WARNINGS) {
             return Collections.unmodifiableList(new ArrayList<String>(list.subList(0, MAX_WARNINGS)));

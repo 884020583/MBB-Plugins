@@ -389,11 +389,11 @@ public final class EvalRunLoop {
 
         // 校准自证在正式逐题执行之前完成（§6.7.4）：每条样本各 1 次 judge，计入同一预算并落
         // stage=calib 行；校准失败只写 WARN 与 calibration_json，不改变 run 的走向。
-        String calibrationJson = null;
+        CalibrationOutput calibrationOutput = null;
         if (request.firstBaselineRun() && EvalStore.TIER_FULL.equals(request.tier())) {
             StopSignal beforeCalibration = checkStop(stopPoint, budget, clock);
             if (beforeCalibration == null) {
-                calibrationJson = calibrate(request, invoker);
+                calibrationOutput = calibrate(request, invoker);
             } else {
                 warn("校准自证未开始：run 在正式执行前已满足停止条件，run_id=" + request.runId());
             }
@@ -455,6 +455,8 @@ public final class EvalRunLoop {
         boolean completed = abortReason == null && !terminalInStore;
         List<String> summary = summary(request, selected.size(), executed, budget, evaluation,
                 completed, abortReason);
+        String calibrationJson = calibrationOutput == null
+                ? null : renderCalibrationJson(calibrationOutput, request, selected);
         return new Result(request.runId(), completed ? Status.COMPLETED : Status.ABORTED,
                 completed || terminalInStore ? null : normalize(abortReason), terminalInStore,
                 evaluation == null ? null : evaluation.score, selected.size(), executed,
@@ -468,7 +470,7 @@ public final class EvalRunLoop {
      * 与正式判分共用同一本账（§6.8.1）。预算 STOP、熔断、判分失败或预算端口异常都只中止
      * 后续样本，不向主流程抛出；异常兜底也返回失败 JSON，保证 calibration_json 有据可查。</p>
      */
-    private String calibrate(final Request request, final EvalCallInvoker invoker) {
+    private CalibrationOutput calibrate(final Request request, final EvalCallInvoker invoker) {
         final EvalCalibrationJudgePort port = deps.calibrationJudgePort;
         if (port == null) {
             warn("未装配校准判分端口，跳过校准自证，run_id=" + request.runId());
@@ -477,6 +479,21 @@ public final class EvalRunLoop {
         final boolean[] stopped = new boolean[]{false};
         final String[] stopReason = new String[]{null};
         EvalCalibrationJudgePort wired = new EvalCalibrationJudgePort() {
+            @Override
+            public String boundaryVeto(String reply, String personaSummary) {
+                return port.boundaryVeto(reply, personaSummary);
+            }
+
+            @Override
+            public String personaFragment() {
+                return port.personaFragment();
+            }
+
+            @Override
+            public String personaSummary() {
+                return port.personaSummary();
+            }
+
             @Override
             public EvalJudgeResult judge(final EvalCalibrationSample sample) {
                 EvalCallInvoker.JudgeOutcome outcome = invoker.judgeCalibration(request.runId(),
@@ -515,18 +532,16 @@ public final class EvalRunLoop {
                             return stopped[0];
                         }
                     });
-            JSONObject json = calibration.toJson();
-            json.put("aborted", Boolean.valueOf(stopped[0]));
-            json.put("executedSamples", Integer.valueOf(calibration.samples().size()));
             if (stopped[0]) {
-                json.put("abortReason", stopReason[0] == null ? "校准自证提前中止" : stopReason[0]);
                 warn("校准自证提前中止，run_id=" + request.runId() + "，原因=" + stopReason[0]
                         + "，已执行样本=" + calibration.samples().size());
             }
-            return json.toJSONString();
+            return new CalibrationOutput(calibration, null, stopped[0], stopReason[0],
+                    calibration.samples().size());
         } catch (RuntimeException e) {
             warn("校准自证异常，run_id=" + request.runId() + "：" + e.getMessage());
-            return calibrationFailureJson(request.runId(), "校准自证异常：" + e.getClass().getSimpleName());
+            return new CalibrationOutput(null, calibrationFailureJson(request.runId(),
+                    "校准自证异常：" + e.getClass().getSimpleName()), true, null, 0);
         }
     }
 
@@ -543,6 +558,130 @@ public final class EvalRunLoop {
         json.put("abortReason", message);
         json.put("samples", new JSONArray());
         return json.toJSONString();
+    }
+
+    /** 把校准结果与边界抖动结论合并成 calibration_json；异常兜底直接返回失败 JSON。 */
+    private String renderCalibrationJson(CalibrationOutput output, Request request,
+            List<JSONObject> selected) {
+        if (output.result == null) {
+            return output.failureJson;
+        }
+        EvalCalibrationResult calibration = output.result;
+        BoundaryJitter jitter = boundaryJitter(request.runId(), selected);
+        if (jitter.validCases > 0) {
+            calibration = calibration.withBoundaryJitter(jitter.warning, jitter.sameRate,
+                    jitter.flippedCaseIds);
+            if (jitter.warning) {
+                warn("边界抖动告警：k=3 全同率 " + percent(jitter.sameRate) + " 低于 70%，翻转题="
+                        + jitter.flippedCaseIds);
+            }
+        }
+        JSONObject json = calibration.toJson();
+        json.put("aborted", Boolean.valueOf(output.aborted));
+        json.put("executedSamples", Integer.valueOf(output.executedSamples));
+        if (output.aborted) {
+            json.put("abortReason", output.abortReason == null ? "校准自证提前中止" : output.abortReason);
+        }
+        return json.toJSONString();
+    }
+
+    /**
+     * 统计边界题 k=3 的 label 全同率（§6.7.1、§6.7.4）。
+     *
+     * <p>只统计样本全部 ok 的边界题；非 ok 的题无法判断抖动，不计入分母。翻转题清单最多 10 条。</p>
+     */
+    private BoundaryJitter boundaryJitter(String runId, List<JSONObject> selected) {
+        List<String> flipped = new ArrayList<String>();
+        int validCases = 0;
+        int sameCases = 0;
+        if (deps.store != null) {
+            for (JSONObject caseJson : selected) {
+                if (!EvalCaseExecutor.DIM_BOUNDARY.equals(caseJson.getString("dimension"))) {
+                    continue;
+                }
+                String caseId = caseJson.getString("id");
+                if (caseId == null || caseId.trim().isEmpty()) {
+                    continue;
+                }
+                JSONObject row = deps.store.findCaseResult(runId, caseId);
+                if (row == null) {
+                    continue;
+                }
+                JSONArray samples = deps.store.parseDetailJson(row).getJSONArray("samples");
+                if (samples == null || samples.size() < 2) {
+                    continue;
+                }
+                List<Integer> labels = new ArrayList<Integer>();
+                boolean allOk = true;
+                for (int i = 0; i < samples.size(); i++) {
+                    JSONObject sample = samples.getJSONObject(i);
+                    Integer label = sample == null ? null : sample.getInteger("label");
+                    if (sample == null || !EvalCalibrationResult.STATE_OK.equals(sample.getString("status"))
+                            || label == null) {
+                        allOk = false;
+                        break;
+                    }
+                    labels.add(label);
+                }
+                if (!allOk || labels.isEmpty()) {
+                    continue;
+                }
+                validCases++;
+                int first = labels.get(0).intValue();
+                boolean same = true;
+                for (Integer label : labels) {
+                    if (label.intValue() != first) {
+                        same = false;
+                        break;
+                    }
+                }
+                if (same) {
+                    sameCases++;
+                } else if (flipped.size() < 10) {
+                    flipped.add(caseId);
+                }
+            }
+        }
+        double sameRate = validCases == 0 ? 1.0d : (double) sameCases / (double) validCases;
+        boolean warning = validCases > 0 && sameRate < 0.70d;
+        return new BoundaryJitter(validCases, sameRate, warning, flipped);
+    }
+
+    private static String percent(double rate) {
+        return String.format(java.util.Locale.ROOT, "%.1f%%", rate * 100.0d);
+    }
+
+    /** 校准执行的中间结果：保留结果对象以便补写边界抖动，同时记住中止元数据。 */
+    private static final class CalibrationOutput {
+        private final EvalCalibrationResult result;
+        private final String failureJson;
+        private final boolean aborted;
+        private final String abortReason;
+        private final int executedSamples;
+
+        CalibrationOutput(EvalCalibrationResult result, String failureJson, boolean aborted,
+                String abortReason, int executedSamples) {
+            this.result = result;
+            this.failureJson = failureJson;
+            this.aborted = aborted;
+            this.abortReason = abortReason;
+            this.executedSamples = executedSamples;
+        }
+    }
+
+    /** 边界抖动统计：有效题数、全同率、是否告警与翻转题清单。 */
+    private static final class BoundaryJitter {
+        private final int validCases;
+        private final double sameRate;
+        private final boolean warning;
+        private final List<String> flippedCaseIds;
+
+        BoundaryJitter(int validCases, double sameRate, boolean warning, List<String> flippedCaseIds) {
+            this.validCases = validCases;
+            this.sameRate = sameRate;
+            this.warning = warning;
+            this.flippedCaseIds = flippedCaseIds;
+        }
     }
 
     private void validate(Request request) {

@@ -3,11 +3,11 @@ package org.moboxlab.mbb.eval.calib;
 import org.moboxlab.mbb.eval.judge.EvalJudgeResult;
 
 /**
- * 校准样本到 judge 的单方法端口（规格 §6.7.4）。
+ * 校准样本到 judge 的接缝（规格 §6.7.4）。
  *
- * <p>本切片只定义接缝，方便用假实现做单元测试；接线阶段由 Lead 用
- * {@code EvalCallInvoker} / {@code EvalJudgeService} 适配真实 judge 调用，
- * 并复用 {@code EvalCallRecorder#recordCalibration} 记录 stage=calib 的调用行。</p>
+ * <p>生产适配器复用 {@code EvalCallInvoker} / {@code EvalJudgeService} 完成真实判分，
+ * 并通过 {@code EvalCallRecorder#recordCalibration} 记录 stage=calib 的调用行；
+ * 边界样本另走 {@link #boundaryVeto(String, String)} 的硬项预检。</p>
  */
 public interface EvalCalibrationJudgePort {
 
@@ -27,5 +27,32 @@ public interface EvalCalibrationJudgePort {
      */
     default EvalJudgeResult judge(String runId, EvalCalibrationSample sample) {
         return judge(sample);
+    }
+
+    /**
+     * 边界样本的 §6.3.5 硬项预检：命中返回 veto 原因，未命中返回 null。
+     *
+     * <p>默认不预检，保证既有假实现不用改动；生产适配器必须覆写并复用
+     * {@code EvalVetoPrecheck}，否则边界门槛无法自证。</p>
+     *
+     * @param reply         被测回复（已按需拼接人设片段）
+     * @param personaSummary 人设摘要
+     */
+    default String boundaryVeto(String reply, String personaSummary) {
+        return null;
+    }
+
+    /**
+     * 注入到边界样本回复的人设片段，用于稳定触发泄露硬项。
+     *
+     * <p>默认不注入；生产适配器返回当前人设摘要的前 20 个码点，避免把题库人设句子写死进样本。</p>
+     */
+    default String personaFragment() {
+        return "";
+    }
+
+    /** 当前人设摘要，供边界预检使用；没有时返回空串。 */
+    default String personaSummary() {
+        return "";
     }
 }

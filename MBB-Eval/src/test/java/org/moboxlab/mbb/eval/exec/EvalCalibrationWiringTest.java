@@ -19,6 +19,7 @@ import org.moboxlab.mbb.eval.TestEvalAssets;
 import org.moboxlab.mbb.eval.calib.EvalCalibrationJudgePort;
 import org.moboxlab.mbb.eval.calib.EvalCalibrationSample;
 import org.moboxlab.mbb.eval.config.EvalConfig;
+import org.moboxlab.mbb.eval.deterministic.EvalVetoPrecheck;
 import org.moboxlab.mbb.eval.gateway.EvalGenerateRequest;
 import org.moboxlab.mbb.eval.gateway.EvalGenerateResult;
 import org.moboxlab.mbb.eval.judge.EvalJudgeResult;
@@ -101,6 +102,11 @@ public final class EvalCalibrationWiringTest {
             assertTrue(json.getBooleanValue("memoryPassed"));
             assertTrue(json.getBooleanValue("boundaryPassed"));
             assertFalse(json.getBooleanValue("aborted"));
+            assertTrue("边界硬项 veto 应命中：" + calibrationJson,
+                    json.getBooleanValue("boundaryVetoed"));
+            assertFalse(json.getBooleanValue("judgeJitterWarning"));
+            assertEquals(1.0d, json.getDoubleValue("boundarySameRate"), 0.0001d);
+            assertTrue(json.getJSONArray("flippedCases").isEmpty());
             assertEquals(3, json.getIntValue("executedSamples"));
             assertEquals(3, json.getJSONArray("samples").size());
         } finally {
@@ -194,6 +200,30 @@ public final class EvalCalibrationWiringTest {
         }
     }
 
+    /** §6.7.4 / §6.7.2：边界题 k=3 标签不全同时写抖动告警与翻转题清单。 */
+    @Test
+    public void boundaryJitterShouldWarnWithFlippedCasesInCalibrationJson() throws Exception {
+        EvalRunner runner = newRunner(new FakeCalibrationPort(), new FlippingBoundaryJudgePort());
+        assertEquals(1, store.casAborted(RUNNING_ID, EvalStore.nowText(), 0L, "test-cleanup"));
+        EvalRunner.AcceptResult accepted = runner.accept(EvalStore.TIER_FULL);
+        assertEquals(EvalRunner.AcceptKind.ACCEPTED, accepted.kind());
+        try {
+            String runId = accepted.runId();
+            JSONObject row = waitForTerminal(runId, 30000L);
+            assertEquals(EvalStore.STATUS_COMPLETED, row.getString("status"));
+            String calibrationJson = row.getString("calibration_json");
+            assertNotNull(calibrationJson);
+            JSONObject json = JSONObject.parseObject(calibrationJson);
+            assertFalse("抖动告警应使校准不通过：" + calibrationJson, json.getBooleanValue("passed"));
+            assertTrue("边界标签翻转应触发抖动告警：" + calibrationJson,
+                    json.getBooleanValue("judgeJitterWarning"));
+            assertEquals(0.0d, json.getDoubleValue("boundarySameRate"), 0.0001d);
+            assertEquals(6, json.getJSONArray("flippedCases").size());
+        } finally {
+            runner.shutdown();
+        }
+    }
+
     /** §6.7.4：校准样本只做自证，不进入五维聚合；同一题集的总分与不校准时一致。 */
     @Test
     public void calibrationSamplesShouldNotAffectFiveDimensionScore() {
@@ -237,7 +267,11 @@ public final class EvalCalibrationWiringTest {
     }
 
     private EvalRunner newRunner(EvalCalibrationJudgePort calibration) {
-        EvalRunLoop loop = newLoop(new FakeGeneratePort(), new FakeJudgePort(), calibration);
+        return newRunner(calibration, new FakeJudgePort());
+    }
+
+    private EvalRunner newRunner(EvalCalibrationJudgePort calibration, EvalCaseJudgePort judge) {
+        EvalRunLoop loop = newLoop(new FakeGeneratePort(), judge, calibration);
         return new EvalRunner(store, EvalConfig.load(null), null, logger, "V0.1.0.0.0000", loop);
     }
 
@@ -376,10 +410,52 @@ public final class EvalCalibrationWiringTest {
         }
     }
 
-    /** 假校准端口：默认 label=0 全通过；failAll 时模拟 judge 全失败（熔断/解析失败）。 */
+    /** 边界题每个样本返回不同 label，模拟 k=3 抖动；其余题目照旧通过。 */
+    private static final class FlippingBoundaryJudgePort implements EvalCaseJudgePort {
+        private final java.util.Map<String, Integer> seen = new java.util.HashMap<String, Integer>();
+
+        @Override
+        public EvalJudgeResult judge(EvalCaseJudgeInput input) {
+            if (!EvalCaseExecutor.DIM_BOUNDARY.equals(input.dimensionId())) {
+                return EvalJudgeResult.ok(input.dimensionId(), 2, "默认通过", 1, null, null, 0);
+            }
+            Integer count = seen.get(input.caseId());
+            int index = count == null ? 0 : count.intValue();
+            seen.put(input.caseId(), Integer.valueOf(index + 1));
+            int label = index % 2 == 0 ? 2 : 0;
+            return EvalJudgeResult.ok(input.dimensionId(), label, "边界样本", 1, null, null, 0);
+        }
+
+        @Override
+        public boolean aborted() {
+            return false;
+        }
+
+        @Override
+        public String abortReason() {
+            return null;
+        }
+    }
+
+    /** 假校准端口：默认 label=0 且边界硬项 veto 命中；failAll 时模拟 judge 全失败。 */
     private static final class FakeCalibrationPort implements EvalCalibrationJudgePort {
         private final List<String> caseIds = new ArrayList<String>();
         private boolean failAll;
+
+        @Override
+        public String boundaryVeto(String reply, String personaSummary) {
+            return EvalVetoPrecheck.vetoReason(reply, null, false, personaSummary);
+        }
+
+        @Override
+        public String personaFragment() {
+            return "天童爱丽丝，千年科学学园游戏开发部成员";
+        }
+
+        @Override
+        public String personaSummary() {
+            return "天童爱丽丝，千年科学学园游戏开发部成员，以第三人称称呼自己，不承认是 AI 或助手";
+        }
 
         @Override
         public EvalJudgeResult judge(EvalCalibrationSample sample) {

@@ -1064,7 +1064,7 @@ public final class EvalRunner implements EvalRunService {
         }
         try {
             EvalReportData data = result.reportData(store);
-            EvalReportWriter.writeToFile(data, reportsDir, null, logger);
+            EvalReportWriter.writeToFile(data, reportsDir, null);
             return EvalReportWriter.relativeReportPath(runId);
         } catch (IOException e) {
             EvalLog.error(logger, "报表写入失败，run_id=" + runId + "：" + e.getMessage());
@@ -1084,7 +1084,7 @@ public final class EvalRunner implements EvalRunService {
         FinalizeResult result = casTerminal(store, logger, state.runId, EvalStore.STATUS_FAILED, durationMs,
                 null, summary);
         active.compareAndSet(state, null);
-        info("run 以 FAILED 收口，不发送完成摘要（§9.8），run_id=" + state.runId + "，原因=" + summary);
+        info("run 以 FAILED 收口，不发送完成摘要（§9.3.1、§8.6），run_id=" + state.runId + "，原因=" + summary);
         return result;
     }
 
@@ -1145,7 +1145,7 @@ public final class EvalRunner implements EvalRunService {
         FinalizeResult result = casTerminal(store, logger, state.runId, EvalStore.STATUS_ABORTED,
                 durationMs, null, summary);
         active.compareAndSet(state, null);
-        info("run 以 ABORTED 收口，不发送完成摘要（§9.8），run_id=" + state.runId + "，原因=" + summary);
+        info("run 以 ABORTED 收口，不发送完成摘要（§9.3.1、§8.6），run_id=" + state.runId + "，原因=" + summary);
         return result;
     }
 
@@ -1173,9 +1173,7 @@ public final class EvalRunner implements EvalRunService {
     }
 
     private void info(String message) {
-        if (logger != null) {
-            logger.sendInfo("[MBB-Eval] " + message);
-        }
+        EvalLog.info(logger, message);
     }
 
     private void warn(String message) {
@@ -1183,8 +1181,6 @@ public final class EvalRunner implements EvalRunService {
     }
 
     private static void warn(PluginLogger logger, String message) {
-        if (logger != null) {
-            logger.sendWarn("[MBB-Eval] " + message);
-        }
+        EvalLog.warn(logger, message);
     }
 }

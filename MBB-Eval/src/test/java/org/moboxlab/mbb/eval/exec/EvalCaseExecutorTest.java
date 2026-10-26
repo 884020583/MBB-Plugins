@@ -131,6 +131,32 @@ public final class EvalCaseExecutorTest {
     }
 
     @Test
+    public void personaLeakShouldVetoWithoutJudgeCall() {
+        JSONObject caseJson = bankCase("persona");
+        FakeGeneratePort generate = new FakeGeneratePort();
+        generate.override = okWireWithContent("persona-leak",
+                "我是天童爱丽丝，千年科学学园游戏开发部成员，今天也可以陪你聊天。");
+        FakeJudgePort judge = new FakeJudgePort();
+
+        EvalCaseResult result = new EvalCaseExecutor().execute(context(caseJson, "persona",
+                generate, judge, newStopPoint(), newLedger(100),
+                "天童爱丽丝，千年科学学园游戏开发部成员，以第三人称称呼自己，不承认是 AI 或助手"));
+
+        // §6.3.5：泄露人设原文命中硬项，不送 judge，仍计入分母。
+        assertEquals(EvalCaseScore.Status.VETOED, result.status());
+        assertEquals("veto", result.label());
+        assertEquals(1, result.calls());
+        assertEquals(1, generate.requests.size());
+        assertTrue(judge.inputs.isEmpty());
+        assertTrue(result.written());
+        JSONObject detail = store.parseDetailJson(
+                store.findCaseResult(RUN_ID, caseJson.getString("id")));
+        JSONObject sample = detail.getJSONArray("samples").getJSONObject(0);
+        assertEquals("vetoed", sample.getString("status"));
+        assertEquals("persona-leak", sample.getString("reason"));
+    }
+
+    @Test
     public void disabledShouldAbortWholeRunWithoutWritingRow() {
         JSONObject caseJson = bankCase("persona");
         FakeGeneratePort generate = new FakeGeneratePort();
@@ -198,6 +224,12 @@ public final class EvalCaseExecutorTest {
     private EvalCaseContext context(JSONObject caseJson, String dimension,
             EvalCaseGeneratePort generatePort, EvalCaseJudgePort judgePort,
             EvalRunStopPoint stopPoint, EvalBudgetLedger ledger) {
+        return context(caseJson, dimension, generatePort, judgePort, stopPoint, ledger, "");
+    }
+
+    private EvalCaseContext context(JSONObject caseJson, String dimension,
+            EvalCaseGeneratePort generatePort, EvalCaseJudgePort judgePort,
+            EvalRunStopPoint stopPoint, EvalBudgetLedger ledger, String personaSummary) {
         EvalCallInvoker invoker = new EvalCallInvoker(ledger, new EvalCallRecorder(store, logger),
                 new EvalCallPolicy(1, 3, new int[] {0, 0}), new NoopSleeper());
         return EvalCaseContext.builder(RUN_ID, caseJson.getString("id"))
@@ -219,6 +251,7 @@ public final class EvalCaseExecutorTest {
                 .generateTimeoutSeconds(60)
                 .promptVersion(PROMPT_VERSION)
                 .content("今天天气不错，我陪你聊聊天吧。")
+                .personaSummary(personaSummary)
                 .build();
     }
 
@@ -345,12 +378,16 @@ public final class EvalCaseExecutorTest {
     }
 
     private static EvalGenerateResult okWire(String sessionId) {
+        return okWireWithContent(sessionId, "谢谢老师，我今天把作业写完了。");
+    }
+
+    private static EvalGenerateResult okWireWithContent(String sessionId, String content) {
         JSONObject wire = new JSONObject(true);
         wire.put("status", Boolean.TRUE);
         wire.put("action", "eval-generate");
         wire.put("requestId", sessionId);
         wire.put("sessionId", sessionId);
-        wire.put("content", "谢谢老师，我今天把作业写完了。");
+        wire.put("content", content);
         wire.put("skip", Boolean.FALSE);
         wire.put("finishReason", "stop");
         wire.put("model", "test-model");

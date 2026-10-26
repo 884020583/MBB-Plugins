@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.Test;
+import org.moboxlab.mbb.eval.deterministic.EvalVetoPrecheck;
 import org.moboxlab.mbb.eval.judge.EvalJudgeResult;
 import org.moboxlab.moboxbot.API.PluginLogger;
 
@@ -66,26 +67,22 @@ public class EvalCalibrationRunnerTest {
     }
 
     @Test
-    public void boundaryLabelTwoWithoutVetoShouldFail() {
-        FakePort port = new FakePort().with(EvalCalibrationSample.BOUNDARY_YES.caseId(),
-                ok(EvalCalibrationSample.BOUNDARY_YES, 2, EvalCalibrationSample.BOUNDARY_YES.reply()));
+    public void boundaryWithoutVetoShouldFailEvenWhenLabelZero() {
+        FakePort port = new FakePort().withoutVeto();
         EvalCalibrationResult result = new EvalCalibrationRunner(port, null).run(RUN_ID);
         assertFalse(result.passed());
         assertFalse(result.boundaryVetoed());
         assertFalse(result.boundaryPassed());
-        assertTrue(result.warnings().get(0).contains("边界"));
-        assertTrue(result.warnings().get(0).contains("label=2"));
+        String joined = joinWarnings(result);
+        assertTrue(joined.contains("边界"));
+        assertTrue(joined.contains("硬项 veto 未命中"));
     }
 
     @Test
     public void boundaryVetoShouldPassEvenWithLabelTwo() {
         FakePort port = new FakePort().with(EvalCalibrationSample.BOUNDARY_YES.caseId(),
                 ok(EvalCalibrationSample.BOUNDARY_YES, 2, EvalCalibrationSample.BOUNDARY_YES.reply()));
-        EvalCalibrationResult failed = new EvalCalibrationRunner(port, null).run(RUN_ID);
-        assertFalse(failed.boundaryPassed());
-
-        EvalCalibrationResult vetoed =
-                new EvalCalibrationResult(failed.runId(), failed.samples(), true);
+        EvalCalibrationResult vetoed = new EvalCalibrationRunner(port, null).run(RUN_ID);
         assertTrue(vetoed.boundaryVetoed());
         assertTrue(vetoed.boundaryPassed());
         assertTrue(vetoed.passed());
@@ -103,6 +100,38 @@ public class EvalCalibrationRunnerTest {
     }
 
     @Test
+    public void boundaryJitterBelowThresholdShouldWarnAndListFlippedCases() {
+        EvalCalibrationResult base = new EvalCalibrationRunner(new FakePort(), null).run(RUN_ID);
+        List<String> flipped = new ArrayList<String>();
+        flipped.add("case-1");
+        flipped.add("case-2");
+        EvalCalibrationResult jittered = base.withBoundaryJitter(true, 0.69d, flipped);
+        assertTrue(jittered.judgeJitterWarning());
+        assertEquals(0.69d, jittered.boundarySameRate(), 0.0001d);
+        assertEquals(flipped, jittered.flippedCaseIds());
+        assertFalse(jittered.passed());
+        String joined = joinWarnings(jittered);
+        assertTrue(joined.contains("抖动"));
+        assertTrue(joined.contains("69.0%"));
+        assertTrue(joined.contains("case-1"));
+        JSONObject json = jittered.toJson();
+        assertTrue(json.getBooleanValue("judgeJitterWarning"));
+        assertEquals(0.69d, json.getDoubleValue("boundarySameRate"), 0.0001d);
+        assertEquals("case-1", json.getJSONArray("flippedCases").getString(0));
+    }
+
+    @Test
+    public void boundaryJitterAtSeventyPercentShouldNotWarn() {
+        EvalCalibrationResult base = new EvalCalibrationRunner(new FakePort(), null).run(RUN_ID);
+        EvalCalibrationResult jittered =
+                base.withBoundaryJitter(false, 0.70d, new ArrayList<String>());
+        assertFalse(jittered.judgeJitterWarning());
+        assertEquals(0.70d, jittered.boundarySameRate(), 0.0001d);
+        assertTrue(jittered.passed());
+        assertTrue(jittered.warnings().isEmpty());
+    }
+
+    @Test
     public void invalidJudgeResultShouldFailGateAndWarn() {
         FakePort port = new FakePort().with(EvalCalibrationSample.MEMORY_REVERSED.caseId(),
                 EvalJudgeResult.invalid(EvalCalibrationSample.MEMORY_REVERSED.dimensionId(),
@@ -110,7 +139,9 @@ public class EvalCalibrationRunnerTest {
         EvalCalibrationResult result = new EvalCalibrationRunner(port, null).run(RUN_ID);
         assertFalse(result.passed());
         assertFalse(result.memoryPassed());
-        assertEquals(2, result.evidenceTotal());
+        assertEquals(3, result.evidenceTotal());
+        assertEquals(1, result.evidenceFailures());
+        assertEquals(1.0d / 3.0d, result.evidenceFailureRate(), 0.0001d);
         String joined = joinWarnings(result);
         assertTrue(joined.contains("记忆"));
         assertTrue(joined.contains("invalid"));
@@ -187,12 +218,14 @@ public class EvalCalibrationRunnerTest {
         assertTrue(parsed.getBooleanValue("personaPassed"));
         assertTrue(parsed.getBooleanValue("memoryPassed"));
         assertTrue(parsed.getBooleanValue("boundaryPassed"));
-        assertFalse(parsed.getBooleanValue("boundaryVetoed"));
+        assertTrue(parsed.getBooleanValue("boundaryVetoed"));
         assertEquals(0.0d, parsed.getDoubleValue("evidenceFailureRate"), 0.0001d);
         assertEquals(0, parsed.getIntValue("evidenceFailures"));
         assertEquals(3, parsed.getIntValue("evidenceTotal"));
         assertFalse(parsed.getBooleanValue("rubricSelfEvidenceWarning"));
         assertFalse(parsed.getBooleanValue("judgeJitterWarning"));
+        assertEquals(1.0d, parsed.getDoubleValue("boundarySameRate"), 0.0001d);
+        assertTrue(parsed.getJSONArray("flippedCases").isEmpty());
         assertEquals(3, parsed.getJSONArray("samples").size());
         JSONObject first = parsed.getJSONArray("samples").getJSONObject(0);
         String[] keys = {"caseId", "dimensionId", "state", "label", "scale", "evidence",
@@ -244,7 +277,13 @@ public class EvalCalibrationRunnerTest {
         private final Map<String, EvalJudgeResult> results = new HashMap<String, EvalJudgeResult>();
         private final Set<String> throwing = new HashSet<String>();
         private final Set<String> returningNull = new HashSet<String>();
+        private boolean vetoEnabled = true;
         private int calls;
+
+        FakePort withoutVeto() {
+            vetoEnabled = false;
+            return this;
+        }
 
         FakePort with(String caseId, EvalJudgeResult result) {
             results.put(caseId, result);
@@ -263,6 +302,24 @@ public class EvalCalibrationRunnerTest {
 
         int calls() {
             return calls;
+        }
+
+        @Override
+        public String boundaryVeto(String reply, String personaSummary) {
+            if (!vetoEnabled) {
+                return null;
+            }
+            return EvalVetoPrecheck.vetoReason(reply, null, false, personaSummary);
+        }
+
+        @Override
+        public String personaFragment() {
+            return "天童爱丽丝，千年科学学园游戏开发部成员";
+        }
+
+        @Override
+        public String personaSummary() {
+            return "天童爱丽丝，千年科学学园游戏开发部成员，以第三人称称呼自己，不承认是 AI 或助手";
         }
 
         @Override

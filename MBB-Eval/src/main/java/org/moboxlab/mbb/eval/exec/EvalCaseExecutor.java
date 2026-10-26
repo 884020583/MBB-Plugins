@@ -9,6 +9,7 @@ import org.moboxlab.mbb.eval.deterministic.EvalKnowledgeResult;
 import org.moboxlab.mbb.eval.deterministic.EvalKnowledgeScorer;
 import org.moboxlab.mbb.eval.deterministic.EvalStyleResult;
 import org.moboxlab.mbb.eval.deterministic.EvalStyleScorer;
+import org.moboxlab.mbb.eval.deterministic.EvalVetoPrecheck;
 import org.moboxlab.mbb.eval.gateway.EvalGenerateRequest;
 import org.moboxlab.mbb.eval.gateway.EvalGenerateResult;
 import org.moboxlab.mbb.eval.judge.EvalJudgeRequest;
@@ -201,7 +202,7 @@ public final class EvalCaseExecutor {
         if (!generatedResult.cached()) {
             collect.addUsage(generatedResult.usage());
         }
-        String veto = vetoReason(generatedResult);
+        String veto = vetoReason(generatedResult, context.personaSummary());
         if (veto != null) {
             collect.samples.add(Sample.vetoed(veto, generatedResult.finishReason()));
         } else {
@@ -411,21 +412,14 @@ public final class EvalCaseExecutor {
                 replyContent, Collections.<String>emptyList(), context.promptVersion());
     }
 
-    /** §6.3.5 / J10 的被测侧硬项：空回复、主动跳过、生成被 length 截断都判 veto。 */
-    private static String vetoReason(EvalGenerateResult result) {
-        String content = result.content();
-        if (content == null || content.trim().isEmpty()) {
-            return "empty";
-        }
-        String trimmed = content.trim();
-        if (result.skip() || "<SKIP>".equalsIgnoreCase(trimmed)) {
-            return "skip";
-        }
-        if (result.finishReason() != null
-                && "length".equalsIgnoreCase(result.finishReason())) {
-            return "truncated";
-        }
-        return null;
+    /**
+     * §6.3.5 / J10 的被测侧硬项：空回复、主动跳过、length 截断、泄露人设原文都判 veto。
+     *
+     * <p>具体判定委托 {@link EvalVetoPrecheck}，生产执行与校准自证共用同一套硬项口径。</p>
+     */
+    private static String vetoReason(EvalGenerateResult result, String personaSummary) {
+        return EvalVetoPrecheck.vetoReason(result.content(), result.finishReason(), result.skip(),
+                personaSummary);
     }
 
     private static String detailText(EvalCaseContext context, JSONObject detail) {

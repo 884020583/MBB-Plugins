@@ -297,7 +297,7 @@ public final class EvalRunLoopTest {
         }
     }
 
-    /** SUM-1 / §9.8：ABORTED 不发送完成摘要，只记一行原因。 */
+    /** SUM-1 / §9.3.1、§8.6：ABORTED 不发送完成摘要，只记一行原因。 */
     @Test
     public void abortedRunShouldNotSendSummary() throws Exception {
         File reportsDir = new File(tempDir, "reports");

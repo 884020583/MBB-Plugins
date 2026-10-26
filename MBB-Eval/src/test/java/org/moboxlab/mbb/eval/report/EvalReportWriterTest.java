@@ -234,6 +234,31 @@ public class EvalReportWriterTest {
     }
 
     @Test
+    public void calibrationJsonFlagsShouldRenderChineseWarningsAndTruncateFlippedCases() {
+        seedSnapshot();
+        StringBuilder flipped = new StringBuilder();
+        for (int i = 1; i <= 12; i++) {
+            if (flipped.length() > 0) {
+                flipped.append(',');
+            }
+            flipped.append('"').append(String.format("flip-%02d", Integer.valueOf(i))).append('"');
+        }
+        runSet(RUN, "calibration_json", "{\"passed\":false,"
+                + "\"rubricSelfEvidenceWarning\":true,\"judgeJitterWarning\":true,"
+                + "\"flippedCases\":[" + flipped + "]}");
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
+        String text = EvalReportWriter.render(data);
+
+        assertTrue(text.contains("rubric 不自证"));
+        assertTrue(text.contains("judge 抖动大"));
+        assertTrue(text.contains("翻转题：flip-01"));
+        assertTrue(text.contains("flip-10"));
+        assertFalse(text.contains("flip-11"));
+        assertTrue(text.contains("等 12 条"));
+        assertTrue(text.contains("校准未通过"));
+    }
+
+    @Test
     public void privacyFieldsShouldNotAppearInReport() {
         seedSnapshot();
         EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
