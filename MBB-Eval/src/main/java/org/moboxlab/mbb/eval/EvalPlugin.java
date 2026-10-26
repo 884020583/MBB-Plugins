@@ -1,10 +1,13 @@
 package org.moboxlab.mbb.eval;
 
+import java.lang.management.ManagementFactory;
+
 import org.moboxlab.moboxbot.API.Plugin;
 import org.moboxlab.moboxbot.API.Storage.StorageService;
 import org.moboxlab.mbb.eval.command.EvalCommand;
 import org.moboxlab.mbb.eval.config.EvalConfig;
 import org.moboxlab.mbb.eval.runner.EvalPreflight;
+import org.moboxlab.mbb.eval.runner.EvalRunRecovery;
 import org.moboxlab.mbb.eval.runner.EvalRunner;
 import org.moboxlab.mbb.eval.store.EvalSchemaService;
 import org.moboxlab.mbb.eval.store.EvalStore;
@@ -40,6 +43,7 @@ public class EvalPlugin extends Plugin {
         getLogger().sendInfo("[MBB-Eval] 配置已读取，共 " + EvalConfig.keys().size()
                 + " 项，默认档位 " + evalConfig.defaultTier());
         initStorage();
+        recoverOrphans();
         initRunner();
         getLogger().sendInfo("[MBB-Eval] 已启用，版本 " + getVersion());
     }
@@ -65,6 +69,33 @@ public class EvalPlugin extends Plugin {
         evalStore = new EvalStore(storage, getLogger());
         schemaReady = true;
         getLogger().sendInfo("[MBB-Eval] 数据表已就绪（4 表 / 7 索引）");
+    }
+
+    /**
+     * 启动期回收上次进程遗留的 RUNNING 行（§4.5、§13.5、ST10）。
+     *
+     * <p>判定依据是 started_at 早于本次进程启动时刻，而不是运行时长；只 CAS 成
+     * ABORTED(orphan)，不删 run 行、不删 case/call 行、不删报表。数据表未就绪或回收失败
+     * 只记 WARN，不影响插件启用。</p>
+     */
+    private void recoverOrphans() {
+        if (evalStore == null) {
+            return;
+        }
+        long processStartedAt;
+        try {
+            processStartedAt = ManagementFactory.getRuntimeMXBean().getStartTime();
+        } catch (RuntimeException e) {
+            processStartedAt = System.currentTimeMillis();
+            getLogger().sendWarn("[MBB-Eval] 读取进程启动时刻失败，孤儿回收改按当前时刻判定："
+                    + e.getMessage());
+        }
+        try {
+            new EvalRunRecovery(evalStore, getLogger(), processStartedAt).recoverOrphans();
+        } catch (RuntimeException e) {
+            getLogger().sendWarn("[MBB-Eval] 孤儿 RUNNING 行回收失败，留待下次启动重试："
+                    + e.getMessage());
+        }
     }
 
     /**
