@@ -1,7 +1,8 @@
 package org.moboxlab.mbb.eval.command;
 
 import org.moboxlab.mbb.eval.config.EvalConfig;
-import org.moboxlab.mbb.eval.runner.EvalPreflight;
+import org.moboxlab.mbb.eval.runner.EvalPreflightPlan;
+import org.moboxlab.mbb.eval.runner.EvalRunService;
 import org.moboxlab.mbb.eval.runner.EvalRunner;
 import org.moboxlab.mbb.eval.store.EvalStore;
 import org.moboxlab.moboxbot.API.Command.BotCommand;
@@ -21,6 +22,10 @@ import java.util.List;
  * <p>本切片（A-3）已实现 run / status / abort / help；report / list / baseline 三组只做权限判定后
  * 回「后续切片接入」，不静默假装成功。骨架期 /eval run 受理后只做占位执行（不读题库、
  * 不发起 AI 调用），用于验证受理—预检—终态落库与卸载中止路径（§16.2 A-3）。</p>
+ *
+ * <p>G-2 收敛受理回执：第二行直接取 {@link EvalPreflightPlan.Receipt#summary()}，重复 /eval run 只回当前
+ * runId 与进度并指向 /eval status、/eval abort；命令线程全程只调用一次 {@link EvalRunService}，不轮询、
+ * 不等待 run 结束、不发起任何 AI 调用（§9.3.1、§9.4、§9.7）。</p>
  */
 public final class EvalCommand extends BotCommand {
 
@@ -28,10 +33,11 @@ public final class EvalCommand extends BotCommand {
     /** 冷却秒数（§9.2）。 */
     private static final int COOLDOWN_SECONDS = 3;
 
-    private final EvalRunner runner;
+    /** 受理面：命令线程只通过这个接口委派，不直接持有执行细节（§9.4）。 */
+    private final EvalRunService runner;
     private final EvalConfig config;
 
-    public EvalCommand(EvalRunner runner, EvalConfig config) {
+    public EvalCommand(EvalRunService runner, EvalConfig config) {
         this.runner = runner;
         this.config = config;
     }
@@ -127,16 +133,16 @@ public final class EvalCommand extends BotCommand {
         switch (result.kind()) {
             case ACCEPTED:
                 sender.sendMessage(PREFIX + "已受理：" + result.runId());
-                sender.sendMessage(PREFIX + "题数 " + result.caseCount() + "（" + result.tier()
-                        + "）／预计调用 " + result.planned() + "/" + result.budgetLimit()
-                        + "／预计 " + EvalPreflight.estimatedMinutesLow(result.planned())
-                        + "-" + EvalPreflight.estimatedMinutesHigh(result.planned()) + " 分钟");
+                // 第二行整体取自预检计划的回执对象，命令层不重复计算题数、调用数与预计时长（§9.3.1）。
+                sender.sendMessage(PREFIX + EvalPreflightPlan.of(result.tier())
+                        .receipt(result.budgetLimit()).summary());
                 sender.sendMessage(PREFIX + "状态 /eval status；中止 /eval abort");
                 return;
             case BUSY:
-                sender.sendMessage(PREFIX + "已有进行中的评测：" + result.runId()
-                        + "；" + (result.message() == null ? "" : result.message() + "；")
-                        + (result.hint() == null ? "可 /eval status 查看进度" : result.hint()));
+                // §9.7：不排队、不新建行、不覆盖，只回当前 runId 与当前进度。
+                sender.sendMessage(PREFIX + "已在进行中：" + result.runId()
+                        + "，当前进度 " + (result.message() == null ? "未知" : result.message())
+                        + (result.hint() == null ? "；可发 /eval status 查看进度" : "；" + result.hint()));
                 return;
             case REJECTED:
                 sender.sendMessage(PREFIX + "预检失败"
