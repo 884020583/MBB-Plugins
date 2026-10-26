@@ -5,6 +5,9 @@ import org.moboxlab.mbb.eval.config.EvalConfig;
 import org.moboxlab.mbb.eval.store.EvalStore;
 import org.moboxlab.moboxbot.API.PluginLogger;
 
+import java.util.ArrayList;
+import java.util.Collections;
+import java.util.List;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.ThreadFactory;
@@ -117,6 +120,11 @@ public final class EvalRunner {
 
         public String hint() {
             return rejection == null ? null : rejection.hint();
+        }
+
+        /** 逐条明细（题库前 5 条错误等）；无明细时为空列表，供命令层原样回显。 */
+        public List<String> details() {
+            return rejection == null ? Collections.<String>emptyList() : rejection.details();
         }
     }
 

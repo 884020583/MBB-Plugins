@@ -89,18 +89,26 @@ public final class EvalPreflight {
         private final String message;
         private final String hint;
         private final Disposition disposition;
+        private final List<String> details;
 
         /** A-3 兼容构造：无阶段、按拒绝处理。 */
         public Rejection(String code, String message, String hint) {
-            this(null, code, message, hint, Disposition.REJECT);
+            this(null, code, message, hint, Disposition.REJECT, null);
         }
 
         public Rejection(Stage stage, String code, String message, String hint, Disposition disposition) {
+            this(stage, code, message, hint, disposition, null);
+        }
+
+        public Rejection(Stage stage, String code, String message, String hint, Disposition disposition,
+                List<String> details) {
             this.stage = stage;
             this.code = code;
             this.message = message;
             this.hint = hint;
             this.disposition = disposition == null ? Disposition.REJECT : disposition;
+            this.details = Collections.unmodifiableList(new ArrayList<String>(
+                    details == null ? Collections.<String>emptyList() : details));
         }
 
         /** 把阶段结论包装为拒绝；非 REJECT 结论不允许走这里。 */
@@ -108,7 +116,8 @@ public final class EvalPreflight {
             if (report == null || !report.isReject()) {
                 throw new IllegalArgumentException("只有 REJECT 结论才能生成拒绝回执");
             }
-            return new Rejection(stage, report.code(), report.message(), report.hint(), Disposition.REJECT);
+            return new Rejection(stage, report.code(), report.message(), report.hint(),
+                    Disposition.REJECT, report.details());
         }
 
         /** 命中的预检阶段；A-3 兼容构造返回 null。 */
@@ -130,6 +139,11 @@ public final class EvalPreflight {
 
         public Disposition disposition() {
             return disposition;
+        }
+
+        /** 逐条明细（题库前 5 条错误等）；无明细时为空列表。 */
+        public List<String> details() {
+            return details;
         }
     }
 
