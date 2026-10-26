@@ -3,6 +3,7 @@ package org.moboxlab.mbb.roleplay;
 import org.moboxlab.moboxbot.API.Plugin;
 
 import java.util.Locale;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 /**
  * MBB-Roleplay 配置
@@ -267,6 +268,9 @@ public class RoleplayConfig {
     public boolean traceEnable = true;
     public int traceKeepHours = 72;
     public int traceMaxRows = 2000;
+    /** 评测接口总开关（正式键）：是否允许 MBB-Eval 通过 capabilities / eval-generate 调用 */
+    public boolean evalApiEnable = true;
+    /** 已废弃：等价于 evalApiEnable，下个小版本停止读取；仅为旧配置与 /role eval 保留读取 */
     public boolean evalEnable = true;
     public String evalProfile = "";
     public int evalMaxTokens = 1200;
@@ -319,6 +323,29 @@ public class RoleplayConfig {
     public int randomTickTimeoutSecond = 90;
     public String randomTickReasoningEffort = "low";
     public String commandPrefixes = "/,!,＃,#";
+
+    /** 旧键废弃 WARN 的进程级一次性标记 */
+    private static final AtomicBoolean LEGACY_EVAL_ENABLE_WARNED = new AtomicBoolean(false);
+
+    /**
+     * 评测接口是否放行：正式键 evalApiEnable 与旧键 evalEnable 为 AND 关系，任一为 false 即关闭。
+     */
+    public boolean evalApiAllowed() {
+        return evalApiEnable && evalEnable;
+    }
+
+    /**
+     * 判断本次配置加载是否需要发送旧键废弃 WARN；同一进程只返回一次 true。
+     * 旧键不存在时不消耗这次机会，避免模板尚未补键时误报。
+     */
+    static boolean warnLegacyEvalEnableOnce(boolean legacyKeyPresent) {
+        return legacyKeyPresent && LEGACY_EVAL_ENABLE_WARNED.compareAndSet(false, true);
+    }
+
+    /** 测试入口：复位一次性 WARN 标记，便于重复验证。 */
+    static void resetLegacyEvalEnableWarning() {
+        LEGACY_EVAL_ENABLE_WARNED.set(false);
+    }
 
     private static double parseDouble(String value,double defaultValue) {
         try {
@@ -698,7 +725,13 @@ public class RoleplayConfig {
         config.traceEnable = plugin.getConfig().getBoolean("traceEnable",true);
         config.traceKeepHours = plugin.getConfig().getInt("traceKeepHours",72);
         config.traceMaxRows = plugin.getConfig().getInt("traceMaxRows",2000);
+        // 旧键 evalEnable 仅在用户配置显式存在时提示一次，缺键时不消耗这一次机会
+        boolean legacyEvalEnablePresent = plugin.getConfig().contains("evalEnable");
+        config.evalApiEnable = plugin.getConfig().getBoolean("evalApiEnable",true);
         config.evalEnable = plugin.getConfig().getBoolean("evalEnable",true);
+        if (warnLegacyEvalEnableOnce(legacyEvalEnablePresent)) {
+            plugin.getLogger().sendWarn("[角色] evalEnable 已废弃，下个小版本停止读取");
+        }
         config.evalProfile = plugin.getConfig().getString("evalProfile","");
         config.evalMaxTokens = plugin.getConfig().getInt("evalMaxTokens",1200);
         config.evalTimeoutSecond = plugin.getConfig().getInt("evalTimeoutSecond",60);

@@ -457,7 +457,9 @@ traceEnable: true
 traceKeepHours: 72
 #trace 最大保留行数
 traceMaxRows: 2000
-#是否允许 /role eval 运行内置评测集
+#是否允许 MBB-Eval 通过 capabilities / eval-generate 调用评测接口（评测接口正式开关）
+evalApiEnable: true
+#已废弃，等价于 evalApiEnable：是否允许 /role eval 运行内置评测集，下个小版本停止读取
 evalEnable: true
 #评测使用的模型配置名，留空使用 aiProfile
 evalProfile: ""

@@ -37,7 +37,7 @@ public class RoleplayEvalService {
 
     public JSONObject run(String id) {
         if (!service.config().evalEnable) {
-            return result(false,id,"评测功能未启用","");
+            return result(false,id,"评测功能未启用（evalEnable 已废弃，等价于 evalApiEnable）","");
         }
         JSONObject test = findCase(id);
         if (test == null) return result(false,id,"没有找到评测用例","");
