@@ -27,10 +27,10 @@ public class EvalBankIdentityTest {
     private static final String BANK_FILE_NAME = "bank-1.0.0.json";
 
     /** bank-1.0.0.json 全文件 sha256 前 12 位（§5.2.4 bank_hash 口径）。 */
-    private static final String FROZEN_BANK_HASH = "3e664cf78c0c";
+    private static final String FROZEN_BANK_HASH = "83e4455b7585";
 
     /** persona-aris.json 全文件 sha256 前 12 位（§5.2.1 persona.personaHash 口径）。 */
-    private static final String FROZEN_PERSONA_HASH = "719b9b10ea99";
+    private static final String FROZEN_PERSONA_HASH = "19e6d6be6d99";
 
     @Test
     public void sha256HexShouldMatchKnownVectors() {
@@ -46,8 +46,8 @@ public class EvalBankIdentityTest {
 
     @Test
     public void firstNShouldTruncateHexForComparison() {
-        String hex = "3e664cf78c0ca886a50126cebff1e458ccca264ea9bcde141c72bfb716ba5eb9";
-        assertEquals("前 12 位应与 §5.2.4 口径一致", "3e664cf78c0c", EvalHashUtil.firstN(hex, 12));
+        String hex = "83e4455b7585a886a50126cebff1e458ccca264ea9bcde141c72bfb716ba5eb9";
+        assertEquals("前 12 位应与 §5.2.4 口径一致", "83e4455b7585", EvalHashUtil.firstN(hex, 12));
         assertEquals("位数不足时原样返回", "3e66", EvalHashUtil.firstN("3e66", 12));
         assertEquals("长度为 0 时返回空串", "", EvalHashUtil.firstN(hex, 0));
         assertEquals("null 输入返回空串", "", EvalHashUtil.firstN(null, 12));
@@ -98,7 +98,7 @@ public class EvalBankIdentityTest {
 
     @Test
     public void identityShouldAcceptDeclaredHashAndIgnoreBom() throws Exception {
-        String body = "{\"schemaVersion\":1,\"version\":\"1.0.0\",\"hash\":\"3e664cf78c0c\","
+        String body = "{\"schemaVersion\":1,\"version\":\"1.0.0\",\"hash\":\"83e4455b7585\","
                 + "\"persona\":{\"file\":\"persona-aris.json\",\"personaHash\":\"719b9b10ea99\"},\"cases\":[]}";
         byte[] plain = body.getBytes(StandardCharsets.UTF_8);
         byte[] withBom = new byte[plain.length + 3];
@@ -111,7 +111,7 @@ public class EvalBankIdentityTest {
         EvalBankIdentity bom = EvalBankIdentity.parse(withBom);
         assertNotNull("无 BOM 应能解析", noBom);
         assertNotNull("带 BOM 应能解析", bom);
-        assertEquals("声明 hash 应原样暴露", "3e664cf78c0c", noBom.bankHash());
+        assertEquals("声明 hash 应原样暴露", "83e4455b7585", noBom.bankHash());
         assertEquals("BOM 与无 BOM 的 computedHash 必须同值", noBom.computedHash(), bom.computedHash());
         assertEquals("BOM 与无 BOM 的 personaHash 必须同值", noBom.personaHash(), bom.personaHash());
         assertTrue("computedHash 应为 12 位小写十六进制：" + bom.computedHash(),

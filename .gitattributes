@@ -1,0 +1,3 @@
+# 资源 JSON 统一使用 LF 行尾：bank/persona 的 sha256 需与打包字节跨平台一致（规格 §5.2.4）
+MBB-Eval/src/main/resources/bank/*.json text eol=lf
+MBB-Roleplay/src/main/resources/persona-*.json text eol=lf

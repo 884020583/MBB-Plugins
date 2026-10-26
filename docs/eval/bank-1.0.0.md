@@ -9,13 +9,13 @@
 | 文件 | `MBB-Eval/src/main/resources/bank/bank-1.0.0.json` |
 | 大小 | 37589 字节（上限 512 KB） |
 | 编码 | UTF-8，无 BOM |
-| sha256 | `1457065025ecb73e79b4cfaee9835a422b71cca87ee4ef8577ad5bf18a6dc297` |
-| bank_hash | `1457065025ec`（加载器按原始字节 sha256 取前 12 位，见规格 §5.6.2） |
+| sha256 | `83e4455b7585ba037825db35976b3e197c91cee11198acbaba1fdf946e39518a` |
+| bank_hash | `83e4455b7585`（加载器按原始字节 sha256 取前 12 位，见规格 §5.6.2） |
 | schemaVersion | 1 |
 | version | 1.0.0（与文件名一致） |
 | 用例数 | 40（persona 12、style 8、knowledge 8、boundary 6、memory 6） |
 | smoke | 12 条，覆盖五维与 choice、points 两种知识模式 |
-| persona 绑定 | `persona-aris.json`，personaHash `719b9b10ea99`（角色文件 sha256 前 12 位） |
+| persona 绑定 | `persona-aris.json`，personaHash `19e6d6be6d99`（角色文件 sha256 前 12 位） |
 | persona.summary | 150 码点（1–400） |
 | meta | title=MBB-Roleplay v1 基础题库；description=群聊回复效果评测固定题库，40 条，覆盖人设、风格、知识、边界、记忆五维。 |
 
