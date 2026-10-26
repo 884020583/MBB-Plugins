@@ -38,6 +38,9 @@ public class RoleplayPublicService implements PluginService {
         if (RoleplayEvalGateway.ACTION_CAPABILITIES.equalsIgnoreCase(action)) {
             return service.evalGateway().capabilities();
         }
+        if (RoleplayEvalGateway.ACTION_EVAL_GENERATE.equalsIgnoreCase(action)) {
+            return service.evalGateway().evalGenerate(params);
+        }
         if ("identity".equalsIgnoreCase(action)) {
             JSONObject result = new JSONObject(true);
             RoleplayPersona persona = service.persona();
