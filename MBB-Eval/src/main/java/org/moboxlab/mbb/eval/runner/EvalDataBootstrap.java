@@ -12,6 +12,8 @@ import org.moboxlab.mbb.eval.bank.EvalBankReleaser;
 import org.moboxlab.mbb.eval.bank.EvalBankReleaseResult;
 import org.moboxlab.mbb.eval.bank.EvalBankResources;
 import org.moboxlab.mbb.eval.bank.EvalBankValidator;
+import org.moboxlab.mbb.eval.bank.EvalRubricReleaseResult;
+import org.moboxlab.mbb.eval.bank.EvalRubricReleaser;
 import org.moboxlab.mbb.eval.rubric.EvalRubric;
 import org.moboxlab.mbb.eval.rubric.EvalRubricCache;
 import org.moboxlab.moboxbot.API.PluginLogger;
@@ -33,16 +35,18 @@ public final class EvalDataBootstrap {
 
     private final EvalBankLocation location;
     private final EvalBankReleaseResult release;
+    private final EvalRubricReleaseResult rubricRelease;
     private final EvalRubricCache rubric;
     private final EvalBankCache bank;
     private final String pinFileName;
     private final List<String> warnings;
 
     private EvalDataBootstrap(EvalBankLocation location, EvalBankReleaseResult release,
-            EvalRubricCache rubric, EvalBankCache bank, String pinFileName,
-            List<String> warnings) {
+            EvalRubricReleaseResult rubricRelease, EvalRubricCache rubric, EvalBankCache bank,
+            String pinFileName, List<String> warnings) {
         this.location = location;
         this.release = release;
+        this.rubricRelease = rubricRelease;
         this.rubric = rubric;
         this.bank = bank;
         this.pinFileName = pinFileName == null ? "" : pinFileName;
@@ -66,6 +70,22 @@ public final class EvalDataBootstrap {
     public static EvalDataBootstrap load(File dataFolder, String bankFile, String promptVersion,
             String personaId, String personaHash, boolean allowMismatch,
             EvalBankResources resources, PluginLogger logger) {
+        // 旧调用方只释放题库；rubric 释放由 R-1 的新重载显式传入资源读取器后启用。
+        return load(dataFolder, bankFile, promptVersion, personaId, personaHash, allowMismatch,
+                resources, null, logger);
+    }
+
+    /**
+     * 装配 onEnable 所需的题库与 rubric 缓存，并在 rubric 缺失时释放内置 rubric（R-1）。
+     *
+     * <p>顺序按 §5.8：定位目录 → 题库缺失时释放 → rubric 缺失时释放 → 加载 rubric。
+     * rubric 释放只影响 onEnable 的日志与预检结果，不抛异常。</p>
+     *
+     * @param rubricResources 内置 rubric 资源读取器；为 null 时跳过 rubric 释放
+     */
+    public static EvalDataBootstrap load(File dataFolder, String bankFile, String promptVersion,
+            String personaId, String personaHash, boolean allowMismatch,
+            EvalBankResources resources, EvalBankResources rubricResources, PluginLogger logger) {
         List<String> warnings = new ArrayList<String>();
 
         // §5.8.1：先定位并（仅在缺失时）释放内置题库，确保首次启动时 evals 目录已就绪；
@@ -89,6 +109,20 @@ public final class EvalDataBootstrap {
             if (!pinFileName.isEmpty()) {
                 effective = EvalBankLocator.locate(dataFolder, pinFileName,
                         EvalBankLocator.BUILTIN_BANK_VERSION);
+            }
+        }
+
+        EvalRubricReleaseResult rubricRelease = null;
+        if (rubricResources != null) {
+            // §5.8.1：rubric 也只在缺失时释放；已存在任何版本的 rubric 一律不覆盖、不删除、不改写。
+            rubricRelease = EvalRubricReleaser.release(effective, rubricResources, logger);
+            if (rubricRelease.released()) {
+                info(logger, "内置 rubric 已释放并进入完整性校验："
+                        + absolute(rubricRelease.rubricFile()) + "，version="
+                        + EvalRubricReleaser.BUILTIN_RUBRIC_VERSION);
+            } else if (rubricRelease.failed()) {
+                warnings.add("内置 rubric 释放失败（" + rubricRelease.errorCode() + "）："
+                        + rubricRelease.message());
             }
         }
 
@@ -123,7 +157,8 @@ public final class EvalDataBootstrap {
             }
         }
 
-        return new EvalDataBootstrap(location, release, rubric, bank, pinFileName, warnings);
+        return new EvalDataBootstrap(location, release, rubricRelease, rubric, bank, pinFileName,
+                warnings);
     }
 
     private static EvalBankValidator.Options options(EvalBankLocation location,
@@ -185,6 +220,11 @@ public final class EvalDataBootstrap {
 
     public EvalBankReleaseResult release() {
         return release;
+    }
+
+    /** 内置 rubric 的释放结果；未启用 rubric 释放时为 null。 */
+    public EvalRubricReleaseResult rubricRelease() {
+        return rubricRelease;
     }
 
     public EvalRubricCache rubric() {
