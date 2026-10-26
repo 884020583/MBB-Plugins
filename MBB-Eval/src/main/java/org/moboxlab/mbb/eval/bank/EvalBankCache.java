@@ -13,6 +13,8 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.parser.Feature;
 
+import org.moboxlab.mbb.eval.store.EvalStore;
+
 /**
  * onEnable 期一次性加载的题库缓存（B-5）。
  *
@@ -308,7 +310,7 @@ public final class EvalBankCache {
             Object item = cases.get(i);
             if (item instanceof JSONObject) {
                 Object tier = ((JSONObject) item).get("tier");
-                if ("smoke".equals(tier)) {
+                if (EvalStore.TIER_SMOKE.equals(tier)) {
                     smoke++;
                 }
             }

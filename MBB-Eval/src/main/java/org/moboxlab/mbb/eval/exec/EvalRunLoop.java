@@ -14,6 +14,7 @@ import org.moboxlab.mbb.eval.call.EvalCallInvoker;
 import org.moboxlab.mbb.eval.call.EvalCallPolicy;
 import org.moboxlab.mbb.eval.call.EvalCallRecorder;
 import org.moboxlab.mbb.eval.config.EvalConfig;
+import org.moboxlab.mbb.eval.log.EvalLog;
 import org.moboxlab.mbb.eval.metrics.EvalAiUsageSource;
 import org.moboxlab.mbb.eval.report.EvalReportData;
 import org.moboxlab.mbb.eval.rubric.EvalRubric;
@@ -43,8 +44,6 @@ public final class EvalRunLoop {
         ABORTED
     }
 
-    /** 单题默认采样次数（§6.2：persona/boundary/memory 各采样 3 次取中位数）。 */
-    private static final int DEFAULT_SAMPLE_COUNT = 3;
     /** 摘要文本的最大行数（§16.7：回执摘要不超过 15 行）。 */
     private static final int SUMMARY_MAX_LINES = 15;
 
@@ -362,10 +361,17 @@ public final class EvalRunLoop {
             try {
                 result = executor.execute(context(request, caseJson, ledger, invoker, clock));
             } catch (RuntimeException e) {
-                warn("单题执行异常，run_id=" + request.runId() + "，题号=" + caseJson.getString("id")
-                        + "：" + e.getMessage());
-                abortReason = "case-error";
-                break;
+                EvalLog.error(deps.logger, "[MBB-Eval] 单题执行异常，run_id=" + request.runId()
+                        + "，题号=" + caseJson.getString("id") + "：" + e.getMessage());
+                // 单题异常不发明中止原因（§13.1.3 原因集合封闭）：记入 error 题分后继续下一题。
+                String caseId = caseJson.getString("id");
+                String dimension = caseJson.getString("dimension");
+                if (caseId != null && !caseId.trim().isEmpty()
+                        && dimension != null && !dimension.trim().isEmpty()) {
+                    executed++;
+                    scores.add(EvalCaseScore.error(caseId, dimension));
+                }
+                continue;
             }
             if (result != null) {
                 if (result.status() != null) {
@@ -396,7 +402,7 @@ public final class EvalRunLoop {
         List<String> summary = summary(request, selected.size(), executed, budget, evaluation,
                 completed, abortReason);
         return new Result(request.runId(), completed ? Status.COMPLETED : Status.ABORTED,
-                completed ? null : (abortReason == null ? "aborted" : abortReason), terminalInStore,
+                completed || terminalInStore ? null : normalize(abortReason), terminalInStore,
                 evaluation == null ? null : evaluation.score, selected.size(), executed,
                 budget.used(), summary, deps.reportWeights(), deps.aiUsageSource());
     }
@@ -448,7 +454,7 @@ public final class EvalRunLoop {
                 .clock(clock)
                 .logger(deps.logger)
                 .stopPoint(request.stopPoint())
-                .sampleCount(DEFAULT_SAMPLE_COUNT)
+                .sampleCount(sampleCountOf(caseJson.getString("dimension")))
                 .personaSummary(personaSummary())
                 .generateProfile(profile(config))
                 .generateTimeoutSeconds(config == null ? 60 : config.timeoutSecond())
@@ -522,8 +528,8 @@ public final class EvalRunLoop {
         List<String> lines = new ArrayList<String>();
         lines.add("档位 " + request.tier() + "：计划 " + plannedCases + " 题，执行 " + executed + " 题");
         lines.add("调用 " + budget.used() + "/" + budget.limit() + "（预检计划 " + budget.planned() + "）");
-        lines.add(completed ? "状态：COMPLETED" : "状态：ABORTED("
-                + (abortReason == null ? "aborted" : abortReason) + ")");
+        lines.add(completed ? "状态：COMPLETED"
+                : (abortReason == null ? "状态：ABORTED" : "状态：ABORTED(" + abortReason + ")"));
         if (evaluation != null && evaluation.score != null && evaluation.score.total() != null) {
             lines.add("总分 " + format(evaluation.score.total().doubleValue()));
         } else {
@@ -561,8 +567,27 @@ public final class EvalRunLoop {
         return String.format(java.util.Locale.ROOT, "%.1f", Double.valueOf(value));
     }
 
-    private static String normalize(String reason) {
-        return reason == null || reason.trim().isEmpty() ? "aborted" : reason;
+    /**
+     * 把中止原因收敛到 §13.1.3 的封闭集合；缺失或越界一律按 ai-unavailable 记录并 WARN。
+     */
+    private String normalize(String reason) {
+        if (reason == null || reason.trim().isEmpty()) {
+            return EvalStore.ABORT_REASON_AI_UNAVAILABLE;
+        }
+        if (EvalStore.ABORT_REASON_USER.equals(reason) || EvalStore.ABORT_REASON_BUDGET.equals(reason)
+                || EvalStore.ABORT_REASON_DEADLINE.equals(reason)
+                || EvalStore.ABORT_REASON_AI_UNAVAILABLE.equals(reason)
+                || EvalStore.ABORT_REASON_ORPHAN.equals(reason)
+                || EvalStore.ABORT_REASON_SHUTDOWN.equals(reason)) {
+            return reason;
+        }
+        warn("中止原因不在封闭集合内（" + reason + "），按 " + EvalStore.ABORT_REASON_AI_UNAVAILABLE + " 记录");
+        return EvalStore.ABORT_REASON_AI_UNAVAILABLE;
+    }
+
+    /** 各维度的采样次数（§6.7.1）：只有 boundary 采三次，其余维度一次。 */
+    private static int sampleCountOf(String dimension) {
+        return "boundary".equals(dimension) ? EvalCaseContext.DEFAULT_SAMPLE_COUNT : 1;
     }
 
     private void warn(String message) {

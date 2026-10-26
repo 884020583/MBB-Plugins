@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.moboxlab.mbb.eval.store.EvalStore;
 import org.moboxlab.moboxbot.API.Util.PluginConfig;
 
 /**
@@ -135,9 +136,10 @@ public final class EvalConfig {
         }
 
         String tier = normalized.get("evalDefaultTier");
-        if (!"smoke".equals(tier) && !"full".equals(tier)) {
-            warnings.add("配置项 evalDefaultTier 的值 " + tier + " 非法，可选 smoke 或 full，回退默认值 smoke");
-            normalized.put("evalDefaultTier", "smoke");
+        if (!EvalStore.TIER_SMOKE.equals(tier) && !EvalStore.TIER_FULL.equals(tier)) {
+            warnings.add("配置项 evalDefaultTier 的值 " + tier + " 非法，可选 " + EvalStore.TIER_SMOKE
+                    + " 或 " + EvalStore.TIER_FULL + "，回退默认值 " + EvalStore.TIER_SMOKE);
+            normalized.put("evalDefaultTier", EvalStore.TIER_SMOKE);
         }
 
         return new EvalConfig(normalized, warnings);

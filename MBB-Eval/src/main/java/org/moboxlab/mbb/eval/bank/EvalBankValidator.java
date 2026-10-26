@@ -24,6 +24,8 @@ import com.alibaba.fastjson.JSONArray;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.parser.Feature;
 
+import org.moboxlab.mbb.eval.store.EvalStore;
+
 /**
  * 题库校验器（规格 §5.7，切片 B-3）。
  *
@@ -57,7 +59,8 @@ public final class EvalBankValidator {
 
     private static final List<String> DIMENSIONS = Collections.unmodifiableList(Arrays.asList(
             "persona", "style", "knowledge", "boundary", "memory"));
-    private static final List<String> TIERS = Collections.unmodifiableList(Arrays.asList("smoke", "full"));
+    private static final List<String> TIERS = Collections.unmodifiableList(Arrays.asList(
+            EvalStore.TIER_SMOKE, EvalStore.TIER_FULL));
     private static final List<String> SOURCES = Collections.unmodifiableList(Arrays.asList(
             "handcrafted", "persona", "chat"));
     private static final List<String> SPEAKERS = Collections.unmodifiableList(Arrays.asList(

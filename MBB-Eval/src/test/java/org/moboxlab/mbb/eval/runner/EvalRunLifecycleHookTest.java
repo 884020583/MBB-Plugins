@@ -286,6 +286,54 @@ public class EvalRunLifecycleHookTest {
         }
     }
 
+    /** §8.2：受理建行即写九键快照；缺生产者的键写空串并逐键 WARN，不阻断受理。 */
+    @Test
+    public void acceptShouldPersistNineKeysSnapshotAndWarnMissingValues() {
+        EvalRunner snapshotRunner = new EvalRunner(store, EvalConfig.load(null), null, logger,
+                "V0.1.0.0.1824", null, new EvalRunSnapshotSource() {
+                    @Override
+                    public JSONObject snapshot() {
+                        JSONObject row = new JSONObject();
+                        row.put("bank_file", "bank.json");
+                        row.put("bank_version", "1.0.0");
+                        row.put("bank_hash", "abc123456789");
+                        row.put("persona_id", "p-1");
+                        row.put("persona_version", "V3");
+                        row.put("persona_hash", "hash-1");
+                        row.put("rubric_version", "r-1");
+                        row.put("config_fingerprint", "cfg-1");
+                        row.put("eval_profile", "default");
+                        row.put("judge_profile", "judge-default");
+                        row.put("eval_api_version", "2");
+                        return row;
+                    }
+                }, null);
+        try {
+            EvalRunner.AcceptResult accepted = snapshotRunner.accept(EvalStore.TIER_SMOKE);
+            assertEquals(EvalRunner.AcceptKind.ACCEPTED, accepted.kind());
+            JSONObject saved = store.findRun(accepted.runId());
+            assertNotNull(saved);
+            String[] keys = {"bank_file", "bank_version", "bank_hash", "persona_id",
+                    "persona_version", "persona_hash", "rubric_version", "config_fingerprint",
+                    "eval_profile", "judge_profile", "eval_api_version", "judge_model",
+                    "generation_model", "sample_k", "baseline_id_at_run"};
+            for (String key : keys) {
+                assertNotNull("受理行缺列：" + key, saved.getString(key));
+            }
+            assertEquals("bank.json", saved.getString("bank_file"));
+            assertEquals("abc123456789", saved.getString("bank_hash"));
+            assertEquals("V3", saved.getString("persona_version"));
+            assertEquals("1", saved.getString("sample_k"));
+            assertEquals("缺生产者的模型名写空串", "", saved.getString("judge_model"));
+            assertEquals("缺生产者的模型名写空串", "", saved.getString("generation_model"));
+            assertEquals("无激活基线写空串", "", saved.getString("baseline_id_at_run"));
+            assertTrue("缺键必须留 WARN：" + logger.warns(), anyWarningContains("judge_model 未取得"));
+            assertTrue("缺键必须留 WARN：" + logger.warns(), anyWarningContains("generation_model 未取得"));
+        } finally {
+            snapshotRunner.shutdown();
+        }
+    }
+
     private JSONObject runRow(String runId, String startedAt) {
         JSONObject row = new JSONObject();
         row.put("run_id", runId);

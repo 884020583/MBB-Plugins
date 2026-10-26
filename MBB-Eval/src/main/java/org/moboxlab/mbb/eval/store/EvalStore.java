@@ -41,6 +41,10 @@ public final class EvalStore {
     public static final String ABORT_REASON_DEADLINE = "deadline";
     /** 插件卸载。 */
     public static final String ABORT_REASON_SHUTDOWN = "shutdown";
+    /** AI 不可用（生成或判分熔断）。 */
+    public static final String ABORT_REASON_AI_UNAVAILABLE = "ai-unavailable";
+    /** 孤儿 RUNNING 行回收。 */
+    public static final String ABORT_REASON_ORPHAN = "orphan";
 
     /** smoke 档。 */
     public static final String TIER_SMOKE = "smoke";

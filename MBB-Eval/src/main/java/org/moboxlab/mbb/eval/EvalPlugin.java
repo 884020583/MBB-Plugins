@@ -5,6 +5,8 @@ import java.lang.management.ManagementFactory;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
+import com.alibaba.fastjson.JSONObject;
+
 import org.moboxlab.moboxbot.API.Plugin;
 import org.moboxlab.moboxbot.API.Storage.StorageService;
 import org.moboxlab.mbb.eval.bank.EvalBankCache;
@@ -35,6 +37,7 @@ import org.moboxlab.mbb.eval.runner.EvalPreflight;
 import org.moboxlab.mbb.eval.runner.EvalPreflightSources.CapabilitiesStatusSource;
 import org.moboxlab.mbb.eval.runner.EvalPreflightSources.ConfigJudgeProfileSource;
 import org.moboxlab.mbb.eval.runner.EvalRunRecovery;
+import org.moboxlab.mbb.eval.runner.EvalRunSnapshotSource;
 import org.moboxlab.mbb.eval.runner.EvalRunner;
 import org.moboxlab.mbb.eval.runner.EvalStageSources;
 import org.moboxlab.mbb.eval.score.EvalDimensionWeights;
@@ -229,8 +232,9 @@ public class EvalPlugin extends Plugin {
         }
         EvalPreflight preflight = builder.build();
         runLoop = buildRunLoop(boundary.reportsDirectory());
-        evalRunner = new EvalRunner(evalStore, evalConfig, preflight, getLogger(), getVersion(), runLoop);
         EvalBaselineService baselineService = buildBaselineService();
+        evalRunner = new EvalRunner(evalStore, evalConfig, preflight, getLogger(), getVersion(), runLoop,
+                snapshotSource(), baselineService);
         getServer().getPluginManager().registerCommand(this, new EvalCommand(
                 evalRunner, evalConfig, evalStore, baselineService, bankCache, boundary.reportsDirectory()));
         getLogger().sendInfo("[MBB-Eval] 已注册 /eval 命令（run 已接入主循环"
@@ -281,7 +285,53 @@ public class EvalPlugin extends Plugin {
     }
 
     /**
-     * 报表 delta 用的五维权重（§6.1）：只取 rubric 文件定义值，失败返回 null 由报表回退缺省权重。
+     * 受理时的九键快照来源（§8.2）。
+     *
+     * <p>只读现有缓存与 capabilities 快照，不发起 AI 调用、不读库；取不到就返回 null 或缺键，
+     * 由 {@link EvalRunner} 补空串并逐键 WARN。judge_model / generation_model 当前没有生产者，
+     * 刻意不填，报表按数据缺失标注。</p>
+     */
+    private EvalRunSnapshotSource snapshotSource() {
+        return new EvalRunSnapshotSource() {
+            @Override
+            public JSONObject snapshot() {
+                try {
+                    JSONObject row = new JSONObject();
+                    if (evalConfig != null) {
+                        row.put("bank_file", evalConfig.bankFile());
+                        row.put("eval_profile", evalConfig.profile());
+                        row.put("judge_profile", evalConfig.judgeProfile());
+                    }
+                    if (bankCache != null && bankCache.ok()) {
+                        row.put("bank_version", bankCache.version());
+                        row.put("bank_hash", bankCache.bankHash());
+                    }
+                    if (rubricCache != null && rubricCache.ok()) {
+                        row.put("rubric_version", rubricCache.rubric().version());
+                    }
+                    if (capabilitiesSource != null) {
+                        EvalCapabilityClient.Snapshot snapshot = capabilitiesSource.snapshot();
+                        if (snapshot != null) {
+                            row.put("persona_id", snapshot.personaId());
+                            row.put("persona_hash", snapshot.personaHash());
+                            row.put("config_fingerprint", snapshot.configFingerprint());
+                            row.put("eval_profile", snapshot.evalProfile());
+                            int apiVersion = snapshot.evalApiVersion();
+                            row.put("eval_api_version", apiVersion < 0 ? "" : String.valueOf(apiVersion));
+                        }
+                    }
+                    return row;
+                } catch (RuntimeException e) {
+                    getLogger().sendWarn("[MBB-Eval] 采集运行快照失败，九键按缺失落库："
+                            + e.getMessage());
+                    return null;
+                }
+            }
+        };
+    }
+
+    /**
+     * 报表 delta 用的五维权重（§6.1）：只取 rubric 文件定义值，失败返回 null 由报表标注权重缺失。
      */
     private Map<String, Double> reportWeights() {
         if (rubricCache == null || !rubricCache.ok()) {
@@ -295,7 +345,7 @@ public class EvalPlugin extends Plugin {
             }
             return map;
         } catch (RuntimeException e) {
-            getLogger().sendWarn("[MBB-Eval] rubric 权重不可用，报表 delta 回退缺省权重："
+            getLogger().sendWarn("[MBB-Eval] rubric 权重不可用，报表将标注权重缺失、总分与 delta 不计算："
                     + e.getMessage());
             return null;
         }

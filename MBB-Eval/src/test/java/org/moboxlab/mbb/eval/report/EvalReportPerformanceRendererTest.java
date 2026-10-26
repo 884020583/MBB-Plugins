@@ -55,7 +55,7 @@ public class EvalReportPerformanceRendererTest {
             seedCall(RUN, "case-" + (i + 1), "gen", "ok", 0, 0,
                     Integer.valueOf(50), Long.valueOf(3200L + i * 400L));
         }
-        EvalReportData data = EvalReportData.assemble(store, RUN);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
         String text = EvalReportPerformanceRenderer.render(data);
 
         assertTrue(text.startsWith("## 7. 性能\n"));
@@ -85,7 +85,7 @@ public class EvalReportPerformanceRendererTest {
             seedCall(RUN, "case-" + (i + 1), "gen", "ok", 0, 0,
                     Integer.valueOf(100), Long.valueOf((i + 1) * 1000L));
         }
-        String text = EvalReportPerformanceRenderer.render(EvalReportData.assemble(store, RUN));
+        String text = EvalReportPerformanceRenderer.render(EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null));
 
         assertTrue(text.contains("- 生成延迟：n=20；mean 10.5 秒；p50 10.0 秒；"
                 + "p90 18.0 秒；max 20.0 秒"));
@@ -123,7 +123,7 @@ public class EvalReportPerformanceRendererTest {
     @Test
     public void emptyRunShouldReportUnavailableThroughputAndOverhead() {
         seedRun(RUN, 0, 720000L);
-        String text = EvalReportPerformanceRenderer.render(EvalReportData.assemble(store, RUN));
+        String text = EvalReportPerformanceRenderer.render(EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null));
 
         assertTrue(text.contains("- 生成延迟：数据缺失（无样本）"));
         assertTrue(text.contains("- 输出吞吐：数据缺失（无成功样本）"));
@@ -139,7 +139,7 @@ public class EvalReportPerformanceRendererTest {
         seedRun(CACHED_RUN, 1, 10000L);
         seedCall(CACHED_RUN, "case-1", "gen", "ok", 1, 0, Integer.valueOf(50), Long.valueOf(1000L));
 
-        EvalReportData data = EvalReportData.assemble(store, CACHED_RUN);
+        EvalReportData data = EvalReportData.assemble(store, CACHED_RUN, TestReportWeights.map(), null, null);
         List<String> warnings = EvalReportPerformanceRenderer.performanceWarnings(data);
         assertEquals(1, warnings.size());
         assertTrue(warnings.get(0).contains("缓存命中率 100.0% 不为 0，缓存键疑似配置错误"));
@@ -150,7 +150,7 @@ public class EvalReportPerformanceRendererTest {
     @Test
     public void exhaustedBudgetShouldTriggerIncompleteSampleWarning() {
         seedRun(EXHAUSTED_RUN, 100, 10000L);
-        EvalReportData data = EvalReportData.assemble(store, EXHAUSTED_RUN);
+        EvalReportData data = EvalReportData.assemble(store, EXHAUSTED_RUN, TestReportWeights.map(), null, null);
 
         List<String> warnings = EvalReportPerformanceRenderer.performanceWarnings(data);
         assertEquals(1, warnings.size());
@@ -166,7 +166,7 @@ public class EvalReportPerformanceRendererTest {
             seedCall(HIGH_LATENCY_RUN, "case-" + (i + 1), "gen", "ok", 0, 0,
                     Integer.valueOf(100), Long.valueOf(200000L));
         }
-        EvalReportData data = EvalReportData.assemble(store, HIGH_LATENCY_RUN);
+        EvalReportData data = EvalReportData.assemble(store, HIGH_LATENCY_RUN, TestReportWeights.map(), null, null);
         String text = EvalReportPerformanceRenderer.render(data);
 
         assertTrue(text.contains("- p95：200.0 秒"));
@@ -181,7 +181,7 @@ public class EvalReportPerformanceRendererTest {
         seedCall(RUN, "case-1", "gen", "ok", 0, 0, Integer.valueOf(50), Long.valueOf(2000L));
         seedCall(RUN, "case-2", "gen", "ok", 0, 1, Integer.valueOf(50), Long.valueOf(4000L));
         seedCall(RUN, "case-2", "gen", "ok", 0, 2, Integer.valueOf(50), Long.valueOf(6000L));
-        String text = EvalReportPerformanceRenderer.render(EvalReportData.assemble(store, RUN));
+        String text = EvalReportPerformanceRenderer.render(EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null));
 
         assertTrue(text.contains("- 重试子集：n=2；mean 5.0 秒；p50：样本不足（n=2，需 ≥20）"));
     }
@@ -191,7 +191,7 @@ public class EvalReportPerformanceRendererTest {
         seedRun(RUN, 0, 720000L);
         storage.update("UPDATE " + EvalSchemaService.TABLE_RUN
                 + " SET config_snapshot_json = ? WHERE run_id = ?", SECRET_SNAPSHOT, RUN);
-        String text = EvalReportPerformanceRenderer.render(EvalReportData.assemble(store, RUN));
+        String text = EvalReportPerformanceRenderer.render(EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null));
 
         assertFalse(text.contains("sk-secret-9f2"));
         assertFalse(text.contains("小明"));
@@ -203,7 +203,7 @@ public class EvalReportPerformanceRendererTest {
     @Test
     public void nineSectionsShouldStayInOrderWithPerformanceRenderer() {
         seedRun(RUN, 0, 720000L);
-        String text = EvalReportWriter.render(EvalReportData.assemble(store, RUN));
+        String text = EvalReportWriter.render(EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null));
         String[] headings = {
             "# MBB-Eval 评测报表",
             "## 1. 头部与结论",

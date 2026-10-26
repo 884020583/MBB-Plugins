@@ -1,8 +1,10 @@
 package org.moboxlab.mbb.eval.runner;
 
 import com.alibaba.fastjson.JSONObject;
+import org.moboxlab.mbb.eval.baseline.EvalBaselineService;
 import org.moboxlab.mbb.eval.config.EvalConfig;
 import org.moboxlab.mbb.eval.exec.EvalRunLoop;
+import org.moboxlab.mbb.eval.log.EvalLog;
 import org.moboxlab.mbb.eval.report.EvalReportData;
 import org.moboxlab.mbb.eval.report.EvalReportWriter;
 import org.moboxlab.mbb.eval.store.EvalStore;
@@ -424,6 +426,10 @@ public final class EvalRunner implements EvalRunService {
     private final ExecutorService executor;
     /** 真实评测主循环；null 表示未装配执行依赖，只做守护轮询（不写 case/call 行、不发终态）。 */
     private final EvalRunLoop runLoop;
+    /** 受理时采集九键快照；null 表示未装配，缺键一律空串并告警。 */
+    private final EvalRunSnapshotSource snapshotSource;
+    /** COMPLETED 后自动创建首个 full 基线；null 表示未装配（只手工切基线）。 */
+    private final EvalBaselineService baselineService;
     private final AtomicReference<RunState> active = new AtomicReference<RunState>(null);
     private final AtomicBoolean closing = new AtomicBoolean(false);
 
@@ -436,7 +442,7 @@ public final class EvalRunner implements EvalRunService {
      */
     public EvalRunner(EvalStore store, EvalConfig config, EvalPreflight preflight, PluginLogger logger,
                       String evalPluginVersion) {
-        this(store, config, preflight, logger, evalPluginVersion, null);
+        this(store, config, preflight, logger, evalPluginVersion, null, null, null);
     }
 
     /**
@@ -447,12 +453,26 @@ public final class EvalRunner implements EvalRunService {
      */
     public EvalRunner(EvalStore store, EvalConfig config, EvalPreflight preflight, PluginLogger logger,
                       String evalPluginVersion, EvalRunLoop runLoop) {
+        this(store, config, preflight, logger, evalPluginVersion, runLoop, null, null);
+    }
+
+    /**
+     * 完整装配：额外注入受理快照来源与自动基线服务。
+     *
+     * @param snapshotSource  九键快照来源；null 时九键写空串并逐键告警
+     * @param baselineService COMPLETED 后自动创建首个 full 基线；null 时跳过
+     */
+    public EvalRunner(EvalStore store, EvalConfig config, EvalPreflight preflight, PluginLogger logger,
+                      String evalPluginVersion, EvalRunLoop runLoop,
+                      EvalRunSnapshotSource snapshotSource, EvalBaselineService baselineService) {
         this.store = store;
         this.config = config;
         this.preflight = preflight;
         this.logger = logger;
         this.evalPluginVersion = evalPluginVersion;
         this.runLoop = runLoop;
+        this.snapshotSource = snapshotSource;
+        this.baselineService = baselineService;
         this.executor = Executors.newSingleThreadExecutor(new ThreadFactory() {
             @Override
             public Thread newThread(Runnable runnable) {
@@ -533,12 +553,7 @@ public final class EvalRunner implements EvalRunService {
                 runRow.put("started_at", EvalStore.formatTime(startedAtMillis));
                 runRow.put("calls_budget", Integer.valueOf(budgetLimit));
                 runRow.put("eval_plugin_version", evalPluginVersion);
-                if (config != null) {
-                    // 受理时已能确定的快照列先落库；题库/persona/rubric 九键由后续切片补入。
-                    runRow.put("eval_profile", config.profile());
-                    runRow.put("judge_profile", config.judgeProfile());
-                    runRow.put("bank_file", config.bankFile());
-                }
+                fillSnapshotColumns(runRow);
                 boolean inserted = store.insertRunning(runRow);
                 if (!inserted) {
                     warn("写入 RUNNING 行失败，重新生成 run_id 后重试（第 " + (attempt + 1) + " 次）");
@@ -555,6 +570,83 @@ public final class EvalRunner implements EvalRunService {
             }
             return AcceptResult.failed(normalized, "连续 " + INSERT_MAX_ATTEMPTS + " 次写入 run 行失败");
         }
+    }
+
+    /**
+     * 受理建行时补齐九键与快照列（§8.2）：
+     * {@code bank_hash / rubric_version / persona_hash / config_fingerprint / eval_profile /
+     * judge_profile / judge_model / generation_model / eval_api_version}，外加题库、persona、
+     * 基线标识与采样次数。任何一列取不到都写空串（{@code sample_k} 为 1）并记
+     * 「{键} 未取得」WARN，绝不因为缺一列而拒绝受理。
+     */
+    private void fillSnapshotColumns(JSONObject runRow) {
+        JSONObject snapshot = null;
+        if (snapshotSource != null) {
+            try {
+                snapshot = snapshotSource.snapshot();
+            } catch (RuntimeException e) {
+                warn("采集九键快照异常，缺键按空串落库：" + e.getMessage());
+            }
+        }
+        String bankFile = snapshotText(snapshot, "bank_file");
+        if (bankFile.isEmpty() && config != null) {
+            bankFile = config.bankFile();
+        }
+        String evalProfile = snapshotText(snapshot, "eval_profile");
+        if (evalProfile.isEmpty() && config != null) {
+            evalProfile = config.profile();
+        }
+        String judgeProfile = snapshotText(snapshot, "judge_profile");
+        if (judgeProfile.isEmpty() && config != null) {
+            judgeProfile = config.judgeProfile();
+        }
+        putRequiredText(runRow, "bank_file", bankFile);
+        putRequiredText(runRow, "bank_version", snapshotText(snapshot, "bank_version"));
+        putRequiredText(runRow, "bank_hash", snapshotText(snapshot, "bank_hash"));
+        putRequiredText(runRow, "persona_id", snapshotText(snapshot, "persona_id"));
+        putRequiredText(runRow, "persona_version", snapshotText(snapshot, "persona_version"));
+        putRequiredText(runRow, "persona_hash", snapshotText(snapshot, "persona_hash"));
+        putRequiredText(runRow, "rubric_version", snapshotText(snapshot, "rubric_version"));
+        putRequiredText(runRow, "config_fingerprint", snapshotText(snapshot, "config_fingerprint"));
+        putRequiredText(runRow, "eval_profile", evalProfile);
+        putRequiredText(runRow, "judge_profile", judgeProfile);
+        putRequiredText(runRow, "judge_model", snapshotText(snapshot, "judge_model"));
+        putRequiredText(runRow, "generation_model", snapshotText(snapshot, "generation_model"));
+        putRequiredText(runRow, "eval_api_version", snapshotText(snapshot, "eval_api_version"));
+        runRow.put("sample_k", Integer.valueOf(1));
+
+        String baselineId = "";
+        try {
+            JSONObject baseline = store.findActiveBaseline();
+            if (baseline != null) {
+                baselineId = snapshotText(baseline, "baseline_id");
+            }
+        } catch (RuntimeException e) {
+            warn("查询激活基线失败，baseline_id_at_run 按空串落库：" + e.getMessage());
+        }
+        putRequiredText(runRow, "baseline_id_at_run", baselineId);
+    }
+
+    /** 单列落库：空白值写空串并告警，保证列存在且非 null。 */
+    private void putRequiredText(JSONObject runRow, String key, String value) {
+        String text = value == null ? "" : value.trim();
+        runRow.put(key, text);
+        if (text.isEmpty()) {
+            warn(key + " 未取得");
+        }
+    }
+
+    /** 从快照取文本；缺键、null、非字符串一律收敛成空串。 */
+    private static String snapshotText(JSONObject snapshot, String key) {
+        if (snapshot == null || key == null) {
+            return "";
+        }
+        Object value = snapshot.get(key);
+        if (value == null) {
+            return "";
+        }
+        String text = String.valueOf(value).trim();
+        return "-1".equals(text) ? "" : text;
     }
 
     /**
@@ -818,43 +910,63 @@ public final class EvalRunner implements EvalRunService {
     }
 
     /**
-     * COMPLETED 收口：先 CAS 终态，成功后才生成报表并回写 report_path。
+     * COMPLETED 收口：先写报表，再把报表相对路径随终态 CAS 一次写入。
      *
-     * <p>CAS 返回 0 / -1 时 {@link #casTerminal} 已记 WARN，这里不再重试、也不生成报表，
-     * 避免出现「报表存在但 run 行仍是 RUNNING」的假完成（§13.4）。</p>
+     * <p>顺序保证不出「报表存在但 run 行仍是 RUNNING」或「终态 COMPLETED 但 report_path
+     * 永久为空」：报表写失败不阻断 COMPLETED（§13.4），CAS 仍以 null 路径收口并记 ERROR；
+     * 报表写成功但 CAS 返回 0 / -1 时保留已落盘路径的日志，供人工/重建恢复。</p>
      */
     private void finishCompleted(final RunState state, final EvalRunLoop.Result result) {
         if (!state.finished.compareAndSet(false, true)) {
             return;
         }
         long durationMs = Math.max(0L, System.currentTimeMillis() - state.startedAtMillis);
+        String reportPath = writeReport(state.runId, result);
         FinalizeResult finalized = casTerminal(store, logger, state.runId, EvalStore.STATUS_COMPLETED,
-                durationMs, null, null);
+                durationMs, reportPath, null);
         active.compareAndSet(state, null);
         if (!finalized.applied()) {
+            if (reportPath != null) {
+                warn("报表已落盘但终态 CAS 未应用，已保留路径供重建，run_id=" + state.runId
+                        + " path=" + reportPath);
+            }
             return;
         }
-        writeReport(state.runId, result);
-    }
-
-    /** 生成 reports/run-&lt;runId&gt;.md 并把相对路径写回 run 行；失败只 WARN，不改终态。 */
-    private void writeReport(final String runId, final EvalRunLoop.Result result) {
-        File reportsDir = runLoop.reportsDirectory();
-        if (reportsDir == null) {
-            warn("报表目录未装配，跳过报表生成，run_id=" + runId);
+        if (baselineService == null) {
             return;
         }
         try {
-            EvalReportData data = result.reportData(store);
-            EvalReportWriter.writeToFile(data, reportsDir);
-            int updated = store.updateReportPath(runId, EvalReportWriter.relativeReportPath(runId));
-            if (updated <= 0) {
-                warn("报表已生成但 report_path 未写入（run_id=" + runId + "，update 返回 " + updated + "）");
+            JSONObject row = store.findRun(state.runId);
+            if (row != null) {
+                baselineService.autoCreateIfFirstFull(store, row);
             }
-        } catch (IOException e) {
-            warn("报表写入失败，run_id=" + runId + "：" + e.getMessage());
         } catch (RuntimeException e) {
-            warn("报表生成异常，run_id=" + runId + "：" + e.getMessage());
+            warn("自动创建首个 full 基线异常，run_id=" + state.runId + "：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 生成 reports/run-&lt;runId&gt;.md，返回库中应记录的相对路径；失败记 ERROR 并返回 null。
+     *
+     * <p>不再单独 updateReportPath：report_path 由 COMPLETED 的 CAS 一次写入，避免两次写库
+     * 之间出现空窗。群内摘要失败只由 writer 记 WARN，不影响主报表。</p>
+     */
+    private String writeReport(final String runId, final EvalRunLoop.Result result) {
+        File reportsDir = runLoop.reportsDirectory();
+        if (reportsDir == null) {
+            warn("报表目录未装配，跳过报表生成，run_id=" + runId);
+            return null;
+        }
+        try {
+            EvalReportData data = result.reportData(store);
+            EvalReportWriter.writeToFile(data, reportsDir, null, logger);
+            return EvalReportWriter.relativeReportPath(runId);
+        } catch (IOException e) {
+            EvalLog.error(logger, "报表写入失败，run_id=" + runId + "：" + e.getMessage());
+            return null;
+        } catch (RuntimeException e) {
+            EvalLog.error(logger, "报表生成异常，run_id=" + runId + "：" + e.getMessage());
+            return null;
         }
     }
 
@@ -919,7 +1031,11 @@ public final class EvalRunner implements EvalRunService {
             return null;
         }
         long durationMs = Math.max(0L, System.currentTimeMillis() - state.startedAtMillis);
-        String summary = reason == null ? "aborted" : reason;
+        String summary = reason == null || reason.trim().isEmpty()
+                ? EvalStore.ABORT_REASON_ORPHAN : reason.trim();
+        if (reason == null || reason.trim().isEmpty()) {
+            warn("中止原因为空，按 orphan 记录，run_id=" + state.runId);
+        }
         FinalizeResult result = casTerminal(store, logger, state.runId, EvalStore.STATUS_ABORTED,
                 durationMs, null, summary);
         active.compareAndSet(state, null);

@@ -86,7 +86,7 @@ public final class EvalReportRebuilder {
             return RebuildResult.rejected(safeRunId, status, reason);
         }
 
-        EvalReportData data = EvalReportData.assemble(store, safeRunId, weightMap());
+        EvalReportData data = EvalReportData.assemble(store, safeRunId, weightMap(), null, logger);
         if (!data.runFound()) {
             EvalLog.warn(logger, "重建报表失败：装配结果标数据缺失 runId=" + safeRunId
                     + " 原因=" + data.note());
@@ -97,7 +97,7 @@ public final class EvalReportRebuilder {
         EvalDeltaResult delta = computeDelta(safeRunId);
         File target;
         try {
-            target = EvalReportWriter.writeToFile(data, reportsDir, delta);
+            target = EvalReportWriter.writeToFile(data, reportsDir, delta, logger);
         } catch (IOException e) {
             EvalLog.warn(logger, "重建报表写盘失败，保留旧文件 runId=" + safeRunId
                     + " 原因=" + e.getMessage());

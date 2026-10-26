@@ -128,7 +128,7 @@ public class EvalGroupSummaryFormatterTest {
         seedGenCalls(RUN, 20);
         runSet(RUN, "calls_used", Integer.valueOf(20));
         seedBaseline(BASE_RUN, 69.0D, RUBRIC);
-        EvalReportData data = EvalReportData.assemble(store, RUN);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
 
         assertTrue(EvalGroupSummaryFormatter.canSummarize(data));
         String text = EvalGroupSummaryFormatter.toPlainText(data);
@@ -146,7 +146,7 @@ public class EvalGroupSummaryFormatterTest {
         seedCase(RUN, "case-4", "knowledge", "error", null, null, 0, 0, "调用失败");
         seedCase(RUN, "case-5", "style", "ok", 60.0D, "natural", 1, 1, "语气自然");
         seedGenCalls(RUN, 3);
-        EvalReportData data = EvalReportData.assemble(store, RUN);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
 
         assertTrue(EvalGroupSummaryFormatter.canSummarize(data));
         String text = EvalGroupSummaryFormatter.toPlainText(data);
@@ -156,7 +156,7 @@ public class EvalGroupSummaryFormatterTest {
 
     @Test
     public void missingRunShouldBeRefused() {
-        EvalReportData data = EvalReportData.assemble(store, "r-20260101000000-full-zzzz");
+        EvalReportData data = EvalReportData.assemble(store, "r-20260101000000-full-zzzz", TestReportWeights.map(), null, null);
         assertFalse(EvalGroupSummaryFormatter.canSummarize(data));
 
         String text = EvalGroupSummaryFormatter.toPlainText(data);
@@ -173,7 +173,7 @@ public class EvalGroupSummaryFormatterTest {
         seedFullCases(RUN);
         seedGenCalls(RUN, 20);
         runSet(RUN, "calls_used", Integer.valueOf(20));
-        EvalReportData data = EvalReportData.assemble(store, RUN);
+        EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
 
         String text = EvalGroupSummaryFormatter.toPlainText(data);
         assertTrue(text.contains("基线 无（不可比）"));
@@ -214,7 +214,7 @@ public class EvalGroupSummaryFormatterTest {
         seedFullCases(RUN);
         seedGenCalls(RUN, 20);
         runSet(RUN, "calls_used", Integer.valueOf(20));
-        return EvalReportData.assemble(store, RUN);
+        return EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
     }
 
     private EvalReportData seedRunningRun() {
@@ -223,7 +223,7 @@ public class EvalGroupSummaryFormatterTest {
         runSet(RUN, "rubric_version", RUBRIC);
         runSet(RUN, "config_fingerprint", CONFIG_FINGERPRINT);
         runSet(RUN, "config_snapshot_json", SECRET_SNAPSHOT);
-        return EvalReportData.assemble(store, RUN);
+        return EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
     }
 
     private void seedRun(String runId, String startedAt, String rubricVersion, String reportPath,

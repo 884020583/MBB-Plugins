@@ -86,10 +86,14 @@ public final class EvalRunLoopTest {
         assertNull(result.abortReason());
         assertEquals(12, result.plannedCases());
         assertEquals(12, result.executedCases());
-        assertEquals(36, result.callsUsed());
+        // 生成侧每题一次（6 个 judge 维用例）+ judge 侧 10 次（persona 2 + memory 2 + boundary 2×3）。
+        assertEquals(16, result.callsUsed());
+        // §9.5：smoke 计划调用 25 次（12 生成 + 10 judge + 3 校准），实际不得超计划。
+        assertTrue("smoke 调用数 " + result.callsUsed() + " 超过计划 25",
+                result.callsUsed() <= 25);
         assertEquals(12, store.findCaseResults(RUN_ID).size());
-        assertEquals(36, store.findCalls(RUN_ID).size());
-        assertEquals(36, store.findRun(RUN_ID).getIntValue("calls_used"));
+        assertEquals(16, store.findCalls(RUN_ID).size());
+        assertEquals(16, store.findRun(RUN_ID).getIntValue("calls_used"));
         assertNotNull(result.score());
         assertNotNull(result.score().total());
         assertTrue("摘要不超过 15 行", result.summaryLines().size() <= 15);
@@ -173,7 +177,8 @@ public final class EvalRunLoopTest {
         assertEquals(EvalRunLoop.Status.COMPLETED, result.status());
         assertEquals(40, result.plannedCases());
         assertEquals(40, result.executedCases());
-        assertEquals(144, result.callsUsed());
+        // 生成 24 次（judge 维 24 题各一次）+ judge 36 次（12×1 + 6×1 + 6×3）。
+        assertEquals(60, result.callsUsed());
         assertEquals(40, store.findCaseResults(RUN_ID).size());
     }
 

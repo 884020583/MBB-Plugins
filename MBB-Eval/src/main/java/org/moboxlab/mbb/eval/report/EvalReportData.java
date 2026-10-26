@@ -8,8 +8,11 @@ import org.moboxlab.mbb.eval.metrics.EvalAiUsageEvidence;
 import org.moboxlab.mbb.eval.metrics.EvalAiUsageEvidenceService;
 import org.moboxlab.mbb.eval.metrics.EvalAiUsageSource;
 import org.moboxlab.mbb.eval.metrics.EvalMetrics;
+import org.moboxlab.mbb.eval.log.EvalLog;
 import org.moboxlab.mbb.eval.metrics.EvalMetricsService;
+import org.moboxlab.moboxbot.API.PluginLogger;
 import org.moboxlab.mbb.eval.score.EvalDimensionWeights;
+import org.moboxlab.mbb.eval.score.EvalScoreAggregator;
 import org.moboxlab.mbb.eval.store.EvalStore;
 
 import java.util.ArrayList;
@@ -31,6 +34,9 @@ import java.util.Map;
  *
  * <p>隐私：case 行只按白名单取 §4.2.2 允许展示的列，prompt、模型回复原文、昵称、userID
  * 一律不进内存结构（§15.9 I2）。</p>
+ *
+ * <p>权重只从 rubric 注入（{@code EvalDimensionWeights.from(rubric)}）：本类不内置任何缺省
+ * 权重。没有注入权重时总分标为缺失并记 WARN，绝不用硬编码系数凑一个看起来正常的分数。</p>
  */
 public final class EvalReportData {
 
@@ -59,8 +65,6 @@ public final class EvalReportData {
 
     /** 维度中文名（§6.1 逐字）。 */
     private static final Map<String, String> DIMENSION_LABELS;
-    /** 维度权重（§6.1 缺省值；判分规约可覆盖，见 {@link #assemble(EvalStore, String, Map)}）。 */
-    private static final Map<String, Double> DEFAULT_WEIGHTS;
 
     static {
         Map<String, String> labels = new LinkedHashMap<String, String>();
@@ -70,14 +74,6 @@ public final class EvalReportData {
         labels.put(DIM_KNOWLEDGE, "知识正确性");
         labels.put(DIM_STYLE, "风格匹配");
         DIMENSION_LABELS = Collections.unmodifiableMap(labels);
-
-        Map<String, Double> weights = new LinkedHashMap<String, Double>();
-        weights.put(DIM_PERSONA, Double.valueOf(0.30D));
-        weights.put(DIM_BOUNDARY, Double.valueOf(0.25D));
-        weights.put(DIM_MEMORY, Double.valueOf(0.20D));
-        weights.put(DIM_KNOWLEDGE, Double.valueOf(0.15D));
-        weights.put(DIM_STYLE, Double.valueOf(0.10D));
-        DEFAULT_WEIGHTS = Collections.unmodifiableMap(weights);
     }
 
     /** 九键名称，顺序与 §8.2 一致；趋势表与基线比较都依赖这组键。 */
@@ -184,22 +180,25 @@ public final class EvalReportData {
     /**
      * 从库装配一次 run 的报表数据（§8.7 库是唯一事实来源）。
      *
+     * <p>不注入权重、不注入日志，等价于「权重缺失 + 静默」；生产路径应调用带
+     * {@link PluginLogger} 的重载。</p>
+     *
      * @param store 评测库门面；null 时返回「数据缺失」数据对象
      * @param runId run_id；空值或库中不存在时返回「数据缺失」数据对象
      * @return 永不返回 null，也永不抛出读库异常
      */
     public static EvalReportData assemble(EvalStore store, String runId) {
-        return assemble(store, runId, null, null);
+        return assemble(store, runId, null, null, null);
     }
 
     /**
-     * 同上，允许判分规约覆盖维度权重（§6.1 注明权重只由 rubric 定义）。
+     * 同上，注入判分规约的维度权重（§6.1：权重只由 rubric 定义）。
      *
-     * @param weightOverride 维度 → 权重；null 或空时用 §6.1 缺省值
+     * @param weightOverride 维度 → 权重；null 或空表示未注入，总分标缺失并告警
      */
     public static EvalReportData assemble(EvalStore store, String runId,
                                          Map<String, Double> weightOverride) {
-        return assemble(store, runId, weightOverride, null);
+        return assemble(store, runId, weightOverride, null, null);
     }
 
     /**
@@ -209,12 +208,26 @@ public final class EvalReportData {
      * 口径行）；数据源读表失败或无行时由 {@link EvalAiUsageEvidenceService} 收敛成
      * 「不可得」结果，不抛异常、不阻断报表装配。基线与 delta 仍由库中激活基线计算。</p>
      *
-     * @param weightOverride 维度 → 权重；null 或空时用 §6.1 缺省值
+     * @param weightOverride 维度 → 权重；null 或空表示未注入，总分标缺失并告警
      * @param usageSource    L3 只读数据源；null 表示本次不采集旁证
      */
     public static EvalReportData assemble(EvalStore store, String runId,
                                          Map<String, Double> weightOverride,
                                          EvalAiUsageSource usageSource) {
+        return assemble(store, runId, weightOverride, usageSource, null);
+    }
+
+    /**
+     * 完整装配入口：额外注入日志器，让被吞掉的读库 / 权重 / delta 异常留下 WARN 轨迹。
+     *
+     * @param weightOverride 维度 → 权重；null 或空表示未注入（总分缺失 + WARN）
+     * @param usageSource    L3 只读数据源；null 表示本次不采集旁证
+     * @param logger         插件日志器；null 表示静默
+     */
+    public static EvalReportData assemble(EvalStore store, String runId,
+                                         Map<String, Double> weightOverride,
+                                         EvalAiUsageSource usageSource,
+                                         PluginLogger logger) {
         String safeRunId = runId == null ? "" : runId.trim();
         Map<String, Double> weights = mergeWeights(weightOverride);
         if (store == null) {
@@ -228,27 +241,29 @@ public final class EvalReportData {
             if (run == null) {
                 return missing(safeRunId, "库中无该 run 的运行行");
             }
-            return assembleFound(store, run, weights, usageSource);
+            return assembleFound(store, run, weights, usageSource, logger);
         } catch (RuntimeException e) {
+            EvalLog.warn(logger, "[MBB-Eval] 报表装配失败，run_id=" + safeRunId + "：" + describe(e));
             return missing(safeRunId, "报表数据装配失败：" + describe(e));
         }
     }
 
-    /** 缺数据时的数据对象：九节结构仍可渲染，所有值标「数据缺失」。 */
+    /** 缺数据时的数据对象：九节结构仍可渲染，所有值标「数据缺失」；权重缺失即 0。 */
     public static EvalReportData missing(String runId, String note) {
         Builder builder = new Builder();
         builder.runId = runId == null ? "" : runId;
         builder.note = note == null ? MISSING : note;
-        builder.weights.putAll(DEFAULT_WEIGHTS);
         for (String dimension : DIMENSION_LABELS.keySet()) {
-            builder.dimensions.add(Dimension.noData(dimension, DEFAULT_WEIGHTS.get(dimension)));
+            builder.weights.put(dimension, Double.valueOf(0D));
+            builder.dimensions.add(Dimension.noData(dimension, Double.valueOf(0D)));
         }
         return new EvalReportData(builder);
     }
 
     private static EvalReportData assembleFound(EvalStore store, JSONObject run,
                                                 Map<String, Double> weights,
-                                                EvalAiUsageSource usageSource) {
+                                                EvalAiUsageSource usageSource,
+                                                PluginLogger logger) {
         String runId = text(run, "run_id");
         EvalStore.RowSet caseSet = store.findCaseResults(runId);
         EvalStore.RowSet callSet = store.findCalls(runId);
@@ -302,20 +317,30 @@ public final class EvalReportData {
         builder.metrics = metrics;
         builder.callRows.addAll(callSet.rows());
         builder.weights.putAll(weights);
+        if (weights.isEmpty()) {
+            builder.note = "维度权重缺失：未从 rubric 注入";
+            EvalLog.warn(logger, "[MBB-Eval] 维度权重缺失，报表总分与 delta 标为数据缺失，run_id="
+                    + runId);
+        }
 
         List<Dimension> raw = buildDimensions(records, weights);
-        double weightSum = 0D;
-        double weighted = 0D;
         int validCases = 0;
+        Map<String, Double> scoresById = new LinkedHashMap<String, Double>();
         for (Dimension dimension : raw) {
             if (dimension.score() != null) {
-                weightSum += dimension.weight();
-                weighted += dimension.weight() * dimension.score().doubleValue();
+                scoresById.put(dimension.id(), dimension.score());
             }
             validCases += dimension.validCount();
         }
-        builder.totalScore = weightSum <= 0D ? null : Double.valueOf(weighted / weightSum);
+        // 总分复用聚合器口径（Σw·dimScore/Σw），不再在本类里重写一遍权重求和。
+        builder.totalScore = EvalScoreAggregator.weightedTotal(scoresById, weights);
         builder.validCaseCount = validCases;
+        double weightSum = 0D;
+        for (Dimension dimension : raw) {
+            if (dimension.score() != null) {
+                weightSum += dimension.weight();
+            }
+        }
         List<Dimension> normalized = new ArrayList<Dimension>();
         for (Dimension dimension : raw) {
             double normalizedWeight = 0D;
@@ -326,9 +351,9 @@ public final class EvalReportData {
         }
         builder.dimensions.addAll(normalized);
 
-        builder.trend.addAll(buildTrend(store, runId, run, builder.totalScore, weights));
+        builder.trend.addAll(buildTrend(store, runId, run, builder.totalScore, weights, logger));
         builder.baseline = buildBaseline(store, run, builder.totalScore);
-        builder.delta = computeDelta(store, runId, weights);
+        builder.delta = computeDelta(store, runId, weights, logger);
         builder.aiUsage = collectAiUsage(usageSource, run);
         return new EvalReportData(builder);
     }
@@ -340,11 +365,14 @@ public final class EvalReportData {
      * 九节其余数据的装配，渲染侧回退「未计算」占位。</p>
      */
     private static EvalDeltaResult computeDelta(EvalStore store, String runId,
-                                                Map<String, Double> weights) {
+                                                Map<String, Double> weights,
+                                                PluginLogger logger) {
         try {
             return new EvalDeltaService(store, EvalDimensionWeights.of(weights))
                     .compareToActiveBaseline(runId);
         } catch (RuntimeException e) {
+            EvalLog.warn(logger, "[MBB-Eval] 基线 delta 计算失败，按未计算处理，run_id=" + runId
+                    + "：" + describe(e));
             return null;
         }
     }
@@ -385,8 +413,11 @@ public final class EvalReportData {
         return day;
     }
 
+    /**
+     * 只收调用方注入的权重：不做任何缺省打底，非法项丢弃（非法项导致的缺失由装配层告警）。
+     */
     private static Map<String, Double> mergeWeights(Map<String, Double> override) {
-        Map<String, Double> merged = new LinkedHashMap<String, Double>(DEFAULT_WEIGHTS);
+        Map<String, Double> merged = new LinkedHashMap<String, Double>();
         if (override != null) {
             for (Map.Entry<String, Double> entry : override.entrySet()) {
                 if (entry.getKey() != null && entry.getValue() != null) {
@@ -478,12 +509,14 @@ public final class EvalReportData {
     /** 趋势表：最近 10 次 run，各自总分由库中 case 行重算，delta 与上一次 run 比较。 */
     private static List<TrendEntry> buildTrend(EvalStore store, String currentRunId,
                                                JSONObject currentRun, Double currentTotal,
-                                               Map<String, Double> weights) {
+                                               Map<String, Double> weights,
+                                               PluginLogger logger) {
         List<TrendEntry> entries = new ArrayList<TrendEntry>();
         List<JSONObject> recent;
         try {
             recent = store.findRecentRuns(TREND_LIMIT);
         } catch (RuntimeException e) {
+            EvalLog.warn(logger, "[MBB-Eval] 趋势表读取失败，按空趋势渲染：" + describe(e));
             return entries;
         }
         if (recent == null) {
@@ -498,7 +531,7 @@ public final class EvalReportData {
             if (runId != null && runId.equals(currentRunId)) {
                 total = currentTotal;
             } else {
-                total = totalOf(store, runId, weights);
+                total = totalOf(store, runId, weights, logger);
             }
             entries.add(new TrendEntry(runId, text(row, "started_at"), text(row, "tier"), total,
                     row, null, "不可比"));
@@ -514,7 +547,8 @@ public final class EvalReportData {
     }
 
     /** 单次 run 的总分（趋势表用）：读该 run 的 case 行按 §6.1 重算。 */
-    private static Double totalOf(EvalStore store, String runId, Map<String, Double> weights) {
+    private static Double totalOf(EvalStore store, String runId, Map<String, Double> weights,
+                                  PluginLogger logger) {
         if (runId == null || runId.isEmpty()) {
             return null;
         }
@@ -527,16 +561,16 @@ public final class EvalReportData {
             if (records.isEmpty()) {
                 return null;
             }
-            double weightSum = 0D;
-            double weighted = 0D;
+            Map<String, Double> scoresById = new LinkedHashMap<String, Double>();
             for (Dimension dimension : buildDimensions(records, weights)) {
                 if (dimension.score() != null) {
-                    weightSum += dimension.weight();
-                    weighted += dimension.weight() * dimension.score().doubleValue();
+                    scoresById.put(dimension.id(), dimension.score());
                 }
             }
-            return weightSum <= 0D ? null : Double.valueOf(weighted / weightSum);
+            return EvalScoreAggregator.weightedTotal(scoresById, weights);
         } catch (RuntimeException e) {
+            EvalLog.warn(logger, "[MBB-Eval] 趋势行总分重算失败，按数据缺失处理，run_id=" + runId
+                    + "：" + describe(e));
             return null;
         }
     }

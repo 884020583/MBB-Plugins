@@ -94,7 +94,8 @@ public final class EvalScoreAggregator {
 
         List<EvalDimensionScore> dimensionScores = new ArrayList<EvalDimensionScore>();
         List<String> missingDimensionIds = new ArrayList<String>();
-        double weightedSum = 0.0d;
+        Map<String, Double> scoresById = new LinkedHashMap<String, Double>();
+        Map<String, Double> weightsById = new LinkedHashMap<String, Double>();
         for (MutableDimension dimension : byId.values()) {
             Double dimensionScore;
             double effectiveWeight;
@@ -105,15 +106,16 @@ public final class EvalScoreAggregator {
             } else {
                 dimensionScore = Double.valueOf(100.0d * dimension.scoreSum / dimension.validCount());
                 effectiveWeight = presentWeightSum > 0.0d ? dimension.weight / presentWeightSum : 0.0d;
-                weightedSum += dimension.weight * dimensionScore.doubleValue();
             }
+            scoresById.put(dimension.dimensionId, dimensionScore);
+            weightsById.put(dimension.dimensionId, Double.valueOf(dimension.weight));
             dimensionScores.add(new EvalDimensionScore(dimension.dimensionId, dimension.weight,
                     effectiveWeight, dimensionScore, dimension.caseCount, dimension.okCount,
                     dimension.vetoedCount, dimension.errorCount, dimension.invalidCount));
         }
 
-        Double total = presentWeightSum > 0.0d
-                ? Double.valueOf(weightedSum / presentWeightSum) : null;
+        // 总分与报表侧复用同一口径，避免两处各算一遍导致漂移。
+        Double total = weightedTotal(scoresById, weightsById);
 
         int caseCount = rows.size();
         double nonOkRate = caseCount == 0 ? 0.0d : (double) nonOkCount / (double) caseCount;
@@ -124,6 +126,35 @@ public final class EvalScoreAggregator {
 
         return new EvalRunScore(dimensionScores, total, validCaseCount, caseCount,
                 errorCaseIds, invalidCaseIds, missingDimensionIds, credibility);
+    }
+
+    /**
+     * 按权重求总分（口径与 {@link #aggregate(List, EvalDimensionWeights)} 完全一致）。
+     *
+     * <p>只统计「分数存在且权重大于 0」的维度：`Σ w·score / Σ w`。分数尺度无关，维度分传
+     * 0..1 或 0..100 都可；缺失维度、空权重、全零权重一律返回 {@code null}，绝不按缺维 0 分折算
+     * （§6.1 判定规则）。报表侧复算总分时直接调用本方法。</p>
+     */
+    public static Double weightedTotal(Map<String, Double> dimensionScores,
+            Map<String, Double> weights) {
+        if (dimensionScores == null || dimensionScores.isEmpty() || weights == null) {
+            return null;
+        }
+        double weightedSum = 0.0d;
+        double weightSum = 0.0d;
+        for (Map.Entry<String, Double> entry : dimensionScores.entrySet()) {
+            if (entry == null) {
+                continue;
+            }
+            Double score = entry.getValue();
+            Double weight = weights.get(entry.getKey());
+            if (score == null || weight == null || weight.doubleValue() <= 0.0d) {
+                continue;
+            }
+            weightedSum += weight.doubleValue() * score.doubleValue();
+            weightSum += weight.doubleValue();
+        }
+        return weightSum > 0.0d ? Double.valueOf(weightedSum / weightSum) : null;
     }
 
     /** 直接从 rubric 读取权重并聚合。 */
