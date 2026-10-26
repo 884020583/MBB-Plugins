@@ -1,5 +1,6 @@
 package org.moboxlab.mbb.eval;
 
+import java.io.File;
 import java.lang.management.ManagementFactory;
 
 import org.moboxlab.moboxbot.API.Plugin;
@@ -18,6 +19,7 @@ import org.moboxlab.mbb.eval.runner.EvalPreflightSources.CapabilitiesStatusSourc
 import org.moboxlab.mbb.eval.runner.EvalRunRecovery;
 import org.moboxlab.mbb.eval.runner.EvalRunner;
 import org.moboxlab.mbb.eval.runner.EvalStageSources;
+import org.moboxlab.mbb.eval.store.EvalReadOnlyBoundary;
 import org.moboxlab.mbb.eval.store.EvalSchemaService;
 import org.moboxlab.mbb.eval.store.EvalStore;
 
@@ -190,8 +192,12 @@ public class EvalPlugin extends Plugin {
         }
         EvalPreflight preflight = builder.build();
         evalRunner = new EvalRunner(evalStore, evalConfig, preflight, getLogger(), getVersion());
-        getServer().getPluginManager().registerCommand(this, new EvalCommand(evalRunner, evalConfig));
-        getLogger().sendInfo("[MBB-Eval] 已注册 /eval 命令（骨架阶段，run 为占位执行，不发起 AI 调用）");
+        // 只读命令只注入库、题库缓存与报表目录，不注入 runner（§9.7、§16.8 G-3）。
+        EvalReadOnlyBoundary boundary = new EvalReadOnlyBoundary(new File(getDataFolder()));
+        getServer().getPluginManager().registerCommand(this, new EvalCommand(
+                evalRunner, evalConfig, evalStore, bankCache, boundary.reportsDirectory()));
+        getLogger().sendInfo("[MBB-Eval] 已注册 /eval 命令（run 为占位执行；status/report/list/baseline "
+                + "为只读命令，不写库、不建 run、不发起 AI 调用）");
     }
 
     @Override
