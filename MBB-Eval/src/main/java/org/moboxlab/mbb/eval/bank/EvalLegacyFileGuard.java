@@ -119,6 +119,33 @@ public final class EvalLegacyFileGuard {
         }
     }
 
+    /**
+     * 启动期旧文件告警（A10）：evals/ 下存在 roleplay-evals.json 时返回单行中文告警，否则返回空串。
+     *
+     * <p>只按文件名探测文件是否存在，不打开、不读取、不删除，也不阻断插件启动；
+     * 提示使用 bank-&lt;version&gt;.json 并给出绝对路径，方便管理员定位。</p>
+     *
+     * @param evalsDirectory 评测数据目录（MBB-Roleplay/evals）；null 视为不命中
+     */
+    public static String startupWarning(File evalsDirectory) {
+        if (evalsDirectory == null) {
+            return "";
+        }
+        File legacy = new File(evalsDirectory, LEGACY_FILE_NAME);
+        if (!legacy.isFile()) {
+            return "";
+        }
+        String path;
+        try {
+            path = legacy.getAbsolutePath();
+        } catch (RuntimeException e) {
+            path = legacy.getPath();
+        }
+        return "检测到旧文件已废弃：" + path
+                + "（按规格 §5.8.2 不读取、不删除、不阻断启动）；"
+                + "请使用 bank-<version>.json 并通过 evalBankFile 配置新文件名";
+    }
+
     private static String messageFor(String value) {
         return MESSAGE + "（当前路径：" + value + "）";
     }

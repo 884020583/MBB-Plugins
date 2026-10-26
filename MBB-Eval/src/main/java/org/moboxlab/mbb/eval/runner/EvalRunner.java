@@ -135,6 +135,11 @@ public final class EvalRunner implements EvalRunService {
         public List<String> details() {
             return rejection == null ? Collections.<String>emptyList() : rejection.details();
         }
+
+        /** 原始预检拒绝对象；命令层据此调用 EvalFailure / EvalRejectionPresenter 统一渲染。 */
+        public EvalPreflight.Rejection rejection() {
+            return rejection;
+        }
     }
 
     /** 中止结果的种类。 */

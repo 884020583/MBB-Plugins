@@ -14,6 +14,7 @@ import org.moboxlab.mbb.eval.bank.EvalBankResources;
 import org.moboxlab.mbb.eval.bank.EvalBankValidator;
 import org.moboxlab.mbb.eval.bank.EvalRubricReleaseResult;
 import org.moboxlab.mbb.eval.bank.EvalRubricReleaser;
+import org.moboxlab.mbb.eval.error.EvalRejectionPresenter;
 import org.moboxlab.mbb.eval.rubric.EvalRubric;
 import org.moboxlab.mbb.eval.rubric.EvalRubricCache;
 import org.moboxlab.moboxbot.API.PluginLogger;
@@ -131,8 +132,8 @@ public final class EvalDataBootstrap {
         if (rubric.ok()) {
             info(logger, rubric.summary());
         } else {
-            warn(logger, "rubric 加载失败（" + rubric.code() + "）：" + rubric.message()
-                    + "；下一步：" + rubric.hint());
+            // H-1/§13.2：启动期失败统一走 presenter，与命令期同错误码同文案来源。
+            warnSummary(logger, EvalRejectionPresenter.startupSummary(rubric));
         }
 
         EvalBankCache bank = null;
@@ -149,11 +150,10 @@ public final class EvalDataBootstrap {
                     warn(logger, "persona 绑定降级：" + bank.binding().message());
                 }
             } else if (bank.ioFailure()) {
-                error(logger, "题库读取失败（" + bank.code() + "）：" + bank.message()
-                        + "；下一步：" + bank.hint());
+                // 读取失败保留 ERROR 级别，文案与命令期回执同源。
+                errorSummary(logger, EvalRejectionPresenter.startupSummary(bank));
             } else {
-                warn(logger, bank.summary());
-                warn(logger, "题库未通过校验，/eval run 将被预检拒绝；下一步：" + bank.hint());
+                warnSummary(logger, EvalRejectionPresenter.startupSummary(bank));
             }
         }
 
@@ -207,6 +207,19 @@ public final class EvalDataBootstrap {
     private static void error(PluginLogger logger, String message) {
         if (logger != null) {
             logger.sendError(LOG_PREFIX + message);
+        }
+    }
+
+    /** presenter 摘要自带 [评测] 前缀，这里不再重复拼接。 */
+    private static void warnSummary(PluginLogger logger, String summary) {
+        if (logger != null) {
+            logger.sendWarn(summary);
+        }
+    }
+
+    private static void errorSummary(PluginLogger logger, String summary) {
+        if (logger != null) {
+            logger.sendError(summary);
         }
     }
 

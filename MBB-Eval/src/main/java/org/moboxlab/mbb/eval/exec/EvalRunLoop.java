@@ -7,12 +7,14 @@ import java.io.File;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
+import java.util.Map;
 
 import org.moboxlab.mbb.eval.call.EvalBudgetLedger;
 import org.moboxlab.mbb.eval.call.EvalCallInvoker;
 import org.moboxlab.mbb.eval.call.EvalCallPolicy;
 import org.moboxlab.mbb.eval.call.EvalCallRecorder;
 import org.moboxlab.mbb.eval.config.EvalConfig;
+import org.moboxlab.mbb.eval.metrics.EvalAiUsageSource;
 import org.moboxlab.mbb.eval.report.EvalReportData;
 import org.moboxlab.mbb.eval.rubric.EvalRubric;
 import org.moboxlab.mbb.eval.runner.EvalRunBudget;
@@ -57,6 +59,8 @@ public final class EvalRunLoop {
         private File reportsDirectory;
         private PluginLogger logger;
         private EvalCaseClock clock;
+        private Map<String, Double> reportWeights;
+        private EvalAiUsageSource aiUsageSource;
 
         public Deps store(EvalStore store) {
             this.store = store;
@@ -103,6 +107,18 @@ public final class EvalRunLoop {
             return this;
         }
 
+        /** 报表 delta 用的五维权重（§6.1）；null 表示用报表内置缺省权重。 */
+        public Deps reportWeights(Map<String, Double> reportWeights) {
+            this.reportWeights = reportWeights;
+            return this;
+        }
+
+        /** 报表 §6 L3 用量旁证来源（§7.5）；null 表示不采集旁证。 */
+        public Deps aiUsageSource(EvalAiUsageSource aiUsageSource) {
+            this.aiUsageSource = aiUsageSource;
+            return this;
+        }
+
         public EvalStore store() {
             return store;
         }
@@ -137,6 +153,14 @@ public final class EvalRunLoop {
 
         public EvalCaseClock clock() {
             return clock;
+        }
+
+        public Map<String, Double> reportWeights() {
+            return reportWeights;
+        }
+
+        public EvalAiUsageSource aiUsageSource() {
+            return aiUsageSource;
         }
     }
 
@@ -187,10 +211,13 @@ public final class EvalRunLoop {
         private final int executedCases;
         private final int callsUsed;
         private final List<String> summaryLines;
+        private final Map<String, Double> reportWeights;
+        private final EvalAiUsageSource aiUsageSource;
 
         private Result(String runId, Status status, String abortReason, boolean terminalInStore,
                        EvalRunScore score, int plannedCases, int executedCases, int callsUsed,
-                       List<String> summaryLines) {
+                       List<String> summaryLines, Map<String, Double> reportWeights,
+                       EvalAiUsageSource aiUsageSource) {
             this.runId = runId;
             this.status = status;
             this.abortReason = abortReason;
@@ -200,6 +227,8 @@ public final class EvalRunLoop {
             this.executedCases = executedCases;
             this.callsUsed = callsUsed;
             this.summaryLines = summaryLines;
+            this.reportWeights = reportWeights;
+            this.aiUsageSource = aiUsageSource;
         }
 
         public String runId() {
@@ -258,7 +287,8 @@ public final class EvalRunLoop {
          * run 行不存在或装配失败时抛出 RuntimeException，由 runner 记 WARN。
          */
         public EvalReportData reportData(EvalStore store) {
-            return EvalReportData.assemble(store, runId);
+            // 权重来自 rubric（§6.1），L3 旁证由 storage 数据源提供（§7.5）；两者缺省时仍可出报表。
+            return EvalReportData.assemble(store, runId, reportWeights, aiUsageSource);
         }
     }
 
@@ -368,7 +398,7 @@ public final class EvalRunLoop {
         return new Result(request.runId(), completed ? Status.COMPLETED : Status.ABORTED,
                 completed ? null : (abortReason == null ? "aborted" : abortReason), terminalInStore,
                 evaluation == null ? null : evaluation.score, selected.size(), executed,
-                budget.used(), summary);
+                budget.used(), summary, deps.reportWeights(), deps.aiUsageSource());
     }
 
     private void validate(Request request) {

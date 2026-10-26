@@ -125,7 +125,13 @@ public class EvalPreflightWiringTest {
         assertTrue(joined, joined.contains("cases[0].id"));
         assertTrue(joined, joined.contains("cases[4].id"));
         assertFalse("不得回显第 6 条错误：" + joined, joined.contains("cases[5].id"));
-        assertTrue("必须给出下一步动作：" + joined, joined.contains("下一步"));
+        // H-1：回执统一由 EvalRejectionPresenter 渲染，必须带错误码、绝对路径与修复建议（§13.2）。
+        assertTrue("必须给出错误码：" + joined, joined.contains(EvalBankProblem.ID));
+        assertTrue("必须给出题库绝对路径：" + joined,
+                joined.contains(bootstrap.bank().absolutePath()));
+        assertTrue("必须给出错误码说明：" + joined, joined.contains("错误码说明"));
+        assertTrue("必须给出修复建议：" + joined, joined.contains("修复建议"));
+        assertFalse("新文案不再使用旧简版措辞：" + joined, joined.contains("下一步："));
 
         RecordingSender second = new RecordingSender();
         assertTrue(command.execute(second, new String[] { "eval", "run" }));

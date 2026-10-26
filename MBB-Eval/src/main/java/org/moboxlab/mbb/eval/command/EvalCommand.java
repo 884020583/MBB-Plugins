@@ -3,6 +3,9 @@ package org.moboxlab.mbb.eval.command;
 import org.moboxlab.mbb.eval.bank.EvalBankCache;
 import org.moboxlab.mbb.eval.baseline.EvalBaselineService;
 import org.moboxlab.mbb.eval.config.EvalConfig;
+import org.moboxlab.mbb.eval.error.EvalFailure;
+import org.moboxlab.mbb.eval.error.EvalRejectionPresenter;
+import org.moboxlab.mbb.eval.runner.EvalPreflight;
 import org.moboxlab.mbb.eval.runner.EvalPreflightPlan;
 import org.moboxlab.mbb.eval.runner.EvalRunService;
 import org.moboxlab.mbb.eval.runner.EvalRunner;
@@ -264,31 +267,20 @@ public final class EvalCommand extends BotCommand {
     }
 
     /**
-     * 预检拒绝回执（§9.3.1、§13.1、§15.3 B29）：原因、前 5 条明细与下一步动作。
+     * 预检拒绝回执（H-1、§9.3.1、§13.2）：统一交给 {@link EvalRejectionPresenter} 渲染。
      *
-     * <p>明细来自 onEnable 缓存，顺序由题库校验的稳定排序决定，同一状态两次回显完全一致；
-     * 纯文本、逐行 [eval] 前缀，总行数不超过 15。</p>
+     * <p>回执含结论头（阶段｜错误码）、错误码说明、绝对路径、最多 5 条明细、总数说明与修复建议，
+     * 与启动期日志同源同码，避免命令层自拼文案。明细来自 onEnable 缓存，顺序由题库校验的
+     * 稳定排序决定，同一状态两次回显完全一致；presenter 每行已带 [eval] 前缀，这里直接发送。</p>
      */
     private void renderRejection(CommandSender sender, EvalRunner.AcceptResult result) {
-        String code = result.code();
-        sender.sendMessage(PREFIX + "预检失败" + (code == null || code.isEmpty() ? "" : "（" + code + "）")
-                + "：" + (result.message() == null ? "未给出原因" : result.message()));
-        java.util.List<String> details = result.details();
-        int shown = 0;
-        for (String detail : details) {
-            if (shown >= 5) {
-                break;
-            }
-            shown++;
-            sender.sendMessage(PREFIX + shown + ". " + detail);
+        EvalPreflight.Rejection rejection = result.rejection();
+        EvalFailure failure = rejection != null
+                ? EvalFailure.of(rejection)
+                : EvalFailure.of(result.code(), result.message(), result.hint(), result.details());
+        for (String line : EvalRejectionPresenter.render(failure)) {
+            sender.sendMessage(line);
         }
-        if (!details.isEmpty()) {
-            sender.sendMessage(PREFIX + (details.size() > shown
-                    ? "仅回显前 " + shown + " 条，完整清单见插件日志"
-                    : "以上 " + shown + " 条为全部错误，完整清单见插件日志"));
-        }
-        sender.sendMessage(PREFIX + "下一步：" + (result.hint() == null || result.hint().isEmpty()
-                ? "修复后重跑 /eval run；/eval report 仍可用" : result.hint()));
     }
 
     private void doAbort(CommandSender sender, String[] args) {
