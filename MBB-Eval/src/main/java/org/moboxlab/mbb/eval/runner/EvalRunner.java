@@ -408,10 +408,13 @@ public final class EvalRunner implements EvalRunService {
         private final EvalRunStopPoint stopPoint;
         /** COMPLETED 完成摘要的回送目标；null 表示本次不回送（旧 accept 入口或自检）。 */
         private final EvalCompletionSink completionSink;
+        /** 是否为首次基线 run：full 档且受理时没有 active 基线，才执行校准自证（§6.7.4）。 */
+        private final boolean firstBaselineRun;
         private final AtomicBoolean finished = new AtomicBoolean(false);
 
         private RunState(String runId, String tier, int caseCount, long startedAtMillis, EvalRunBudget budget,
-                         EvalRunStopPoint stopPoint, EvalCompletionSink completionSink) {
+                         EvalRunStopPoint stopPoint, EvalCompletionSink completionSink,
+                         boolean firstBaselineRun) {
             this.runId = runId;
             this.tier = tier;
             this.caseCount = caseCount;
@@ -419,6 +422,7 @@ public final class EvalRunner implements EvalRunService {
             this.budget = budget;
             this.stopPoint = stopPoint;
             this.completionSink = completionSink;
+            this.firstBaselineRun = firstBaselineRun;
         }
     }
 
@@ -556,6 +560,7 @@ public final class EvalRunner implements EvalRunService {
             int planned = EvalPreflight.plannedCalls(normalized);
             int caseCount = EvalPreflight.caseCount(normalized);
             int budgetLimit = config == null ? planned : config.callBudget();
+            boolean firstBaselineRun = firstBaselineRun(normalized);
             for (int attempt = 0; attempt < INSERT_MAX_ATTEMPTS; attempt++) {
                 String runId;
                 try {
@@ -580,7 +585,7 @@ public final class EvalRunner implements EvalRunService {
                         + (config == null ? 30L : config.runDeadlineMinutes()) * 60_000L;
                 RunState state = new RunState(runId, normalized, caseCount, startedAtMillis,
                         new EvalRunBudget(planned, budgetLimit, deadlineAtMillis),
-                        new EvalRunStopPoint(runId, statusProbe(runId)), completionSink);
+                        new EvalRunStopPoint(runId, statusProbe(runId)), completionSink, firstBaselineRun);
                 active.set(state);
                 scheduleRun(state);
                 return AcceptResult.accepted(runId, normalized, caseCount, planned, budgetLimit);
@@ -901,7 +906,7 @@ public final class EvalRunner implements EvalRunService {
         EvalRunLoop.Result result;
         try {
             result = runLoop.run(EvalRunLoop.Request.of(state.runId, state.tier, state.budget,
-                    state.stopPoint));
+                    state.stopPoint, state.firstBaselineRun));
         } catch (RuntimeException e) {
             warn("评测主循环异常，run_id=" + state.runId + "：" + e.getMessage());
             finishFailed(state, "主循环异常：" + e.getClass().getSimpleName());
@@ -938,6 +943,7 @@ public final class EvalRunner implements EvalRunService {
             return;
         }
         long durationMs = Math.max(0L, System.currentTimeMillis() - state.startedAtMillis);
+        writeCalibrationJson(state.runId, result);
         String reportPath = writeReport(state.runId, result);
         FinalizeResult finalized = casTerminal(store, logger, state.runId, EvalStore.STATUS_COMPLETED,
                 durationMs, reportPath, null);
@@ -1009,6 +1015,38 @@ public final class EvalRunner implements EvalRunService {
             sink.send(text);
         } catch (RuntimeException e) {
             warn("完成摘要发送失败，不影响 run 终态与报表，run_id=" + state.runId + "：" + e.getMessage());
+        }
+    }
+
+    /** 受理时判定首次基线 run：只有 full 档且当前没有 active 基线才执行校准自证。 */
+    private boolean firstBaselineRun(String tier) {
+        if (!EvalStore.TIER_FULL.equals(tier)) {
+            return false;
+        }
+        try {
+            return store.findActiveBaseline() == null;
+        } catch (RuntimeException e) {
+            warn("查询激活基线失败，按非首次基线处理（跳过校准自证）：" + e.getMessage());
+            return false;
+        }
+    }
+
+    /**
+     * 在 COMPLETED 终态 CAS 之前回写 calibration_json（§6.7.4、§8.6 第 8 节）。
+     *
+     * <p>写入失败只记 WARN：校准是自证旁证，不得阻断 run 收口、报表与基线创建。</p>
+     */
+    private void writeCalibrationJson(String runId, EvalRunLoop.Result result) {
+        String json = result.calibrationJson();
+        if (json == null) {
+            return;
+        }
+        try {
+            if (!store.writeCalibrationJson(runId, json)) {
+                warn("校准自证 JSON 未写入 run 行，run_id=" + runId + "（run 终态不受影响）");
+            }
+        } catch (RuntimeException e) {
+            warn("校准自证 JSON 写入异常，run_id=" + runId + "：" + e.getMessage());
         }
     }
 

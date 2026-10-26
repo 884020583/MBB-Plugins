@@ -370,6 +370,26 @@ public final class EvalCallInvoker {
      * @return 判分结果；预算止步时 result 为 null 且 kind 为 BUDGET_STOPPED
      */
     public JudgeOutcome judge(String runId, String caseId, int sampleIndex, int attempt, JudgeCall call) {
+        return judgeInternal(runId, caseId, sampleIndex, attempt, call, false);
+    }
+
+    /**
+     * 执行一次校准自证判分：与 {@link #judge} 同样占 1 次预算、调用一次、落 1 行，但行的
+     * {@code stage} 写 {@code calib}（§6.7.4、§6.8.1）。
+     *
+     * <p>校准的 3 次调用计入同一预算与 calls_used，因此预算触顶时同样返回
+     * {@link JudgeKind#BUDGET_STOPPED}，由调用方中止校准步骤而不是中止 run。</p>
+     *
+     * @param attempt 同一 run 内校准行的行序号，由调用方保证唯一
+     * @return 判分结果；预算止步时 result 为 null 且 kind 为 BUDGET_STOPPED
+     */
+    public JudgeOutcome judgeCalibration(String runId, String caseId, int sampleIndex, int attempt,
+            JudgeCall call) {
+        return judgeInternal(runId, caseId, sampleIndex, attempt, call, true);
+    }
+
+    private JudgeOutcome judgeInternal(String runId, String caseId, int sampleIndex, int attempt,
+            JudgeCall call, boolean calibration) {
         if (call == null) {
             throw new IllegalArgumentException("判分调用不能为空");
         }
@@ -400,7 +420,11 @@ public final class EvalCallInvoker {
                     EvalGenerateResult.ERROR_INTERNAL, false, 0, null, "判分调用返回 null", null, 0);
         }
         long elapsedMs = System.currentTimeMillis() - startedAt;
-        recorder.recordJudge(runId, caseId, sampleIndex, attempt, elapsedMs, result);
+        if (calibration) {
+            recorder.recordCalibration(runId, caseId, sampleIndex, attempt, elapsedMs, result);
+        } else {
+            recorder.recordJudge(runId, caseId, sampleIndex, attempt, elapsedMs, result);
+        }
 
         JudgeKind kind = result.isOk() ? JudgeKind.OK : (result.isInvalid() ? JudgeKind.INVALID : JudgeKind.ERROR);
         return new JudgeOutcome(kind, result, result.message(), elapsedMs, ledger.used(), ledger.limit(), null);

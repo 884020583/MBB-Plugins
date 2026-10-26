@@ -13,7 +13,13 @@ import org.moboxlab.mbb.eval.call.EvalBudgetLedger;
 import org.moboxlab.mbb.eval.call.EvalCallInvoker;
 import org.moboxlab.mbb.eval.call.EvalCallPolicy;
 import org.moboxlab.mbb.eval.call.EvalCallRecorder;
+import org.moboxlab.mbb.eval.calib.EvalCalibrationJudgePort;
+import org.moboxlab.mbb.eval.calib.EvalCalibrationResult;
+import org.moboxlab.mbb.eval.calib.EvalCalibrationRunner;
+import org.moboxlab.mbb.eval.calib.EvalCalibrationSample;
 import org.moboxlab.mbb.eval.config.EvalConfig;
+import org.moboxlab.mbb.eval.gateway.EvalGenerateResult;
+import org.moboxlab.mbb.eval.judge.EvalJudgeResult;
 import org.moboxlab.mbb.eval.log.EvalLog;
 import org.moboxlab.mbb.eval.metrics.EvalAiUsageSource;
 import org.moboxlab.mbb.eval.report.EvalReportData;
@@ -55,6 +61,8 @@ public final class EvalRunLoop {
         private EvalRubric rubric;
         private EvalCaseGeneratePort generatePort;
         private EvalCaseJudgePort judgePort;
+        /** 校准自证判分端口（§6.7.4）；null 表示未装配，首次基线 run 跳过校准并记 WARN。 */
+        private EvalCalibrationJudgePort calibrationJudgePort;
         private File reportsDirectory;
         private PluginLogger logger;
         private EvalCaseClock clock;
@@ -88,6 +96,11 @@ public final class EvalRunLoop {
 
         public Deps judgePort(EvalCaseJudgePort judgePort) {
             this.judgePort = judgePort;
+            return this;
+        }
+
+        public Deps calibrationJudgePort(EvalCalibrationJudgePort calibrationJudgePort) {
+            this.calibrationJudgePort = calibrationJudgePort;
             return this;
         }
 
@@ -142,6 +155,11 @@ public final class EvalRunLoop {
             return judgePort;
         }
 
+        /** 校准自证判分端口；null 表示未装配。 */
+        public EvalCalibrationJudgePort calibrationJudgePort() {
+            return calibrationJudgePort;
+        }
+
         public File reportsDirectory() {
             return reportsDirectory;
         }
@@ -169,17 +187,28 @@ public final class EvalRunLoop {
         private final String tier;
         private final EvalRunBudget budget;
         private final EvalRunStopPoint stopPoint;
+        /** 是否为首次基线 run：true 时在正式逐题执行前跑 3 条校准自证（§6.7.4）。 */
+        private final boolean firstBaselineRun;
 
-        private Request(String runId, String tier, EvalRunBudget budget, EvalRunStopPoint stopPoint) {
+        private Request(String runId, String tier, EvalRunBudget budget, EvalRunStopPoint stopPoint,
+                        boolean firstBaselineRun) {
             this.runId = runId;
             this.tier = tier;
             this.budget = budget;
             this.stopPoint = stopPoint;
+            this.firstBaselineRun = firstBaselineRun;
         }
 
+        /** 旧签名：不执行校准自证（firstBaselineRun=false），保持既有调用行为不变。 */
         public static Request of(String runId, String tier, EvalRunBudget budget,
                                  EvalRunStopPoint stopPoint) {
-            return new Request(runId, tier, budget, stopPoint);
+            return new Request(runId, tier, budget, stopPoint, false);
+        }
+
+        /** 带校准标志的入口：只有首次基线 full run 才应传 true。 */
+        public static Request of(String runId, String tier, EvalRunBudget budget,
+                                 EvalRunStopPoint stopPoint, boolean firstBaselineRun) {
+            return new Request(runId, tier, budget, stopPoint, firstBaselineRun);
         }
 
         public String runId() {
@@ -197,6 +226,11 @@ public final class EvalRunLoop {
         public EvalRunStopPoint stopPoint() {
             return stopPoint;
         }
+
+        /** 是否为首次基线 run；true 才执行校准自证。 */
+        public boolean firstBaselineRun() {
+            return firstBaselineRun;
+        }
     }
 
     /** 主循环结果：终态建议、聚合分、报表数据入口与 ≤15 行摘要。 */
@@ -212,11 +246,13 @@ public final class EvalRunLoop {
         private final List<String> summaryLines;
         private final Map<String, Double> reportWeights;
         private final EvalAiUsageSource aiUsageSource;
+        /** 校准自证 JSON；null 表示本次 run 未执行校准或校准未产出结果。 */
+        private final String calibrationJson;
 
         private Result(String runId, Status status, String abortReason, boolean terminalInStore,
                        EvalRunScore score, int plannedCases, int executedCases, int callsUsed,
                        List<String> summaryLines, Map<String, Double> reportWeights,
-                       EvalAiUsageSource aiUsageSource) {
+                       EvalAiUsageSource aiUsageSource, String calibrationJson) {
             this.runId = runId;
             this.status = status;
             this.abortReason = abortReason;
@@ -228,6 +264,7 @@ public final class EvalRunLoop {
             this.summaryLines = summaryLines;
             this.reportWeights = reportWeights;
             this.aiUsageSource = aiUsageSource;
+            this.calibrationJson = calibrationJson;
         }
 
         public String runId() {
@@ -267,6 +304,11 @@ public final class EvalRunLoop {
 
         public List<String> summaryLines() {
             return summaryLines;
+        }
+
+        /** 校准自证 JSON；null 表示未执行或未产出，由 runner 决定是否写 run 行。 */
+        public String calibrationJson() {
+            return calibrationJson;
         }
 
         /** 回执摘要文本，最多 15 行。 */
@@ -345,6 +387,18 @@ public final class EvalRunLoop {
                 new EvalCallRecorder(deps.store, deps.logger), policy());
         EvalCaseExecutor executor = new EvalCaseExecutor();
 
+        // 校准自证在正式逐题执行之前完成（§6.7.4）：每条样本各 1 次 judge，计入同一预算并落
+        // stage=calib 行；校准失败只写 WARN 与 calibration_json，不改变 run 的走向。
+        String calibrationJson = null;
+        if (request.firstBaselineRun() && EvalStore.TIER_FULL.equals(request.tier())) {
+            StopSignal beforeCalibration = checkStop(stopPoint, budget, clock);
+            if (beforeCalibration == null) {
+                calibrationJson = calibrate(request, invoker);
+            } else {
+                warn("校准自证未开始：run 在正式执行前已满足停止条件，run_id=" + request.runId());
+            }
+        }
+
         List<EvalCaseScore> scores = new ArrayList<EvalCaseScore>();
         String abortReason = null;
         boolean terminalInStore = false;
@@ -404,7 +458,91 @@ public final class EvalRunLoop {
         return new Result(request.runId(), completed ? Status.COMPLETED : Status.ABORTED,
                 completed || terminalInStore ? null : normalize(abortReason), terminalInStore,
                 evaluation == null ? null : evaluation.score, selected.size(), executed,
-                budget.used(), summary, deps.reportWeights(), deps.aiUsageSource());
+                budget.used(), summary, deps.reportWeights(), deps.aiUsageSource(), calibrationJson);
+    }
+
+    /**
+     * 执行 3 条校准样本，返回可写入 run.calibration_json 的文本。
+     *
+     * <p>每条样本通过 {@link EvalCallInvoker#judgeCalibration} 发起：预算 +1、落 stage=calib 行，
+     * 与正式判分共用同一本账（§6.8.1）。预算 STOP、熔断、判分失败或预算端口异常都只中止
+     * 后续样本，不向主流程抛出；异常兜底也返回失败 JSON，保证 calibration_json 有据可查。</p>
+     */
+    private String calibrate(final Request request, final EvalCallInvoker invoker) {
+        final EvalCalibrationJudgePort port = deps.calibrationJudgePort;
+        if (port == null) {
+            warn("未装配校准判分端口，跳过校准自证，run_id=" + request.runId());
+            return null;
+        }
+        final boolean[] stopped = new boolean[]{false};
+        final String[] stopReason = new String[]{null};
+        EvalCalibrationJudgePort wired = new EvalCalibrationJudgePort() {
+            @Override
+            public EvalJudgeResult judge(final EvalCalibrationSample sample) {
+                EvalCallInvoker.JudgeOutcome outcome = invoker.judgeCalibration(request.runId(),
+                        sample.caseId(), 0, 0, new EvalCallInvoker.JudgeCall() {
+                            @Override
+                            public EvalJudgeResult call() {
+                                return port.judge(request.runId(), sample);
+                            }
+                        });
+                if (outcome.isBudgetStopped()) {
+                    stopped[0] = true;
+                    stopReason[0] = "预算已触顶，校准自证中止（" + normalize(outcome.abortReason()) + "）";
+                    return EvalJudgeResult.error(sample.dimensionId(), EvalJudgeResult.KIND_TRANSPORT,
+                            "budget", false, 0, null, stopReason[0], null, 0);
+                }
+                EvalJudgeResult result = outcome.result();
+                if (result == null) {
+                    stopped[0] = true;
+                    stopReason[0] = "校准样本 " + sample.caseId() + " 判分未返回结果";
+                    return EvalJudgeResult.error(sample.dimensionId(), EvalJudgeResult.KIND_TRANSPORT,
+                            EvalGenerateResult.ERROR_INTERNAL, false, 0, null, stopReason[0], null, 0);
+                }
+                if (!result.isOk()) {
+                    stopped[0] = true;
+                    stopReason[0] = "校准样本 " + sample.caseId() + " 判分失败："
+                            + (result.isInvalid() ? result.errorKind() : result.errorType());
+                }
+                return result;
+            }
+        };
+        try {
+            EvalCalibrationResult calibration = new EvalCalibrationRunner(wired, deps.logger)
+                    .run(request.runId(), new EvalCalibrationRunner.StopCondition() {
+                        @Override
+                        public boolean stop() {
+                            return stopped[0];
+                        }
+                    });
+            JSONObject json = calibration.toJson();
+            json.put("aborted", Boolean.valueOf(stopped[0]));
+            json.put("executedSamples", Integer.valueOf(calibration.samples().size()));
+            if (stopped[0]) {
+                json.put("abortReason", stopReason[0] == null ? "校准自证提前中止" : stopReason[0]);
+                warn("校准自证提前中止，run_id=" + request.runId() + "，原因=" + stopReason[0]
+                        + "，已执行样本=" + calibration.samples().size());
+            }
+            return json.toJSONString();
+        } catch (RuntimeException e) {
+            warn("校准自证异常，run_id=" + request.runId() + "：" + e.getMessage());
+            return calibrationFailureJson(request.runId(), "校准自证异常：" + e.getClass().getSimpleName());
+        }
+    }
+
+    /** 校准过程自身异常时的兜底 JSON：保留三项门槛键，明确标记未通过。 */
+    private static String calibrationFailureJson(String runId, String message) {
+        JSONObject json = new JSONObject(true);
+        json.put("runId", runId);
+        json.put("passed", Boolean.FALSE);
+        json.put("personaPassed", Boolean.FALSE);
+        json.put("memoryPassed", Boolean.FALSE);
+        json.put("boundaryPassed", Boolean.FALSE);
+        json.put("boundaryVetoed", Boolean.FALSE);
+        json.put("aborted", Boolean.TRUE);
+        json.put("abortReason", message);
+        json.put("samples", new JSONArray());
+        return json.toJSONString();
     }
 
     private void validate(Request request) {
