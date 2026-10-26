@@ -105,6 +105,14 @@ public final class EvalStore {
             + " WHERE run_id = ? AND status = 'RUNNING'";
 
     /**
+     * 报表重建后只回写 report_path（§8.7、§13.4）：不碰状态、结束时间、调用数与任何分数。
+     *
+     * <p>数据库是唯一事实源，报表文件只是派生视图；重建只允许改这一个派生列。</p>
+     */
+    private static final String SQL_UPDATE_REPORT_PATH = "UPDATE plugin_mbb_eval_run"
+            + " SET report_path = ? WHERE run_id = ?";
+
+    /**
      * 用例结果插入：主键由门面按「run_id + 业务键」派生（§4.2 O7），(run_id, case_id) 唯一索引兜底。
      *
      * <p>走 update 而不是 insert：主键是 TEXT，insert 返回的 last_insert_rowid 对这类表没有意义，
@@ -793,6 +801,35 @@ public final class EvalStore {
         return update("ABORTED", SQL_CAS_ABORTED, runId, endedAt, durationMs, errorSummary);
     }
 
+    /**
+     * 报表重建后回写 report_path（§8.7）。
+     *
+     * <p>只更新 report_path 一列，不改 status / ended_at / duration_ms / calls_used，
+     * 也不重算任何分数；重复重建写入同一相对路径是幂等的。</p>
+     *
+     * @param runId      run 标识
+     * @param reportPath 相对路径，形如 {@code reports/run-<run_id>.md}
+     * @return storage.update 返回值：-1 表示未执行（已记 WARN）、0 表示 run 行不存在、正数表示已更新
+     */
+    public int updateReportPath(String runId, String reportPath) {
+        if (runId == null || runId.trim().isEmpty()) {
+            throw new IllegalArgumentException("run_id 不能为空");
+        }
+        int result;
+        try {
+            result = storage.update(SQL_UPDATE_REPORT_PATH, reportPath, runId);
+        } catch (RuntimeException e) {
+            warn("report_path 回写异常（run_id=" + runId + "）：" + e.getMessage());
+            return -1;
+        }
+        if (result < 0) {
+            warn("report_path 回写未执行（run_id=" + runId + "），效果未知");
+        } else if (result == 0) {
+            warn("report_path 回写未命中 run 行（run_id=" + runId + "）");
+        }
+        return result;
+    }
+
     private int update(String targetStatus, String sql, String runId, String endedAt,
                        long durationMs, String text) {
         if (runId == null || runId.trim().isEmpty()) {
@@ -883,7 +920,7 @@ public final class EvalStore {
     public static List<String> sqlStatements() {
         return Collections.unmodifiableList(new ArrayList<String>(Arrays.asList(
                 SQL_RUN_ID_EXISTS, SQL_INSERT_RUN, SQL_FIND_RUN, SQL_FIND_RUNNING, SQL_FIND_LATEST,
-                SQL_CAS_COMPLETED, SQL_CAS_FAILED, SQL_CAS_ABORTED,
+                SQL_CAS_COMPLETED, SQL_CAS_FAILED, SQL_CAS_ABORTED, SQL_UPDATE_REPORT_PATH,
                 SQL_INSERT_CASE_RESULT, SQL_FIND_CASE_RESULT, SQL_FIND_CASE_RESULTS,
                 SQL_COUNT_CASE_RESULTS, SQL_INSERT_CALL, SQL_FIND_CALL, SQL_FIND_CALLS,
                 SQL_COUNT_CALLS, SQL_INCREMENT_CALLS_USED, SQL_INSERT_BASELINE,
