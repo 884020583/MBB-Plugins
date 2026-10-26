@@ -251,6 +251,7 @@ memoryConflictMinOverlap: 2
 traceEnable: true
 traceKeepHours: 72
 traceMaxRows: 2000
+evalApiEnable: true
 evalEnable: true
 evalProfile: ""
 evalMaxTokens: 1200
@@ -353,7 +354,7 @@ quietReplyEnable: true
 风格层连续出现 `styleFailureThreshold` 次无效改写后会熔断
 `styleFailureCooldownSecond` 秒，期间直接使用执行层原文。
 
-`traceEnable` 默认 `true`，按群记录路由与回复 trace，保留 `traceKeepHours` 小时，最多 `traceMaxRows` 行；`/role trace` 查看。`evalEnable` 默认 `true`，`/role eval` 运行内置或 `evals/roleplay-evals.json` 自定义评测集，`evalProfile` 留空时使用 `aiProfile`。
+`traceEnable` 默认 `true`，按群记录路由与回复 trace，保留 `traceKeepHours` 小时，最多 `traceMaxRows` 行；`/role trace` 查看。`evalApiEnable` 默认 `true`，是评测接口总开关，决定 MBB-Eval 能否通过 `capabilities` / `eval-generate` 调用 Roleplay；`evalEnable` 默认 `true`，已废弃，等价于 `evalApiEnable`，两者为 AND 关系（任一为 `false` 即关闭），下个小版本停止读取。`evalProfile` 留空时使用 `aiProfile`。`/role eval` 已转为墓碑提示，评测请改用 MBB-Eval 的 `/eval list`、`/eval run`。
 
 `threadEnable` 默认 `true`，按群维护会话线程、参与者、上一位发言者和角色是否被等待回应；`threadWindowSecond` 控制多久没有新消息后视为新线程。
 

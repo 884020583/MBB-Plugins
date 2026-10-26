@@ -60,7 +60,7 @@ public class RoleplayEvalGenerationService {
      * 就无法写入任何群状态，这是 §10.4.2 隔离要求的结构性保证，也是不变量单测锁定的对象。</p>
      */
     public interface Runtime {
-        /** 评测总开关：evalApiEnable && evalEnable */
+        /** 评测总开关：evalApiEnable && evalEnable（旧键 evalEnable 已废弃，等价于 evalApiEnable） */
         boolean evalApiEnabled();
 
         /** 常规回复用的 profile，评测 profile 为空时回退到它 */
@@ -118,7 +118,8 @@ public class RoleplayEvalGenerationService {
 
     private JSONObject dispatch(JSONObject params) {
         if (!runtime.evalApiEnabled()) {
-            return failure("disabled", false, "评测接口未开启：evalApiEnable 与 evalEnable 需同时为 true");
+            return failure("disabled", false,
+                    "评测接口未开启：evalApiEnable 与 evalEnable 需同时为 true（旧键 evalEnable 已废弃，等价于 evalApiEnable）");
         }
         Spec spec = new Spec();
         Problem problem = fill(params, spec);

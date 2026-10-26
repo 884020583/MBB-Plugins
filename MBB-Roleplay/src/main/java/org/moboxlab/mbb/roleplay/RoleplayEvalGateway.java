@@ -21,10 +21,9 @@ import java.security.NoSuchAlgorithmException;
  * {@link RoleplayEvalGenerationService}，本类只负责能力汇总、动作分发与异常收口，
  * 不依赖 MBB-Eval 的任何类型，也不读 MBB-Eval 的数据表。</p>
  *
- * <p>能力字段取值全部来自现有配置与 persona 快照，不新增配置键。开关键按规格 §12.2 / §14.5 取
- * {@code evalApiEnable && evalEnable}：新键缺失按 true，旧键作为兼容别名参与 AND，任一为 false 即关闭。
- * evalApiEnable 的正式模板键登记、RoleplayConfig 读取处兜底与一次性废弃 WARN 归 I-5（issue #94，
- * MBB-Eval 首版发布窗口）；本切片不写回配置，也不改 RoleplayConfigMigrator 的默认键表。</p>
+ * <p>能力字段取值全部来自现有配置与 persona 快照。开关键在配置层统一收口为
+ * {@link RoleplayConfig#evalApiAllowed()}，语义是 {@code evalApiEnable && evalEnable}：新键缺失按 true，
+ * 旧键 evalEnable 已废弃但仍作为兼容别名参与 AND，任一为 false 即关闭；旧键的一次性废弃 WARN 在配置加载处发出。</p>
  */
 public class RoleplayEvalGateway {
     /** 能力探测动作名 */
@@ -230,14 +229,20 @@ public class RoleplayEvalGateway {
     }
 
     /**
-     * 评测接口总开关：按规格 §12.2 / §14.5 取 {@code evalApiEnable && evalEnable}，
-     * 旧键 evalEnable 作为兼容别名参与 AND 兜底，任一为 false 即关闭。
-     * evalApiEnable 正式入模板、RoleplayConfig 读取处兜底与一次性废弃 WARN 归 I-5（issue #94）。
+     * 评测接口总开关：配置已加载时直接使用 {@link RoleplayConfig#evalApiAllowed()}，
+     * 即 {@code evalApiEnable && evalEnable}，任一为 false 即关闭。
+     * 配置尚未就绪时退回插件配置读取，新键缺失按 true，避免初始化阶段误关。
      */
     static boolean evalApiEnabled(Plugin plugin, RoleplayConfig config) {
+        if (config != null) {
+            return config.evalApiAllowed();
+        }
         PluginConfig pluginConfig = plugin == null ? null : plugin.getConfig();
-        boolean apiEnable = pluginConfig == null || pluginConfig.getBoolean(KEY_EVAL_API_ENABLE, true);
-        boolean legacyEnable = config == null || config.evalEnable;
+        if (pluginConfig == null) {
+            return true;
+        }
+        boolean apiEnable = pluginConfig.getBoolean(KEY_EVAL_API_ENABLE, true);
+        boolean legacyEnable = pluginConfig.getBoolean("evalEnable", true);
         return apiEnable && legacyEnable;
     }
 

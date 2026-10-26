@@ -65,7 +65,7 @@ flowchart LR
 | `replyMaxTokens` / `promptTotalChars` | int | 生效值 |
 | `toolEnable` / `replyReviewEnable` | bool | 如实回报当前配置 |
 | `maxHistoryRounds` / `maxHistoryChars` | int | 评测注入历史上限，固定 `40` / `30000` |
-| `evalApiEnable` | bool | 评测接口总开关，取 `evalApiEnable && evalEnable`（旧键参与 AND 兜底） |
+| `evalApiEnable` | bool | 评测接口总开关，取 `evalApiEnable && evalEnable`；旧键 `evalEnable` 已废弃，下个小版本停止读取 |
 
 协商规则：
 
@@ -73,7 +73,7 @@ flowchart LR
 2. 服务名 `MBB-Roleplay` 取不到时按「插件缺失」处理；`evalApiEnable=false` 时 `capabilities` 仍可调用，但 `actions` 只留 `capabilities`。
 3. `personaHash` 与 `configFingerprint` 供调用方判定两次 run 是否可比，只落库不参与角色逻辑。
 
-兼容说明：`evalApiEnable` 的模板键登记、一次性废弃 WARN 与版本窗口归 MBB-Eval 首版发布（切片 I-5）；本切片已按规格 §12.2 / §14.5 取 `evalApiEnable && evalEnable`（新键缺失按 true，旧键任一为 false 即关闭），不写回配置文件。`eval-generate` 已由切片 C-2 接入（跳过发送、工具回合、记忆、情绪、反馈与关系，只写一行 `[评测]` 普通日志）；`capabilities` 内的运行时异常在网关收口，记 ERROR 并返回 `status=false`，不会穿出服务边界。
+兼容说明：`evalApiEnable` 与旧键 `evalEnable` 为 AND 关系，任一为 `false` 即关闭，新键缺失按 `true`；`evalEnable` 已废弃，仅作一版兼容别名，下个小版本停止读取，配置加载时若显式存在该键会记一次 WARN「evalEnable 已废弃，下个小版本停止读取」。`eval-generate` 已由切片 C-2 接入（跳过发送、工具回合、记忆、情绪、反馈与关系，只写一行 `[评测]` 普通日志）；`capabilities` 内的运行时异常在网关收口，记 ERROR 并返回 `status=false`，不会穿出服务边界。
 
 ## 多机器人协作（MBB-BotHub）
 
