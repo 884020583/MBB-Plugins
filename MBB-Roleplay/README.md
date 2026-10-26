@@ -182,6 +182,7 @@ flowchart LR
 2. `MBB-AIGuard` 与 Roleplay 的分工是内容风险与角色扮演各管各的，二者互不依赖，可以同时启用；需要风控时不必改 Roleplay。
 3. `MBB-Chat` 与 Roleplay 共用 `MBB-AI` 的 profile 与并发上限，多个 AI 插件同开时要注意 `MBB-AI` 的 `maxConcurrent` 需要覆盖它们的总并发。
 4. `MBB-Poke` 与 Roleplay 的戳一戳能力互斥：检测到 `MBB-Poke` 启用时，Roleplay 主动让位，避免同一件事回两次。
+5. `MBB-Eval`（可选，同仓库）是调用方：它通过服务名 `MBB-Roleplay` 调 `capabilities` 与 `eval-generate` 做离线评测，Roleplay 只汇总能力字段与提供不落状态的生成入口，不依赖 MBB-Eval，也不感知它的数据表。契约见 [技能与集成](../docs/roleplay/integrations.md#评测接口mbb-eval)。
 
 ## 快速开始
 
@@ -202,6 +203,7 @@ flowchart LR
 | `MBB-Vision` | 可选 | 图片与表情包识图、缓存和原图上下文 |
 | `MBB-Sticker` | 可选 | 表情包标签检索、随机发送与主动收藏 |
 | `MBB-ComfyUI` | 可选 | 生图技能与生成完成回调 |
+| `MBB-Eval` | 可选（调用方） | 离线评测调用 `capabilities` / `eval-generate`，只读与不落状态 |
 
 没有可选插件时，Roleplay 仍可使用文本聊天、记忆、情绪和提醒功能。
 
