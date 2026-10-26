@@ -117,6 +117,13 @@ public final class EvalStore {
             + " SET report_path = ? WHERE run_id = ?";
 
     /**
+     * 校准自证结果只回写当前仍 RUNNING 的 run 行（§6.7.4、§8.6）：终态之后不得再改
+     * calibration_json，避免覆盖已被其他路径收口的行。
+     */
+    private static final String SQL_UPDATE_CALIBRATION = "UPDATE plugin_mbb_eval_run"
+            + " SET calibration_json = ? WHERE run_id = ? AND status = 'RUNNING'";
+
+    /**
      * 用例结果插入：主键由门面按「run_id + 业务键」派生（§4.2 O7），(run_id, case_id) 唯一索引兜底。
      *
      * <p>走 update 而不是 insert：主键是 TEXT，insert 返回的 last_insert_rowid 对这类表没有意义，
@@ -482,6 +489,29 @@ public final class EvalStore {
             throw new IllegalArgumentException("run_id 不能为空");
         }
         return write("calls_used 自增（run_id=" + runId + "）", SQL_INCREMENT_CALLS_USED, runId);
+    }
+
+    /**
+     * 把校准自证 JSON 写入 run 行的 calibration_json（§6.7.4、§8.6 第 8 节）。
+     *
+     * <p>只在 run 仍为 RUNNING 时生效：终态之后 update 返回 0 属于正常竞态，按已有行跳过并
+     * 记 WARN，不重试、不覆盖。写入失败只影响校准自证列，不影响 run 终态与报表。</p>
+     *
+     * @param runId 运行编号，不能为空
+     * @param json  校准结果 JSON；空白视为无结果，返回 false
+     * @return true 表示至少改写了 1 行
+     * @throws IllegalArgumentException run_id 为空
+     */
+    public boolean writeCalibrationJson(String runId, String json) {
+        if (isBlank(runId)) {
+            throw new IllegalArgumentException("run_id 不能为空");
+        }
+        if (isBlank(json)) {
+            warn("calibration_json 写入跳过（run_id=" + runId + "）：内容为空");
+            return false;
+        }
+        return write("calibration_json 写入（run_id=" + runId + "）", SQL_UPDATE_CALIBRATION, json, runId)
+                == WriteResult.APPLIED;
     }
 
     /** 按 call_id 查询单次调用行；没有或查询异常返回 null（异常已记 WARN）。 */
@@ -925,6 +955,7 @@ public final class EvalStore {
         return Collections.unmodifiableList(new ArrayList<String>(Arrays.asList(
                 SQL_RUN_ID_EXISTS, SQL_INSERT_RUN, SQL_FIND_RUN, SQL_FIND_RUNNING, SQL_FIND_LATEST,
                 SQL_CAS_COMPLETED, SQL_CAS_FAILED, SQL_CAS_ABORTED, SQL_UPDATE_REPORT_PATH,
+                SQL_UPDATE_CALIBRATION,
                 SQL_INSERT_CASE_RESULT, SQL_FIND_CASE_RESULT, SQL_FIND_CASE_RESULTS,
                 SQL_COUNT_CASE_RESULTS, SQL_INSERT_CALL, SQL_FIND_CALL, SQL_FIND_CALLS,
                 SQL_COUNT_CALLS, SQL_INCREMENT_CALLS_USED, SQL_INSERT_BASELINE,

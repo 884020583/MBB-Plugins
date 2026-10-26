@@ -14,6 +14,12 @@ import org.moboxlab.moboxbot.API.PluginLogger;
  */
 public final class EvalCalibrationRunner {
 
+    /** 每条样本执行前的中止判定；适配器把它接预算 STOP、熔断或判分失败。 */
+    public interface StopCondition {
+        /** true 表示不再执行后续样本，已执行的样本仍保留在结果中。 */
+        boolean stop();
+    }
+
     private final EvalCalibrationJudgePort judgePort;
     private final PluginLogger logger;
 
@@ -33,12 +39,28 @@ public final class EvalCalibrationRunner {
      * 执行 3 条固定样本，返回不可变校准结果；judge 失败不会抛出。
      */
     public EvalCalibrationResult run(String runId) {
+        return run(runId, null);
+    }
+
+    /**
+     * 执行固定样本，并在每条样本前检查中止条件（预算 STOP、熔断或判分失败）。
+     *
+     * <p>中止只截断后续样本，已执行样本的结果照样返回：调用方据此把「校准未跑完」写进
+     * calibration_json，同时不让校准失败波及 run 主流程（§6.7.4）。</p>
+     *
+     * @param stopCondition 可空；null 表示跑满 3 条
+     */
+    public EvalCalibrationResult run(String runId, StopCondition stopCondition) {
         String id = runId == null ? "" : runId;
         List<EvalCalibrationSample> samples = EvalCalibrationSample.all();
         EvalLog.info(logger, "开始校准自证 run=" + id + " 样本数=" + samples.size());
         List<EvalCalibrationResult.SampleOutcome> outcomes =
                 new ArrayList<EvalCalibrationResult.SampleOutcome>(samples.size());
         for (EvalCalibrationSample sample : samples) {
+            if (stopCondition != null && stopCondition.stop()) {
+                EvalLog.warn(logger, "校准自证提前中止 run=" + id + "，已执行样本=" + outcomes.size());
+                break;
+            }
             outcomes.add(runOne(sample));
         }
         EvalCalibrationResult result = new EvalCalibrationResult(id, outcomes, false);

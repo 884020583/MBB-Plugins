@@ -20,6 +20,7 @@ import org.moboxlab.mbb.eval.command.EvalCommand;
 import org.moboxlab.mbb.eval.config.EvalConfig;
 import org.moboxlab.mbb.eval.exec.EvalRoleplayGeneratePort;
 import org.moboxlab.mbb.eval.exec.EvalRunLoop;
+import org.moboxlab.mbb.eval.exec.EvalServiceCalibrationJudgePort;
 import org.moboxlab.mbb.eval.exec.EvalServiceJudgePort;
 import org.moboxlab.mbb.eval.gateway.EvalCapabilityClient;
 import org.moboxlab.mbb.eval.gateway.RoleplayEvalGateway;
@@ -272,6 +273,8 @@ public class EvalPlugin extends Plugin {
                     .rubric(rubricCache.rubric())
                     .generatePort(new EvalRoleplayGeneratePort(gateway))
                     .judgePort(new EvalServiceJudgePort(judgeService, rubricCache.rubric()))
+                    .calibrationJudgePort(new EvalServiceCalibrationJudgePort(judgeService,
+                            rubricCache.rubric(), calibrationPersonaSummary()))
                     .reportWeights(reportWeights())
                     .aiUsageSource(aiUsageSource())
                     .reportsDirectory(reportsDirectory)
@@ -282,6 +285,24 @@ public class EvalPlugin extends Plugin {
                     + e.getMessage());
             return null;
         }
+    }
+
+    /**
+     * 校准判分用的角色档案摘要：优先取题库 persona.summary，缺失时用固定兜底文本，
+     * 保证校准端口装配不因题库字段缺失而整体失败。
+     */
+    private String calibrationPersonaSummary() {
+        try {
+            JSONObject bank = bankCache == null ? null : bankCache.json();
+            JSONObject persona = bank == null ? null : bank.getJSONObject("persona");
+            String summary = persona == null ? null : persona.getString("summary");
+            if (summary != null && !summary.trim().isEmpty()) {
+                return summary.trim();
+            }
+        } catch (RuntimeException e) {
+            getLogger().sendWarn("[MBB-Eval] 读取角色档案摘要失败，校准改用兜底文本：" + e.getMessage());
+        }
+        return "爱丽丝";
     }
 
     /**
