@@ -2,6 +2,7 @@ package org.moboxlab.mbb.eval.store;
 
 import com.alibaba.fastjson.JSONObject;
 import org.moboxlab.mbb.eval.config.EvalConfig;
+import org.moboxlab.mbb.eval.log.EvalLog;
 import org.moboxlab.moboxbot.API.PluginLogger;
 
 import java.io.File;
@@ -179,15 +180,11 @@ public final class EvalRetentionService {
     }
 
     private void info(String message) {
-        if (logger != null) {
-            logger.sendInfo(message);
-        }
+        EvalLog.info(logger, message);
     }
 
     private void warn(String message) {
-        if (logger != null) {
-            logger.sendWarn(message);
-        }
+        EvalLog.warn(logger, message);
     }
 
     /** 一轮清理的结果：删除 / 跳过 / 失败计数与逐条明细。 */
