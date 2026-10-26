@@ -3,13 +3,13 @@
 MoBoxBot 的离线评测与回归基线插件：用固定题库对 MBB-AI 做可重复的自动评测，由 LLM 判分并与基线对比。评测只在命令触发或后台调度时运行，**不参与线上对话回复**。
 
 - 规格：[docs/MBB-Eval.md](../docs/MBB-Eval.md)
-- 规格票：#50；实施票：#51（A-1 插件骨架与构建接入）、#53（A-2 四表建表、索引与 run_id/CAS 骨架）、#60（A-3 命令受理、预检桩与 runner 骨架）、#61（A-4 Roleplay 网关骨架）
+- 规格票：#50；实施票：#51（A-1 插件骨架与构建接入）、#53（A-2 四表建表、索引与 run_id/CAS 骨架）、#60（A-3 命令受理、预检桩与 runner 骨架）、#61（A-4 Roleplay 网关骨架）、#54（A-5 测试载体与最小用例）
 
 ## 当前阶段
 
-A-4 网关骨架阶段：插件可构建、可被主程序加载、可读取并钳制配置；启用时幂等创建四张数据表与七个索引，并对老库只补列、不删除不重建；已注册 `/eval` 命令，具备逐子命令权限判定、预检与单 run 互斥、run_id 生成、RUNNING 行写入与终态 CAS；对 MBB-Roleplay 的 `capabilities` / `eval-generate` 已有完整网关（入参拼装、出参必需字段校验、errorType 处置映射、sessionId 编码），预检据此判定接口版本与禁用状态。骨架期 `/eval run` 受理后只做占位执行（不读题库、不调用 AI、不写 case/call 行）；题库、rubric、判分、报表与基线由后续切片按规格 §16.2 接入。
+A-5 测试载体阶段：插件可构建、可被主程序加载、可读取并钳制配置；启用时幂等创建四张数据表与七个索引，并对老库只补列、不删除不重建；已注册 `/eval` 命令，具备逐子命令权限判定、预检与单 run 互斥、run_id 生成、RUNNING 行写入与终态 CAS；对 MBB-Roleplay 的 `capabilities` / `eval-generate` 已有完整网关（入参拼装、出参必需字段校验、errorType 处置映射、sessionId 编码），预检据此判定接口版本与禁用状态。骨架期 `/eval run` 受理后只做占位执行（不读题库、不调用 AI、不写 case/call 行）；题库、rubric、判分、报表与基线由后续切片按规格 §16.2 接入。构建脚本已支持可选 `-Test` 本地自检（配置键、SQL 文本、run_id 正则、权限矩阵与清单资源），不传 `-Test` 时行为与此前一致。
 
-当前版本：`V0.1.0.0.1426`（apiVersion `0.3`）。
+当前版本：`V0.1.0.0.1528`（apiVersion `0.3`）。
 
 ## 配置
 
@@ -79,6 +79,14 @@ MBB-Eval 不 import MBB-Roleplay 的任何内部类，只经主程序的服务�
 ```
 
 产物为 `out/MBB-Eval.jar`，全量构建后同时汇总到仓库根目录 `out/`。构建脚本只编译本插件源码、复制 `src/main/resources`，不打包 MoBoxBot API 与 fastjson；实际 JAR 依赖主程序提供。
+
+本地自检（可选）：
+
+```powershell
+.\build.ps1 -Bot "D:\CodeX\Projects\MoBoxBot\out\MoBoxBot.jar" -Test
+```
+
+`-Test` 在打包成功后编译 `src/test/java` 并用 JUnitCore 跑 `*Test` 用例，覆盖配置键与钳制、四表七索引的 SQL 文本边界（索引名、唯一性与部分谓词）、`run_id` 格式与主键冲突重生成、终态 CAS 返回值语义、权限矩阵，以及直接解包 `out/MBB-Eval.jar` 检查根目录清单与 `plugin.json` / `config.yml` 内容。首次运行会把 `junit 4.13.2` 与 `hamcrest-core 1.3` 下载到 `out/test-libs` 并做 sha1 校验（离线环境可手工放入同名 jar，内置 sha1 兜底），下载失败即构建失败。全量构建 `build-all.ps1` 不传 `-Test`，因此没有测试环境时全量构建不受影响。
 
 ## 安装
 

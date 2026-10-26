@@ -1,8 +1,10 @@
 ﻿# MBB-Eval 构建脚本
 # 用法：.\build.ps1 -Bot "D:\CodeX\Projects\MoBoxBot\out\MoBoxBot.jar"
+# 加 -Test 时构建后编译 src/test/java 并用 JUnitCore 跑最小用例（首次会下载 junit / hamcrest 到 out/test-libs）
 # 契约见 docs/MBB-Eval.md §11.5：只编译本插件源码，不打包 MoBoxBot 与公共依赖。
 param(
-    [string]$Bot = "D:\CodeX\Projects\MoBoxBot\out\MoBoxBot.jar"
+    [string]$Bot = "D:\CodeX\Projects\MoBoxBot\out\MoBoxBot.jar",
+    [switch]$Test
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,6 +20,9 @@ $srcResources = Join-Path $root "src\main\resources"
 $outDir = Join-Path $root "out"
 $buildDir = Join-Path $outDir "build"
 $classesDir = Join-Path $buildDir "classes"
+$srcTestJava = Join-Path $root "src\test\java"
+$testClassesDir = Join-Path $buildDir "test-classes"
+$testLibsDir = Join-Path $outDir "test-libs"
 $jarPath = Join-Path $outDir ($pluginName + ".jar")
 
 Write-Host ("==== " + $pluginName + " 构建 ====")
@@ -99,4 +104,137 @@ if (-not (Test-Path -LiteralPath $jarPath)) {
 
 $size = (Get-Item -LiteralPath $jarPath).Length
 Write-Host ("构建成功：" + $jarPath + "（" + $size + " 字节）")
+
+if (-not $Test) {
+    exit 0
+}
+
+# ===== 测试载体：首次从 Maven Central 下载 junit / hamcrest 到 out/test-libs 并校验 sha1 =====
+# 期望 sha1 直接取自 Maven Central 同名 .sha1 文件，下载后再取远端 .sha1 复核；
+# 远端不可达时仍可用已登记 sha1 校验本地 jar（离线环境与受限网络），但下载失败一律构建失败。
+# 全量构建 build-all.ps1 不传 -Test，因此没有测试环境时全量构建不受影响。
+Write-Host "==== 准备测试依赖 ===="
+
+[Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
+$mavenBase = "https://repo1.maven.org/maven2"
+$testLibs = @(
+    @{ Name = "junit-4.13.2.jar";      Url = $mavenBase + "/junit/junit/4.13.2/junit-4.13.2.jar";              Sha1 = "8ac9e16d933b6fb43bc7f576336b8f4d7eb5ba12" },
+    @{ Name = "hamcrest-core-1.3.jar"; Url = $mavenBase + "/org/hamcrest/hamcrest-core/1.3/hamcrest-core-1.3.jar"; Sha1 = "42a25dc3219429f0e5d060061f71acb49bf010a0" }
+)
+
+New-Item -ItemType Directory -Force -Path $testLibsDir | Out-Null
+$testJars = @()
+foreach ($lib in $testLibs) {
+    $target = Join-Path $testLibsDir $lib.Name
+    if (Test-Path -LiteralPath $target) {
+        $actual = (Get-FileHash -LiteralPath $target -Algorithm SHA1).Hash.ToLower()
+        if ($actual -eq $lib.Sha1) {
+            Write-Host ("已存在且校验通过：" + $target)
+            $testJars += $target
+            continue
+        }
+        Write-Host ("已存在的测试依赖校验失败，删除后重新下载：" + $target)
+        Remove-Item -LiteralPath $target -Force
+    }
+
+    $tempFile = $target + ".part"
+    # Maven Central 在共享出口上偶发 429 / 5xx：重试三次并退避，全部失败才判定构建失败。
+    $attempts = 3
+    $delays = @(5, 15)
+    $downloaded = $false
+    $lastError = ""
+    for ($attempt = 1; $attempt -le $attempts; $attempt++) {
+        Write-Host ("下载测试依赖（第 " + $attempt + "/" + $attempts + " 次）：" + $lib.Url)
+        try {
+            Invoke-WebRequest -Uri $lib.Url -OutFile $tempFile -UseBasicParsing -TimeoutSec 120
+            $downloaded = $true
+            break
+        } catch {
+            $lastError = $_.Exception.Message
+            if (Test-Path -LiteralPath $tempFile) { Remove-Item -LiteralPath $tempFile -Force }
+            if ($attempt -lt $attempts) {
+                $delay = $delays[$attempt - 1]
+                Write-Host ("下载失败，原因：" + $lastError + "；" + $delay + " 秒后重试。")
+                Start-Sleep -Seconds $delay
+            }
+        }
+    }
+    if (-not $downloaded) {
+        Write-Host ("下载测试依赖失败：" + $lib.Url)
+        Write-Host ("原因：" + $lastError)
+        Write-Host "请在可联网环境重试，或手工把 jar 放入 out\test-libs 后重跑（内置 sha1 校验会兜底）。"
+        exit 1
+    }
+
+    $actual = (Get-FileHash -LiteralPath $tempFile -Algorithm SHA1).Hash.ToLower()
+    if ($actual -ne $lib.Sha1) {
+        Remove-Item -LiteralPath $tempFile -Force
+        Write-Host ("测试依赖校验失败：" + $lib.Url)
+        Write-Host ("期望 sha1：" + $lib.Sha1 + "，实际：" + $actual)
+        exit 1
+    }
+
+    try {
+        $remoteSha1 = ((Invoke-WebRequest -Uri ($lib.Url + ".sha1") -UseBasicParsing -TimeoutSec 60).Content | Out-String).Trim().ToLower()
+        if ($remoteSha1 -ne $lib.Sha1) {
+            Remove-Item -LiteralPath $tempFile -Force
+            Write-Host ("远端 sha1 与内置登记值不一致：" + ($lib.Url + ".sha1"))
+            Write-Host ("远端：" + $remoteSha1 + "，内置：" + $lib.Sha1)
+            exit 1
+        }
+    } catch {
+        Write-Host ("无法读取远端 sha1（" + ($lib.Url + ".sha1") + "），改用内置登记值校验通过。")
+    }
+
+    Move-Item -LiteralPath $tempFile -Destination $target -Force
+    Write-Host ("已校验并入位：" + $target)
+    $testJars += $target
+}
+
+if (-not (Test-Path -LiteralPath $srcTestJava)) {
+    Write-Host ("没有找到测试源码目录：" + $srcTestJava)
+    exit 1
+}
+$testJavaFiles = @(Get-ChildItem -LiteralPath $srcTestJava -Recurse -File -Filter *.java | Select-Object -ExpandProperty FullName)
+if ($testJavaFiles.Count -eq 0) {
+    Write-Host ("没有找到测试源码：" + $srcTestJava)
+    exit 1
+}
+
+New-Item -ItemType Directory -Force -Path $testClassesDir | Out-Null
+$testClassPath = $Bot + ";" + $classesDir + ";" + ($testJars -join ";")
+Write-Host ("编译测试源码：" + $testJavaFiles.Count + " 个文件")
+$ErrorActionPreference = "Continue"
+& javac -encoding UTF-8 @releaseArgs -cp $testClassPath -d $testClassesDir $testJavaFiles
+$testCompileExit = $LASTEXITCODE
+$ErrorActionPreference = $nativeErrorAction
+if ($testCompileExit -ne 0) {
+    Write-Host ("测试源码编译失败，退出码 " + $testCompileExit)
+    exit 1
+}
+
+$testClassNames = @()
+foreach ($file in (Get-ChildItem -LiteralPath $testClassesDir -Recurse -File -Filter *.class)) {
+    if ($file.Name -like '*$*') { continue }
+    # 只跑测试类，测试基座（如假存储服务）不参与运行
+    if ($file.Name -notlike "*Test.class") { continue }
+    $relative = $file.FullName.Substring($testClassesDir.Length).TrimStart('\', '/')
+    $testClassNames += ($relative -replace '[\\/]', '.') -replace '\.class$', ''
+}
+if ($testClassNames.Count -eq 0) {
+    Write-Host "没有找到可执行的测试类。"
+    exit 1
+}
+
+$runClassPath = $testClassPath + ";" + $testClassesDir
+Write-Host ("运行测试：" + ($testClassNames -join ", "))
+$ErrorActionPreference = "Continue"
+& java -cp $runClassPath org.junit.runner.JUnitCore @testClassNames
+$testRunExit = $LASTEXITCODE
+$ErrorActionPreference = $nativeErrorAction
+if ($testRunExit -ne 0) {
+    Write-Host "测试未通过，已中止。"
+    exit $testRunExit
+}
+Write-Host ("测试全部通过：" + $testClassNames.Count + " 个测试类")
 exit 0
