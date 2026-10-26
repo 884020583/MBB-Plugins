@@ -1,5 +1,6 @@
 package org.moboxlab.mbb.eval.report;
 
+import org.moboxlab.mbb.eval.baseline.EvalDeltaResult;
 import org.moboxlab.mbb.eval.metrics.EvalMetrics;
 import org.moboxlab.mbb.eval.store.EvalStore;
 
@@ -69,7 +70,7 @@ public final class EvalGroupSummaryFormatter {
         lines.add("总分 " + numOrMissing(data.totalScore()));
         lines.add(baselineLine(data));
         lines.add(dimensionsLine(data));
-        lines.add("题级 变好/变差/持平/翻转 未计算（题级对比未接入）；ok→error 未计算");
+        lines.add(levelLine(data));
         lines.add(performanceLine(data));
         lines.add(warningsLine(data));
         lines.add("报表 " + EvalReportWriter.relativeReportPath(data.runId()));
@@ -97,8 +98,27 @@ public final class EvalGroupSummaryFormatter {
         if (data.totalScore() == null || baseline.totalScore() == null) {
             return "基线 " + orMissing(baseline.runId()) + "：不可比（总分缺失）";
         }
+        EvalDeltaResult paired = data.delta();
+        if (paired != null && paired.available() && paired.totalDelta() != null) {
+            return "基线 " + orMissing(baseline.runId()) + "："
+                    + signed(paired.totalDelta().doubleValue()) + "（点值，不判显著性）";
+        }
         double delta = data.totalScore().doubleValue() - baseline.totalScore().doubleValue();
         return "基线 " + orMissing(baseline.runId()) + "：" + signed(delta) + "（显著性未计算）";
+    }
+
+    /**
+     * 题级对比行：有 F-6 配对 delta 时写真实计数，否则保留「未计算」占位（§8.6）。
+     */
+    private static String levelLine(EvalReportData data) {
+        EvalDeltaResult delta = data.delta();
+        if (delta == null || !delta.available()) {
+            return "题级 变好/变差/持平/翻转 未计算（题级对比未接入）；ok→error 未计算";
+        }
+        return "题级 变好 " + delta.betterCount() + " / 变差 " + delta.worseCount()
+                + " / 持平 " + delta.sameCount() + " / 翻转 "
+                + delta.flippedCaseIds().size() + "/" + delta.flippedTotal()
+                + "；ok→error " + delta.okToErrorCount();
     }
 
     /** 五维分与方向：可比时按基线维度分给出上箭头 / 下箭头 / 等号。 */

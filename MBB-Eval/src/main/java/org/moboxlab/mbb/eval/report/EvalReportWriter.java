@@ -91,22 +91,24 @@ public final class EvalReportWriter {
      * 渲染九节 Markdown，并在第 5 节消费 F-6 的 {@link EvalDeltaResult}（§8.4）。
      *
      * <p>传入 delta 时，第 5 节使用配对 delta、维度置信区间、显著性四态、题级翻转、
-     * 不可信变更与标注；delta 为 null 时保留「未计算」占位，供仅有装配结果的调用方使用。</p>
+     * 不可信变更与标注；delta 为 null 时回退装配结果自带的 {@link EvalReportData#delta()}，
+     * 两者都没有才保留「未计算」占位。第 7 节按 {@link EvalReportData#aiUsage()} 挂 L3 旁证。</p>
      *
      * @param data  装配结果；null 时按「数据缺失」渲染
-     * @param delta 基线比较结果；null 时第 5 节按未计算口径渲染
+     * @param delta 基线比较结果；null 时使用装配结果自带的 delta
      * @return 以单个换行结尾的 Markdown 文本
      */
     public static String render(EvalReportData data, EvalDeltaResult delta) {
         EvalReportData report = data == null
                 ? EvalReportData.missing("", "未装配报表数据") : data;
+        EvalDeltaResult effective = delta != null ? delta : report.delta();
         StringBuilder sb = new StringBuilder(4096);
         sb.append(TITLE).append("\n\n");
         appendHeader(sb, report);
         appendSnapshot(sb, report);
         appendDimensions(sb, report);
         appendTotal(sb, report);
-        appendBaseline(sb, report, delta);
+        appendBaseline(sb, report, effective);
         appendCases(sb, report);
         appendPerformance(sb, report);
         appendCalibration(sb, report);
@@ -312,7 +314,8 @@ public final class EvalReportWriter {
      * 题级翻转与不可信变更都直接取自 {@link EvalDeltaResult}，避免报表另算一套口径。</p>
      */
     private static void appendBaseline(StringBuilder sb, EvalReportData data, EvalDeltaResult delta) {
-        if (delta == null) {
+        boolean hasBaseline = data.baseline() != null && data.baseline().present();
+        if (delta == null || (!delta.available() && !hasBaseline)) {
             appendBaselineLegacy(sb, data);
             return;
         }
@@ -553,9 +556,12 @@ public final class EvalReportWriter {
      *
      * <p>先写同目录临时文件再原子改名，避免半截报表；同名文件按 F20 覆盖重建。</p>
      *
+     * <p>{@code COMPLETED} 的 run 还会在同目录写群内摘要纯文本
+     * {@code run-<run_id>.summary.txt}；返回值仍是完整报表文件，{@code report_path} 语义不变。</p>
+     *
      * @param data       装配结果
      * @param reportsDir 报表目录（{@code getDataFolder()/reports}）
-     * @return 写入的文件
+     * @return 写入的完整报表文件
      * @throws IOException 目录创建或写入失败，交由命令层记录与重试
      */
     public static File writeToFile(EvalReportData data, File reportsDir) throws IOException {
@@ -567,8 +573,8 @@ public final class EvalReportWriter {
      *
      * @param data       装配结果
      * @param reportsDir 报表目录（{@code getDataFolder()/reports}）
-     * @param delta      基线比较结果；null 时第 5 节保留「未计算」占位
-     * @return 写入的文件
+     * @param delta      基线比较结果；null 时使用 {@link EvalReportData#delta()}
+     * @return 写入的完整报表文件（群摘要是同目录附属文件，见 {@link #summaryFileName(String)}）
      * @throws IOException 目录创建或写入失败；旧文件不被破坏
      */
     public static File writeToFile(EvalReportData data, File reportsDir, EvalDeltaResult delta)
@@ -587,10 +593,36 @@ public final class EvalReportWriter {
             throw new IOException("创建报表目录失败：" + reportsDir.getAbsolutePath());
         }
         File target = new File(reportsDir, fileName(runId));
-        File temp = File.createTempFile(fileName(runId) + ".", ".tmp", reportsDir);
+        writeAtomically(target, render(data, delta));
+        writeGroupSummary(data, reportsDir, runId);
+        return target;
+    }
+
+    /**
+     * 同目录写群内摘要纯文本（F-7：§8.6）：{@code run-<run_id>.summary.txt}。
+     *
+     * <p>仅 {@code COMPLETED} 的 run 生成摘要（I-2 口径，≤15 行）；摘要为附属产物，
+     * 写失败只跳过摘要，不破坏已落盘的完整报表，也不向命令层抛错（§13.4）。</p>
+     */
+    private static void writeGroupSummary(EvalReportData data, File reportsDir, String runId) {
+        if (!EvalGroupSummaryFormatter.canSummarize(data)) {
+            return;
+        }
+        String text = EvalGroupSummaryFormatter.toPlainText(data);
+        File target = new File(reportsDir, summaryFileName(runId));
+        try {
+            writeAtomically(target, text);
+        } catch (IOException e) {
+            return;
+        }
+    }
+
+    /** 先写同目录临时文件再原子改名；失败时保留旧文件。 */
+    private static void writeAtomically(File target, String text) throws IOException {
+        File temp = File.createTempFile(target.getName() + ".", ".tmp", target.getParentFile());
         boolean moved = false;
         try {
-            Files.write(temp.toPath(), render(data, delta).getBytes(StandardCharsets.UTF_8));
+            Files.write(temp.toPath(), text.getBytes(StandardCharsets.UTF_8));
             moveAtomically(temp, target);
             moved = true;
         } finally {
@@ -598,7 +630,11 @@ public final class EvalReportWriter {
                 temp.delete();
             }
         }
-        return target;
+    }
+
+    /** 群内摘要文件名：run-<run_id>.summary.txt（纯文本，不是 Markdown）。 */
+    public static String summaryFileName(String runId) {
+        return "run-" + runId + ".summary.txt";
     }
 
     /** 报表文件名：run-<run_id>.md（§8.3 逐字）。 */
