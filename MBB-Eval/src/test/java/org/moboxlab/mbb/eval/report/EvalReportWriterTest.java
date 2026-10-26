@@ -405,10 +405,9 @@ public class EvalReportWriterTest {
         assertEquals(file.getAbsoluteFile(), rewritten.getAbsoluteFile());
         assertEquals(EvalReportWriter.render(data),
                 new String(Files.readAllBytes(file.toPath()), StandardCharsets.UTF_8));
-        File summary = new File(reportsDir, EvalReportWriter.summaryFileName(RUN));
-        assertTrue("群摘要附属文件必须写出：" + summary, summary.isFile());
         File[] children = reportsDir.listFiles();
-        assertTrue(children != null && children.length == 2);
+        assertTrue(children != null);
+        assertEquals("§8.7：报表目录只保留完整报表，群摘要不落盘", 1, children.length);
     }
 
     @Test

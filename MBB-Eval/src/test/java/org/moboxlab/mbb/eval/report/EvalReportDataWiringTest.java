@@ -202,7 +202,7 @@ public class EvalReportDataWiringTest {
     }
 
     @Test
-    public void writeToFileShouldWritePlainTextSummaryNextToReport() throws IOException {
+    public void writeToFileShouldNotPersistGroupSummary() throws IOException {
         seedBaselineRun();
         seedRun(RUN, RUBRIC, flatCases(60.0D, 40), 40);
         seedGenCalls(RUN, 20);
@@ -210,12 +210,13 @@ public class EvalReportDataWiringTest {
         File reportsDir = new File(folder.getRoot(), "reports");
 
         File report = EvalReportWriter.writeToFile(data, reportsDir);
-        File summary = new File(reportsDir, EvalReportWriter.summaryFileName(RUN));
 
         assertEquals("run-" + RUN + ".md", report.getName());
-        assertTrue("群摘要必须与完整报表同目录落盘：" + summary, summary.isFile());
-        String text = new String(Files.readAllBytes(summary.toPath()), StandardCharsets.UTF_8);
-        assertEquals(EvalGroupSummaryFormatter.toPlainText(data), text);
+        File[] children = reportsDir.listFiles();
+        assertTrue(children != null);
+        assertEquals("§8.7：群摘要只作消息输出，不单独存文件", 1, children.length);
+        // 摘要文本本身仍可按需现场渲染（不落盘）
+        String text = EvalGroupSummaryFormatter.toPlainText(data);
         assertTrue("摘要不得超过 15 行",
                 text.split("\n", -1).length <= EvalGroupSummaryFormatter.MAX_LINES);
         assertTrue(text.startsWith("【MBB-Eval】" + RUN));
@@ -223,17 +224,14 @@ public class EvalReportDataWiringTest {
     }
 
     @Test
-    public void summaryFileShouldNotLeakPrivacyFields() throws IOException {
+    public void renderedSummaryShouldNotLeakPrivacyFields() throws IOException {
         seedBaselineRun();
         seedRun(RUN, RUBRIC, flatCases(60.0D, 40), 40);
         seedGenCalls(RUN, 20);
         EvalReportData data = EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null);
 
-        File reportsDir = new File(folder.getRoot(), "reports");
-        EvalReportWriter.writeToFile(data, reportsDir);
-        String text = new String(Files.readAllBytes(
-                new File(reportsDir, EvalReportWriter.summaryFileName(RUN)).toPath()),
-                StandardCharsets.UTF_8);
+        EvalReportWriter.writeToFile(data, new File(folder.getRoot(), "reports"));
+        String text = EvalGroupSummaryFormatter.toPlainText(data);
 
         String[] forbidden = {"sk-secret-9f2", "小明", "完整提示词", "模型回复原文", "case-1",
                 "人设贴合", "config_snapshot", "persona_hash", "p-hash-1", "evidence"};
@@ -259,9 +257,7 @@ public class EvalReportDataWiringTest {
         EvalReportWriter.writeToFile(data, reportsDir);
 
         assertTrue(new File(reportsDir, "run-" + RUN + ".md").isFile());
-        assertFalse("非 COMPLETED 不写群摘要",
-                new File(reportsDir, EvalReportWriter.summaryFileName(RUN)).exists());
-        assertEquals(1, reportsDir.listFiles().length);
+        assertEquals("报表目录只有完整报表一个文件", 1, reportsDir.listFiles().length);
     }
 
     // ===== 夹具 =====

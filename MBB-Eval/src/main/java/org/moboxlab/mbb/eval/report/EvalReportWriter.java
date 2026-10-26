@@ -1,7 +1,6 @@
 package org.moboxlab.mbb.eval.report;
 
 import org.moboxlab.mbb.eval.baseline.EvalDeltaResult;
-import org.moboxlab.mbb.eval.log.EvalLog;
 import org.moboxlab.mbb.eval.metrics.EvalMetrics;
 import org.moboxlab.moboxbot.API.PluginLogger;
 import org.moboxlab.mbb.eval.store.EvalStore;
@@ -559,8 +558,8 @@ public final class EvalReportWriter {
      *
      * <p>先写同目录临时文件再原子改名，避免半截报表；同名文件按 F20 覆盖重建。</p>
      *
-     * <p>{@code COMPLETED} 的 run 还会在同目录写群内摘要纯文本
-     * {@code run-<run_id>.summary.txt}；返回值仍是完整报表文件，{@code report_path} 语义不变。</p>
+     * <p>群内摘要只作消息输出，不落库也不单独存文件（§8.7），因此本方法只写完整报表；
+     * 摘要文本由调用方用 {@link EvalGroupSummaryFormatter#toPlainText} 现场渲染后发送。</p>
      *
      * @param data       装配结果
      * @param reportsDir 报表目录（{@code getDataFolder()/reports}）
@@ -577,7 +576,7 @@ public final class EvalReportWriter {
      * @param data       装配结果
      * @param reportsDir 报表目录（{@code getDataFolder()/reports}）
      * @param delta      基线比较结果；null 时使用 {@link EvalReportData#delta()}
-     * @return 写入的完整报表文件（群摘要是同目录附属文件，见 {@link #summaryFileName(String)}）
+     * @return 写入的完整报表文件
      * @throws IOException 目录创建或写入失败；旧文件不被破坏
      */
     public static File writeToFile(EvalReportData data, File reportsDir, EvalDeltaResult delta)
@@ -586,7 +585,7 @@ public final class EvalReportWriter {
     }
 
     /**
-     * 写报表文件，并记录群内摘要写入失败等可降级错误。
+     * 写报表文件（保留 logger 参数以兼容既有调用；群摘要不落盘，见 §8.7）。
      *
      * @param data       装配结果
      * @param reportsDir 报表目录
@@ -612,29 +611,7 @@ public final class EvalReportWriter {
         }
         File target = new File(reportsDir, fileName(runId));
         writeAtomically(target, render(data, delta));
-        writeGroupSummary(data, reportsDir, runId, logger);
         return target;
-    }
-
-    /**
-     * 同目录写群内摘要纯文本（F-7：§8.6）：{@code run-<run_id>.summary.txt}。
-     *
-     * <p>仅 {@code COMPLETED} 的 run 生成摘要（I-2 口径，≤15 行）；摘要为附属产物，
-     * 写失败只跳过摘要，不破坏已落盘的完整报表，也不向命令层抛错（§13.4）。</p>
-     */
-    private static void writeGroupSummary(EvalReportData data, File reportsDir, String runId,
-                                          PluginLogger logger) {
-        if (!EvalGroupSummaryFormatter.canSummarize(data)) {
-            return;
-        }
-        String text = EvalGroupSummaryFormatter.toPlainText(data);
-        File target = new File(reportsDir, summaryFileName(runId));
-        try {
-            writeAtomically(target, text);
-        } catch (IOException e) {
-            EvalLog.warn(logger, "[MBB-Eval] 群内摘要写入失败，已保留完整报表，run_id=" + runId
-                    + "：" + e.getMessage());
-        }
     }
 
     /** 先写同目录临时文件再原子改名；失败时保留旧文件。 */
@@ -650,11 +627,6 @@ public final class EvalReportWriter {
                 temp.delete();
             }
         }
-    }
-
-    /** 群内摘要文件名：run-<run_id>.summary.txt（纯文本，不是 Markdown）。 */
-    public static String summaryFileName(String runId) {
-        return "run-" + runId + ".summary.txt";
     }
 
     /** 报表文件名：run-<run_id>.md（§8.3 逐字）。 */
