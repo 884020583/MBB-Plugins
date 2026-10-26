@@ -115,6 +115,8 @@ public final class EvalReportData {
     private final int callsExpected;
     private final int callsRead;
     private final EvalMetrics metrics;
+    /** 原始 call 行的只读副本；仅供性能节计算输出吞吐与评测自身开销（§7.2）。 */
+    private final List<JSONObject> callRows;
     private final List<Dimension> dimensions;
     private final Double totalScore;
     private final int validCaseCount;
@@ -158,6 +160,7 @@ public final class EvalReportData {
         this.callsExpected = builder.callsExpected;
         this.callsRead = builder.callsRead;
         this.metrics = builder.metrics;
+        this.callRows = Collections.unmodifiableList(new ArrayList<JSONObject>(builder.callRows));
         this.weights = Collections.unmodifiableMap(new LinkedHashMap<String, Double>(builder.weights));
         this.dimensions = Collections.unmodifiableList(new ArrayList<Dimension>(builder.dimensions));
         this.totalScore = builder.totalScore;
@@ -268,6 +271,7 @@ public final class EvalReportData {
         builder.callsExpected = callSet.expectedCount();
         builder.callsRead = callSet.rows().size();
         builder.metrics = metrics;
+        builder.callRows.addAll(callSet.rows());
         builder.weights.putAll(weights);
 
         List<Dimension> raw = buildDimensions(records, weights);
@@ -767,6 +771,14 @@ public final class EvalReportData {
         return metrics;
     }
 
+    /**
+     * call 行的只读副本：性能节需要逐调用 elapsed_ms / usage_completion 计算输出吞吐
+     * 与评测自身开销（§7.2），指标快照未冻结这两个口径。渲染侧不得写出原始行内容。
+     */
+    List<JSONObject> callRows() {
+        return callRows;
+    }
+
     public List<Dimension> dimensions() {
         return dimensions;
     }
@@ -829,6 +841,7 @@ public final class EvalReportData {
         private int callsExpected = -1;
         private int callsRead = -1;
         private EvalMetrics metrics;
+        private final List<JSONObject> callRows = new ArrayList<JSONObject>();
         private final List<Dimension> dimensions = new ArrayList<Dimension>();
         private Double totalScore;
         private int validCaseCount;
