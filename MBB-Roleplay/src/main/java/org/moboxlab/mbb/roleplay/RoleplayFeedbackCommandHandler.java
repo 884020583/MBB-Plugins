@@ -234,48 +234,7 @@ public class RoleplayFeedbackCommandHandler {
     }
 
     void handleEval(CommandSender sender,String[] args) {
-        RoleplayEvalService eval = command.service().getEvalService();
-        String action = args.length > 2 ? args[2].toLowerCase() : "list";
-        if ("list".equals(action)) {
-            JSONArray cases = eval.list();
-            if (cases.isEmpty()) {
-                sender.sendMessage("没有可用的评测用例。");
-                return;
-            }
-            StringBuilder builder = new StringBuilder("评测用例：");
-            for (Object object : cases) {
-                JSONObject item = (JSONObject)object;
-                builder.append("\n").append(item.getString("id"))
-                        .append(" - ").append(item.getString("name"));
-            }
-            sender.sendMessage(builder.toString());
-            return;
-        }
-        if (!"run".equals(action)) {
-            sender.sendMessage("用法：/role eval [list|run <id|all>]");
-            return;
-        }
-        String target = args.length > 3 ? args[3] : "all";
-        if ("all".equalsIgnoreCase(target)) {
-            JSONArray cases = eval.list();
-            int passed = 0;
-            StringBuilder builder = new StringBuilder("评测结果：");
-            for (Object object : cases) {
-                JSONObject item = (JSONObject)object;
-                JSONObject result = eval.run(item.getString("id"));
-                if (result.getBooleanValue("pass")) passed++;
-                builder.append("\n").append(item.getString("id"))
-                        .append(" ").append(result.getBooleanValue("pass") ? "通过" : "失败")
-                        .append(result.getString("reason").isEmpty() ? "" : "："+result.getString("reason"));
-            }
-            builder.append("\n通过 ").append(passed).append("/").append(cases.size());
-            sender.sendMessage(builder.toString());
-            return;
-        }
-        JSONObject result = eval.run(target);
-        sender.sendMessage("评测 "+target+"："
-                +(result.getBooleanValue("pass") ? "通过" : "失败")
-                +(result.getString("reason").isEmpty() ? "" : "（"+result.getString("reason")+"）")
-                +(result.getString("reply").isEmpty() ? "" : "\n回复："+result.getString("reply")));
+        // S1 墓碑：五种输入统一提示，不读文件、不调用 MBB-AI、不落库、不写 trace，也不转发给 MBB-Eval
+        sender.sendMessage("[评测] 旧 /role eval 已迁移到 MBB-Eval，请使用 /eval list、/eval run。旧 evals/roleplay-evals.json 不再读取。");
     }
 }

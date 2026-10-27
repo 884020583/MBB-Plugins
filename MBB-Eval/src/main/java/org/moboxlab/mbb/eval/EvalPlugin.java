@@ -1,0 +1,466 @@
+package org.moboxlab.mbb.eval;
+
+import java.io.File;
+import java.lang.management.ManagementFactory;
+import java.util.LinkedHashMap;
+import java.util.Map;
+
+import com.alibaba.fastjson.JSONObject;
+
+import org.moboxlab.moboxbot.API.Plugin;
+import org.moboxlab.moboxbot.API.Storage.StorageService;
+import org.moboxlab.mbb.eval.bank.EvalBankCache;
+import org.moboxlab.mbb.eval.bank.EvalBankLocator;
+import org.moboxlab.mbb.eval.bank.EvalBankResources;
+import org.moboxlab.mbb.eval.bank.EvalLegacyFileGuard;
+import org.moboxlab.mbb.eval.error.EvalFailure;
+import org.moboxlab.mbb.eval.error.EvalRejectionPresenter;
+import org.moboxlab.mbb.eval.baseline.EvalBaselineService;
+import org.moboxlab.mbb.eval.command.EvalCommand;
+import org.moboxlab.mbb.eval.config.EvalConfig;
+import org.moboxlab.mbb.eval.exec.EvalRoleplayGeneratePort;
+import org.moboxlab.mbb.eval.exec.EvalRunLoop;
+import org.moboxlab.mbb.eval.exec.EvalServiceCalibrationJudgePort;
+import org.moboxlab.mbb.eval.exec.EvalServiceJudgePort;
+import org.moboxlab.mbb.eval.gateway.EvalCapabilityClient;
+import org.moboxlab.mbb.eval.gateway.RoleplayEvalGateway;
+import org.moboxlab.mbb.eval.judge.EvalAiChatClient;
+import org.moboxlab.mbb.eval.judge.EvalJudge;
+import org.moboxlab.mbb.eval.judge.EvalJudgeChatClient;
+import org.moboxlab.mbb.eval.judge.EvalJudgeFailureTracker;
+import org.moboxlab.mbb.eval.judge.EvalJudgePrompt;
+import org.moboxlab.mbb.eval.judge.EvalJudgeService;
+import org.moboxlab.mbb.eval.metrics.EvalAiUsageSource;
+import org.moboxlab.mbb.eval.metrics.EvalAiUsageStorageSource;
+import org.moboxlab.mbb.eval.rubric.EvalRubricCache;
+import org.moboxlab.mbb.eval.runner.EvalDataBootstrap;
+import org.moboxlab.mbb.eval.runner.EvalPreflight;
+import org.moboxlab.mbb.eval.runner.EvalPreflightSources.CapabilitiesStatusSource;
+import org.moboxlab.mbb.eval.runner.EvalPreflightSources.ConfigJudgeProfileSource;
+import org.moboxlab.mbb.eval.runner.EvalRunRecovery;
+import org.moboxlab.mbb.eval.runner.EvalRunSnapshotSource;
+import org.moboxlab.mbb.eval.runner.EvalRunner;
+import org.moboxlab.mbb.eval.runner.EvalStageSources;
+import org.moboxlab.mbb.eval.score.EvalDimensionWeights;
+import org.moboxlab.mbb.eval.store.EvalReadOnlyBoundary;
+import org.moboxlab.mbb.eval.store.EvalSchemaService;
+import org.moboxlab.mbb.eval.store.EvalStore;
+
+/**
+ * MBB-Eval 插件主类（A-1 骨架 + A-2 存储骨架）。
+ *
+ * <p>负责：保存默认配置、在启用时读取并钳制 14 个 eval* 配置键、把越界与非法项写入日志；
+ * 启用时幂等创建四张数据表与索引，失败则禁用评测写路径但不重建、不删表；
+ * 随后装配 {@link EvalPreflight} 与 {@link EvalRunner} 并注册 /eval 命令。
+ * 停用时先让 runner 尽力把 RUNNING 行收尾为 ABORTED(shutdown)，再释放引用。
+ * 题库与 rubric 在 onEnable 一次性定位、校验并缓存（B-5），运行期不热重载；缓存失败只记录
+ * 状态并拒绝 /eval run，不影响插件启用与只读命令。报表与判决由后续切片接入。</p>
+ */
+public class EvalPlugin extends Plugin {
+
+    private EvalConfig evalConfig;
+    private EvalStore evalStore;
+    private EvalRunner evalRunner;
+    private EvalCapabilityClient capabilityClient;
+    private CapabilitiesStatusSource capabilitiesSource;
+    private RoleplayEvalGateway gateway;
+    private EvalRunLoop runLoop;
+    private EvalDataBootstrap dataBootstrap;
+    private EvalBankCache bankCache;
+    private EvalRubricCache rubricCache;
+    private boolean schemaReady;
+
+    @Override
+    public void onLoad() {
+        saveDefaultConfig();
+        getLogger().sendInfo("[MBB-Eval] 插件已加载：读取配置、数据表与命令");
+    }
+
+    @Override
+    public void onEnable() {
+        evalConfig = EvalConfig.load(getConfig());
+        for (String warning : evalConfig.warnings()) {
+            getLogger().sendWarn("[MBB-Eval] " + warning);
+        }
+        getLogger().sendInfo("[MBB-Eval] 配置已读取，共 " + EvalConfig.keys().size()
+                + " 项，默认档位 " + evalConfig.defaultTier());
+        initStorage();
+        recoverOrphans();
+        initEvalData();
+        initRunner();
+        getLogger().sendInfo("[MBB-Eval] 已启用，版本 " + getVersion());
+    }
+
+    /** 建表失败只禁用评测写路径：绝不在已有库上 DROP 或重建。 */
+    private void initStorage() {
+        schemaReady = false;
+        if (getServer() == null) {
+            getLogger().sendError("[MBB-Eval] 服务器未就绪，数据表未创建，评测能力已禁用");
+            return;
+        }
+        StorageService storage = getServer().getStorage();
+        if (storage == null) {
+            getLogger().sendError("[MBB-Eval] 存储服务不可用，数据表未创建，评测能力已禁用");
+            return;
+        }
+        EvalSchemaService schema = new EvalSchemaService(storage, getLogger());
+        if (!schema.ensureSchema()) {
+            getLogger().sendError("[MBB-Eval] 数据表未就绪，评测能力已禁用；"
+                    + "不会删除或重建已有表，请检查数据库与上方告警后重启插件");
+            return;
+        }
+        evalStore = new EvalStore(storage, getLogger());
+        schemaReady = true;
+        getLogger().sendInfo("[MBB-Eval] 数据表已就绪（4 表 / 7 索引）");
+    }
+
+    /**
+     * 启动期回收上次进程遗留的 RUNNING 行（§4.5、§13.5、ST10）。
+     *
+     * <p>判定依据是 started_at 早于本次进程启动时刻，而不是运行时长；只 CAS 成
+     * ABORTED(orphan)，不删 run 行、不删 case/call 行、不删报表。数据表未就绪或回收失败
+     * 只记 WARN，不影响插件启用。</p>
+     */
+    private void recoverOrphans() {
+        if (evalStore == null) {
+            return;
+        }
+        long processStartedAt;
+        try {
+            processStartedAt = ManagementFactory.getRuntimeMXBean().getStartTime();
+        } catch (RuntimeException e) {
+            processStartedAt = System.currentTimeMillis();
+            getLogger().sendWarn("[MBB-Eval] 读取进程启动时刻失败，孤儿回收改按当前时刻判定："
+                    + e.getMessage());
+        }
+        try {
+            new EvalRunRecovery(evalStore, getLogger(), processStartedAt).recoverOrphans();
+        } catch (RuntimeException e) {
+            getLogger().sendWarn("[MBB-Eval] 孤儿 RUNNING 行回收失败，留待下次启动重试："
+                    + e.getMessage());
+        }
+    }
+
+    /**
+     * 装配题库与 rubric 缓存（§5.7.4、§5.8）。
+     *
+     * <p>顺序：capabilities 快照（取 personaId/personaHash）→ rubric → 题库（缺失时释放内置
+     * 并钉版本）。全部失败只记日志、置缓存状态，不抛异常、不阻止插件启用；/eval report 等
+     * 只读命令不受影响。</p>
+     */
+    private void initEvalData() {
+        try {
+            gateway = new RoleplayEvalGateway(this, getLogger());
+            capabilityClient = new EvalCapabilityClient(gateway, getLogger());
+            final EvalCapabilityClient client = capabilityClient;
+            capabilitiesSource = new CapabilitiesStatusSource() {
+                @Override
+                public EvalCapabilityClient.Snapshot snapshot() {
+                    return client.snapshot();
+                }
+            };
+            EvalCapabilityClient.Snapshot snapshot = capabilityClient.snapshot();
+            String dataFolderPath = getDataFolder();
+            java.io.File dataFolder = dataFolderPath == null ? null : new java.io.File(dataFolderPath);
+            // A10：旧题库文件只按文件名探测一次并 WARN，不读取、不删除、不阻断启动。
+            String legacyWarning = EvalLegacyFileGuard.startupWarning(
+                    dataFolder == null ? null : EvalBankLocator.evalsDirectory(dataFolder));
+            if (!legacyWarning.isEmpty()) {
+                getLogger().sendWarn("[评测] " + legacyWarning);
+            }
+            dataBootstrap = EvalDataBootstrap.load(dataFolder, evalConfig.bankFile(),
+                    EvalJudgePrompt.PROMPT_VERSION,
+                    snapshot == null ? null : snapshot.personaId(),
+                    snapshot == null ? null : snapshot.personaHash(),
+                    evalConfig.allowPersonaMismatch(), EvalBankResources.of(this),
+                    EvalBankResources.of(this), getLogger());
+            bankCache = dataBootstrap.bank();
+            rubricCache = dataBootstrap.rubric();
+            for (String warning : dataBootstrap.warnings()) {
+                getLogger().sendWarn("[评测] " + warning);
+            }
+            if (!dataBootstrap.pinFileName().isEmpty()) {
+                pinBankFile(dataBootstrap.pinFileName());
+            }
+        } catch (RuntimeException e) {
+            // 缓存初始化异常只禁用 run 预检，不影响插件启用与只读命令（§13.1.1 规则 4）；
+            // 文案统一走 presenter，保证启动期与命令期同源（H-1、§13.2）。
+            getLogger().sendWarn(EvalRejectionPresenter.startupSummary(EvalFailure.ofStage(null, "",
+                    "评测数据初始化异常：" + e.getMessage(),
+                    "请查看插件日志并修复后重启插件；/eval report 仍可用", null)));
+        }
+    }
+
+    /** 首次释放内置题库后把 evalBankFile 钉成该版本文件名，避免下次启动回退到默认名。 */
+    private void pinBankFile(String fileName) {
+        try {
+            getConfig().set("evalBankFile", fileName);
+            getConfig().save();
+            getLogger().sendInfo("[评测] 已将 evalBankFile 固定为 " + fileName);
+        } catch (RuntimeException e) {
+            getLogger().sendWarn("[评测] 写回 evalBankFile 失败，请在 config.yml 手动填写 "
+                    + fileName + "：" + e.getMessage());
+        }
+    }
+
+    /**
+     * 装配预检与 runner，并注册 /eval 命令。
+     *
+     * <p>即使数据表未就绪也要注册命令：/eval status、/eval help 仍应可用，run 由预检回
+     * 「数据表未就绪」而不是静默消失（§4.6、§13.4）。</p>
+     */
+    private void initRunner() {
+        if (getServer() == null) {
+            getLogger().sendError("[MBB-Eval] 服务器未就绪，未注册 /eval 命令");
+            return;
+        }
+        // 只读命令只注入库、题库缓存与报表目录，不注入 runner（§9.7、§16.8 G-3）；
+        // 目录边界同时提供预检第六、七项需要的 evals/ 与 reports/ 绝对路径。
+        EvalReadOnlyBoundary boundary = new EvalReadOnlyBoundary(new File(getDataFolder()));
+        EvalPreflight.Builder builder = EvalPreflight.builder()
+                .config(evalConfig)
+                .logger(getLogger())
+                .bank(EvalStageSources.bank(bankCache))
+                .rubric(EvalStageSources.rubric(rubricCache))
+                .persona(EvalStageSources.persona(bankCache, capabilitiesSource,
+                        evalConfig.allowPersonaMismatch()))
+                .judgeProfile(new ConfigJudgeProfileSource(evalConfig, capabilitiesSource))
+                .ai(EvalStageSources.ai(getServer().getPluginManager()))
+                .dataDir(EvalStageSources.dataDir(boundary.evalsDirectory(),
+                        boundary.reportsDirectory()));
+        if (capabilitiesSource != null) {
+            builder.capabilities(capabilitiesSource);
+        }
+        EvalPreflight preflight = builder.build();
+        runLoop = buildRunLoop(boundary.reportsDirectory());
+        EvalBaselineService baselineService = buildBaselineService();
+        evalRunner = new EvalRunner(evalStore, evalConfig, preflight, getLogger(), getVersion(), runLoop,
+                snapshotSource(), baselineService);
+        getServer().getPluginManager().registerCommand(this, new EvalCommand(
+                evalRunner, evalConfig, evalStore, baselineService, bankCache, boundary.reportsDirectory()));
+        getLogger().sendInfo("[MBB-Eval] 已注册 /eval 命令（run 已接入主循环"
+                + (runLoop == null ? "，但题库/rubric/网关未就绪，本次未装配执行依赖" : "")
+                + "；status/report/list/baseline 为只读命令，不写库、不建 run、不发起 AI 调用；"
+                + "baseline set / abort 为写侧命令"
+                + (baselineService == null ? "，基线服务因 rubric 权重不可用未接线" : "") + "）");
+    }
+
+    /**
+     * 装配真实主循环（§9.4–§9.6）：题库用例 + rubric + 生成/判分端口 + 报表目录。
+     *
+     * <p>任一必需件缺失时返回 {@code null}：run 仍由预检拒绝，不装配半成品执行链；
+     * 判分 chat 走 MBB-AI 公开服务，缺失只影响 persona/boundary/memory 三维。</p>
+     */
+    private EvalRunLoop buildRunLoop(File reportsDirectory) {
+        if (evalStore == null) {
+            getLogger().sendWarn("[MBB-Eval] 数据表未就绪，run 主循环未装配");
+            return null;
+        }
+        if (gateway == null || bankCache == null || !bankCache.ok()
+                || rubricCache == null || !rubricCache.ok()) {
+            getLogger().sendWarn("[MBB-Eval] 题库/rubric/网关未就绪，run 主循环未装配（预检会拒绝 /eval run）");
+            return null;
+        }
+        try {
+            EvalJudgeChatClient chatClient = new EvalAiChatClient(this, getLogger());
+            EvalJudge judge = EvalJudge.fromConfig(chatClient, evalConfig, "default");
+            EvalJudgeService judgeService = new EvalJudgeService(judge,
+                    EvalJudgeFailureTracker.fromConfig(evalConfig), getLogger());
+            EvalRunLoop.Deps deps = new EvalRunLoop.Deps()
+                    .store(evalStore)
+                    .config(evalConfig)
+                    .bank(bankCache.json())
+                    .rubric(rubricCache.rubric())
+                    .generatePort(new EvalRoleplayGeneratePort(gateway))
+                    .judgePort(new EvalServiceJudgePort(judgeService, rubricCache.rubric()))
+                    .calibrationJudgePort(new EvalServiceCalibrationJudgePort(judgeService,
+                            rubricCache.rubric(), calibrationPersonaSummary()))
+                    .reportWeights(reportWeights())
+                    .aiUsageSource(aiUsageSource())
+                    .reportsDirectory(reportsDirectory)
+                    .logger(getLogger());
+            return new EvalRunLoop(deps);
+        } catch (RuntimeException e) {
+            getLogger().sendWarn("[MBB-Eval] run 主循环装配失败，/eval run 将只做预检："
+                    + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 校准判分用的角色档案摘要：优先取题库 persona.summary，缺失时用固定兜底文本，
+     * 保证校准端口装配不因题库字段缺失而整体失败。
+     */
+    private String calibrationPersonaSummary() {
+        try {
+            JSONObject bank = bankCache == null ? null : bankCache.json();
+            JSONObject persona = bank == null ? null : bank.getJSONObject("persona");
+            String summary = persona == null ? null : persona.getString("summary");
+            if (summary != null && !summary.trim().isEmpty()) {
+                return summary.trim();
+            }
+        } catch (RuntimeException e) {
+            getLogger().sendWarn("[MBB-Eval] 读取角色档案摘要失败，校准改用兜底文本：" + e.getMessage());
+        }
+        return "爱丽丝";
+    }
+
+    /**
+     * 受理时的九键快照来源（§8.2）。
+     *
+     * <p>只读现有缓存与 capabilities 快照，不发起 AI 调用、不读库；取不到就返回 null 或缺键，
+     * 由 {@link EvalRunner} 补空串并逐键 WARN。judge_model / generation_model 当前没有生产者，
+     * 刻意不填，报表按数据缺失标注。</p>
+     */
+    private EvalRunSnapshotSource snapshotSource() {
+        return new EvalRunSnapshotSource() {
+            @Override
+            public JSONObject snapshot() {
+                try {
+                    JSONObject row = new JSONObject();
+                    if (evalConfig != null) {
+                        row.put("bank_file", evalConfig.bankFile());
+                        row.put("eval_profile", evalConfig.profile());
+                        row.put("judge_profile", evalConfig.judgeProfile());
+                    }
+                    if (bankCache != null && bankCache.ok()) {
+                        row.put("bank_version", bankCache.version());
+                        row.put("bank_hash", bankCache.bankHash());
+                    }
+                    if (rubricCache != null && rubricCache.ok()) {
+                        row.put("rubric_version", rubricCache.rubric().version());
+                    }
+                    if (capabilitiesSource != null) {
+                        EvalCapabilityClient.Snapshot snapshot = capabilitiesSource.snapshot();
+                        if (snapshot != null) {
+                            row.put("persona_id", snapshot.personaId());
+                            row.put("persona_hash", snapshot.personaHash());
+                            row.put("config_fingerprint", snapshot.configFingerprint());
+                            row.put("eval_profile", snapshot.evalProfile());
+                            int apiVersion = snapshot.evalApiVersion();
+                            row.put("eval_api_version", apiVersion < 0 ? "" : String.valueOf(apiVersion));
+                        }
+                    }
+                    return row;
+                } catch (RuntimeException e) {
+                    getLogger().sendWarn("[MBB-Eval] 采集运行快照失败，九键按缺失落库："
+                            + e.getMessage());
+                    return null;
+                }
+            }
+        };
+    }
+
+    /**
+     * 报表 delta 用的五维权重（§6.1）：只取 rubric 文件定义值，失败返回 null 由报表标注权重缺失。
+     */
+    private Map<String, Double> reportWeights() {
+        if (rubricCache == null || !rubricCache.ok()) {
+            return null;
+        }
+        try {
+            EvalDimensionWeights weights = EvalDimensionWeights.from(rubricCache.rubric());
+            Map<String, Double> map = new LinkedHashMap<String, Double>();
+            for (String id : weights.ids()) {
+                map.put(id, Double.valueOf(weights.weight(id)));
+            }
+            return map;
+        } catch (RuntimeException e) {
+            getLogger().sendWarn("[MBB-Eval] rubric 权重不可用，报表将标注权重缺失、总分与 delta 不计算："
+                    + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * §7.5 L3 用量旁证只读来源（E-4）：存储服务可用时读 MBB-AI 的逐日统计表。
+     *
+     * <p>storage 为 null 或构造失败时返回 null，报表 §6 不采集旁证并保留「不可得」口径，
+     * 不影响主报表生成。</p>
+     */
+    private EvalAiUsageSource aiUsageSource() {
+        try {
+            StorageService storage = getServer() == null ? null : getServer().getStorage();
+            return storage == null ? null : new EvalAiUsageStorageSource(storage);
+        } catch (RuntimeException e) {
+            getLogger().sendWarn("[MBB-Eval] 存储服务不可用，报表 L3 用量旁证本次不采集："
+                    + e.getMessage());
+            return null;
+        }
+    }
+
+    /**
+     * 按 rubric 五维权重构造基线服务（§8.1、§16.8 G-4）。
+     *
+     * <p>rubric 未就绪或权重非法时返回 null：baseline set 只回「写侧基线服务未接线」，
+     * 不影响只读命令与 abort，也不阻止插件启用；原因写入日志便于排查。</p>
+     */
+    private EvalBaselineService buildBaselineService() {
+        if (rubricCache == null || !rubricCache.ok()) {
+            getLogger().sendWarn("[MBB-Eval] rubric 未就绪，baseline set 不可用（不影响只读命令与 abort）");
+            return null;
+        }
+        try {
+            EvalDimensionWeights weights = EvalDimensionWeights.from(rubricCache.rubric());
+            return new EvalBaselineService(weights, getLogger());
+        } catch (RuntimeException e) {
+            getLogger().sendWarn("[MBB-Eval] 构造基线服务失败，baseline set 不可用：" + e.getMessage());
+            return null;
+        }
+    }
+
+    @Override
+    public void onDisable() {
+        if (evalRunner != null) {
+            evalRunner.shutdown();
+            evalRunner = null;
+        }
+        evalConfig = null;
+        evalStore = null;
+        capabilityClient = null;
+        capabilitiesSource = null;
+        gateway = null;
+        runLoop = null;
+        dataBootstrap = null;
+        bankCache = null;
+        rubricCache = null;
+        schemaReady = false;
+        getLogger().sendInfo("[MBB-Eval] 已停用");
+    }
+
+    /**
+     * 当前配置快照；插件未启用时为 {@code null}。
+     */
+    public EvalConfig evalConfig() {
+        return evalConfig;
+    }
+
+    /**
+     * run_id 与终态 CAS 入口；schema 未就绪或插件未启用时为 {@code null}。
+     */
+    public EvalStore evalStore() {
+        return evalStore;
+    }
+
+    /**
+     * 四表七索引是否就绪；未就绪时后续切片不得写入评测数据。
+     */
+    public boolean schemaReady() {
+        return schemaReady;
+    }
+
+    /** onEnable 的题库/rubric 装配结果；未启用时为 {@code null}。 */
+    public EvalDataBootstrap dataBootstrap() {
+        return dataBootstrap;
+    }
+
+    /** 只读题库缓存；加载失败时仍非 null（带错误码与明细），未启用时为 {@code null}。 */
+    public EvalBankCache bankCache() {
+        return bankCache;
+    }
+
+    /** 只读 rubric 缓存；未启用时为 {@code null}。 */
+    public EvalRubricCache rubricCache() {
+        return rubricCache;
+    }
+}

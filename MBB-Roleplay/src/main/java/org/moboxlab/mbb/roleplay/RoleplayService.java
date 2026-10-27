@@ -89,7 +89,7 @@ public class RoleplayService {
     private final RoleplayDrawNotifyService drawNotifyService;
     private final RoleplayDrawPromptService drawPromptService;
     private final RoleplayTraceService traceService;
-    private final RoleplayEvalService evalService;
+    private final RoleplayEvalGateway evalGateway;
     private final RoleplayReplyReviewService replyReviewService;
     private final RoleplayThreadService threadService;
     private final RoleplayPacingService pacingService;
@@ -317,7 +317,7 @@ public class RoleplayService {
         this.drawNotifyService = new RoleplayDrawNotifyService(this);
         this.drawPromptService = new RoleplayDrawPromptService(this);
         this.traceService = new RoleplayTraceService(plugin,config);
-        this.evalService = new RoleplayEvalService(this);
+        this.evalGateway = new RoleplayEvalGateway(this);
         this.replyReviewService = new RoleplayReplyReviewService(this);
         this.threadService = new RoleplayThreadService(this);
         this.pacingService = new RoleplayPacingService(this);
@@ -712,6 +712,11 @@ public class RoleplayService {
         return persona;
     }
 
+    /** 评测接口网关：对外只经 RoleplayPublicService 分发，本服务只做门面转发 */
+    RoleplayEvalGateway evalGateway() {
+        return evalGateway;
+    }
+
     RoleplayAttentionService attentionService() {
         return attentionService;
     }
@@ -791,10 +796,6 @@ public class RoleplayService {
 
     public RoleplayTraceService getTraceService() {
         return traceService;
-    }
-
-    public RoleplayEvalService getEvalService() {
-        return evalService;
     }
 
     public RoleplayReplyReviewService getReplyReviewService() {

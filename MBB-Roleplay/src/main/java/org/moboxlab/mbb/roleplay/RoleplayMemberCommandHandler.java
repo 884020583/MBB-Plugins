@@ -139,7 +139,7 @@ public class RoleplayMemberCommandHandler {
                     +"\n/role expression clear"
                     +"\n/role attention [reset]"
                     +"\n/role trace [条数]"
-                    +"\n/role eval [list|run <id|all>]");
+                    +"\n/role eval [list|run <id|all>]（已废弃，请改用 MBB-Eval 的 /eval）");
             return;
         }
         if ("tool".equals(category)) {

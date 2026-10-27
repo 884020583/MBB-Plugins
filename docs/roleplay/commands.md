@@ -37,8 +37,7 @@
 | `/role tool trace [条数]` | `BOT_ADMIN` | 查看最近工具调用、用户和时间 |
 | `/role tool cancel` | `BOT_ADMIN` | 取消当前群正在执行的工具与 AI 等待 |
 | `/role tool clear` | `BOT_ADMIN` | 清空当前群持久化的工具结果上下文 |
-| `/role eval list` | `BOT_ADMIN` | 查看内置评测用例 |
-| `/role eval run <id\|all>` | `BOT_ADMIN` | 运行指定评测用例或全部评测 |
+| `/role eval [list\|run <id\|all>]` | `BOT_ADMIN` | 已废弃（墓碑）：只提示改用 MBB-Eval 的 `/eval list`、`/eval run`，不再读取旧评测集 |
 | `/role learn [备注]` | `BOT_ADMIN` | 回复某条消息再发，采集那条消息和前后文到训练语料；不带引用时采集最近一条群消息 |
 | `/role learn stats` | `BOT_ADMIN` | 查看累计采集的语料数量 |
 | `/role learn recent [条数]` | `BOT_ADMIN` | 查看最近采集的语料记录 |

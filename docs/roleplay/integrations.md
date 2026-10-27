@@ -16,6 +16,7 @@ flowchart LR
     RP -.->|"isEnabled 冲突检测"| POKE["MBB-Poke（可选）"]
     RP -.->|"共享同一套 AI profile"| CHAT["MBB-Chat（同生态参考）"]
     RP -.->|"内容风控各管各的"| GUARD["MBB-AIGuard（同生态参考）"]
+    EVAL["MBB-Eval（评测调用方，可选）"] -.->|"capabilities / eval-generate"| RP
 
     AI ==>|"OpenAI 兼容接口"| API["MBB-AI 上游模型"]
 ```
@@ -32,6 +33,7 @@ flowchart LR
 | 生图 | `MBB-ComfyUI` | `status` / `generate` | 角色通过原生 `draw` 工具生图，包含群级冷却与完成回调 | `draw` 工具不开放 |
 | 多机器人协作 | `MBB-BotHub` | `vision_lookup` / `vision_claim` / `vision_publish` / `vision_wait` / `turn_claim` / `task_claim` / `chat_guard` | 同群多 bot 共享识图、回合权、任务去重与互聊熔断 | 完全退回单机：识图各识别一次，回复不做跨进程去重 |
 | 戳一戳 | `MBB-Poke` | `isEnabled` | 检测冲突，避免同一件事回两次 | Roleplay 自行处理戳一戳 |
+| 评测调用方 | `MBB-Eval` | `capabilities` / `eval-generate` | 只读能力探测，按注入的历史生成一条不落状态的回复 | 不影响 Roleplay 任何功能 |
 
 集成约定：
 
@@ -39,6 +41,39 @@ flowchart LR
 2. 调用参数和返回值都是 fastjson 的 `JSONObject`，用 `status` 字段判断成败。
 3. 可选插件缺失时降级而不是报错：技能不开放、资料不注入，其余功能照常。
 4. 多个 AI 插件同时启用时，共用 `MBB-AI` 的 `maxConcurrent`，需要按总并发量配置。
+
+## 评测接口（MBB-Eval）
+
+[MBB-Eval](../MBB-Eval.md) 是离线评测插件，通过服务名 `MBB-Roleplay` 调用两个动作，契约的权威定义见 MBB-Eval 规格 §10。这两个动作都不是聊天入口：不投递消息、不写状态表、不写 trace，也不改变角色状态。
+
+| 动作 | 语义 | 副作用 |
+|---|---|---|
+| `capabilities` | 返回评测接口版本、动作列表、persona 与配置指纹、历史上限与开关状态 | 只读 |
+| `eval-generate` | 用外部传入的 `history` 与采样参数生成一条回复，跳过发送、记忆、情绪、反馈与工具 | 只写普通运行日志（`[评测]`），不落任何角色状态 |
+
+`capabilities` 出参：
+
+| 字段 | 类型 | 含义 |
+|---|---|---|
+| `status` / `action` | bool / string | 恒为 `true` / `capabilities` |
+| `evalApiVersion` | int | 评测接口版本，v1 固定为 `1` |
+| `actions` | string[] | 可用动作；`evalApiEnable=false` 时只保留 `capabilities` |
+| `personaId` | string | 当前 persona 名 |
+| `personaHash` | string | persona 文件原文的 sha256 前 12 位小写十六进制（与题库 `persona.personaHash` 同口径）；读不到文件时为空串并记 WARN |
+| `configFingerprint` | string | `aiProfile` / `evalProfile` / `replyMaxTokens` / `replyReviewEnable` / `toolEnable` / `promptTotalChars` 按固定顺序序列化后的 sha256 |
+| `aiProfile` / `evalProfile` | string | 配置原样返回，`evalProfile` 为空表示由调用方回退到 `aiProfile` |
+| `replyMaxTokens` / `promptTotalChars` | int | 生效值 |
+| `toolEnable` / `replyReviewEnable` | bool | 如实回报当前配置 |
+| `maxHistoryRounds` / `maxHistoryChars` | int | 评测注入历史上限，固定 `40` / `30000` |
+| `evalApiEnable` | bool | 评测接口总开关，取 `evalApiEnable && evalEnable`；旧键 `evalEnable` 已废弃，下个小版本停止读取 |
+
+协商规则：
+
+1. 调用方只接受 `evalApiVersion=1`，且 `actions` 必须含 `eval-generate`；否则按「版本不匹配 / 未启用 / 插件缺失」三选一提示并禁用评测，不降级猜字段。
+2. 服务名 `MBB-Roleplay` 取不到时按「插件缺失」处理；`evalApiEnable=false` 时 `capabilities` 仍可调用，但 `actions` 只留 `capabilities`。
+3. `personaHash` 与 `configFingerprint` 供调用方判定两次 run 是否可比，只落库不参与角色逻辑。
+
+兼容说明：`evalApiEnable` 与旧键 `evalEnable` 为 AND 关系，任一为 `false` 即关闭，新键缺失按 `true`；`evalEnable` 已废弃，仅作一版兼容别名，下个小版本停止读取，配置加载时若显式存在该键会记一次 WARN「evalEnable 已废弃，下个小版本停止读取」。`eval-generate` 已由切片 C-2 接入（跳过发送、工具回合、记忆、情绪、反馈与关系，只写一行 `[评测]` 普通日志）；`capabilities` 内的运行时异常在网关收口，记 ERROR 并返回 `status=false`，不会穿出服务边界。
 
 ## 多机器人协作（MBB-BotHub）
 
