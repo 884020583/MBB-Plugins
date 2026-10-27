@@ -121,6 +121,7 @@ public final class EvalAiUsageStorageSource implements EvalAiUsageSource {
             String trimmed = value.trim();
             return trimmed.isEmpty() ? null : trimmed;
         } catch (RuntimeException e) {
+            // 列缺失或取值类型不符按「无值」处理：旁证只是只读补充，不因此中断报表
             return null;
         }
     }
@@ -130,6 +131,7 @@ public final class EvalAiUsageStorageSource implements EvalAiUsageSource {
             Long value = row.getLong(key);
             return value == null ? 0L : value.longValue();
         } catch (RuntimeException e) {
+            // 同上：异常值按 0 计，避免一条脏行让整份旁证不可得
             return 0L;
         }
     }

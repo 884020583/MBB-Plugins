@@ -275,13 +275,20 @@ public class RoleplayEvalGateway {
         }
     }
 
+    /** MBB-Eval 规格 §8.2 F14 冻结的 configVersion；键集合或语义变化时才进位。 */
+    static final int CONFIG_VERSION = 46;
+
     /**
-     * 评测相关配置指纹。字段集合与顺序取自 MBB-Eval 规格 §10.1：
-     * aiProfile / evalProfile / replyMaxTokens / replyReviewEnable / toolEnable / promptTotalChars，
-     * 固定顺序以换行分隔后取 sha256，键序或注释变化不影响结果。
+     * 评测相关配置指纹（§8.2 F14）：sha256(configVersion + "|" + 规范化 k=v 串)。
+     *
+     * <p>键集合与顺序取自 §10.1 的六个键：aiProfile / evalProfile / replyMaxTokens /
+     * replyReviewEnable / toolEnable / promptTotalChars；组件之间用换行分隔。键序、注释与
+     * 整份 config.yml 的排版变化都不影响结果，但 configVersion 与竖线前缀是 F14 冻结的
+     * 算法，缺了会和 MBB-Eval 落库的旧指纹对不上。</p>
      */
     static String configFingerprint(RoleplayConfig config) {
         StringBuilder text = new StringBuilder();
+        text.append(CONFIG_VERSION).append('|');
         text.append("aiProfile=").append(aiProfileOf(config));
         text.append('\n').append("evalProfile=").append(evalProfileOf(config));
         text.append('\n').append("replyMaxTokens=").append(replyMaxTokensOf(config));

@@ -33,9 +33,6 @@ import org.moboxlab.mbb.eval.store.EvalStore;
  */
 public final class EvalWriteCommand {
 
-    /** 五维顺序与中文名（§6.1），只用于回执展示，不参与计分。 */
-    private static final Map<String, String> DIMENSION_LABELS;
-
     /** 未采到的值统一文案，与只读命令保持一致。 */
     private static final String MISSING = EvalReportData.MISSING;
 
@@ -45,16 +42,6 @@ public final class EvalWriteCommand {
 
     /** abort 不接受参数。 */
     private static final String USAGE_ABORT = "用法 /eval abort；不接受参数";
-
-    static {
-        Map<String, String> labels = new LinkedHashMap<String, String>();
-        labels.put(EvalReportData.DIM_PERSONA, "人设一致性");
-        labels.put(EvalReportData.DIM_BOUNDARY, "边界安全");
-        labels.put(EvalReportData.DIM_MEMORY, "记忆召回");
-        labels.put(EvalReportData.DIM_KNOWLEDGE, "知识正确性");
-        labels.put(EvalReportData.DIM_STYLE, "风格匹配");
-        DIMENSION_LABELS = Collections.unmodifiableMap(labels);
-    }
 
     /** 基线写入用的库门面；null 表示未接线，baseline set 只回库不可用。 */
     private final EvalStore store;
@@ -273,7 +260,7 @@ public final class EvalWriteCommand {
         JSONObject dimensions = parseObject(json);
         StringBuilder line = new StringBuilder("五维分：");
         boolean first = true;
-        for (Map.Entry<String, String> entry : DIMENSION_LABELS.entrySet()) {
+        for (Map.Entry<String, String> entry : EvalReportData.dimensionLabels().entrySet()) {
             if (!first) {
                 line.append('、');
             }

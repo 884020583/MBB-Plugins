@@ -76,6 +76,17 @@ public final class EvalReportData {
         DIMENSION_LABELS = Collections.unmodifiableMap(labels);
     }
 
+    /** 维度中文名（§6.1）；未知维度原样回 id，便于展示。 */
+    public static String dimensionLabel(String dimensionId) {
+        String label = dimensionId == null ? null : DIMENSION_LABELS.get(dimensionId);
+        return label == null ? dimensionId : label;
+    }
+
+    /** 五维 id → 中文名，只读；顺序与 §6.1 一致。命令层与报表共用这一份，避免三处重复。 */
+    public static Map<String, String> dimensionLabels() {
+        return DIMENSION_LABELS;
+    }
+
     /** 九键名称，顺序与 §8.2 一致；趋势表与基线比较都依赖这组键。 */
     private static final String[] NINE_KEYS = {
         "bank_hash", "rubric_version", "persona_hash", "config_fingerprint",
@@ -588,6 +599,16 @@ public final class EvalReportData {
         }
         String baselineRunId = text(baselineRow, "run_id");
         String createdAt = text(baselineRow, "created_at");
+        String baselineBankVersion = null;
+        try {
+            JSONObject baselineRun = store.findRun(baselineRunId);
+            if (baselineRun != null) {
+                baselineBankVersion = text(baselineRun, "bank_version");
+            }
+        } catch (RuntimeException e) {
+            // 基线 run 已被清理或读取失败时只丢「version 未变」这条附加告警，不影响九键比较
+            baselineBankVersion = null;
+        }
         Double baselineTotal = number(baselineRow, "total_score");
         Map<String, Double> dimensionScores = parseDimensionScores(
                 text(baselineRow, "dimension_scores_json"));
@@ -613,7 +634,7 @@ public final class EvalReportData {
             reason = "总分缺失";
         }
         return new BaselineView(true, baselineRunId, createdAt, baselineTotal, comparable,
-                differing, dimensionScores, reason);
+                differing, dimensionScores, baselineBankVersion, reason);
     }
 
     /** dimension_scores_json 兼容 {"persona": 81.4} 与 {"persona": {"score": 81.4}} 两种形态。 */
@@ -1280,7 +1301,7 @@ public final class EvalReportData {
      */
     public static final class BaselineView {
         private static final BaselineView NONE = new BaselineView(false, null, null, null, false,
-                Collections.<String>emptyList(), Collections.<String, Double>emptyMap(), "无基线");
+                Collections.<String>emptyList(), Collections.<String, Double>emptyMap(), null, "无基线");
 
         private final boolean present;
         private final String runId;
@@ -1289,11 +1310,12 @@ public final class EvalReportData {
         private final boolean comparable;
         private final List<String> differingKeys;
         private final Map<String, Double> dimensionScores;
+        private final String bankVersion;
         private final String reason;
 
         private BaselineView(boolean present, String runId, String createdAt, Double totalScore,
                              boolean comparable, List<String> differingKeys,
-                             Map<String, Double> dimensionScores, String reason) {
+                             Map<String, Double> dimensionScores, String bankVersion, String reason) {
             this.present = present;
             this.runId = runId;
             this.createdAt = createdAt;
@@ -1303,6 +1325,7 @@ public final class EvalReportData {
                     new ArrayList<String>(differingKeys));
             this.dimensionScores = Collections.unmodifiableMap(
                     new LinkedHashMap<String, Double>(dimensionScores));
+            this.bankVersion = bankVersion;
             this.reason = reason;
         }
 
@@ -1338,6 +1361,11 @@ public final class EvalReportData {
         /** 基线冻结的维度分（dimension_scores_json）。 */
         public Map<String, Double> dimensionScores() {
             return dimensionScores;
+        }
+
+        /** 基线冻结的题库 version；用于区分「换了版本」与「version 未变但 hash 变了」（§5.6.2）。 */
+        public String bankVersion() {
+            return bankVersion;
         }
 
         /** 不可比原因；可比时为 null。 */

@@ -130,7 +130,7 @@ public class EvalCommandTest {
         assertTrue(command().execute(sender, new String[] { "eval", "baseline", "set",
                 "r-20260101000000-full-abcd", "理由" }));
         message = sender.messages.get(0);
-        assertTrue("baseline set 仍待后续切片：" + message, message.contains("后续切片"));
+        assertTrue("基线服务不可用时必须说明：" + message, message.contains("基线服务不可用"));
         assertAllPrefixed(sender);
     }
 

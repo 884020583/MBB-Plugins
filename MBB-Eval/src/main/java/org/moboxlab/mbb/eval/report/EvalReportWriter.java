@@ -701,6 +701,15 @@ public final class EvalReportWriter {
                 && baseline.differingKeys().contains("rubric_version")) {
             warnings.add("rubric 已变：基线 rubric_version 与本次不同，不与历史直接比（§8.5）");
         }
+        if (baseline != null && baseline.present() && !baseline.comparable()
+                && baseline.differingKeys().contains("bank_hash")) {
+            warnings.add("题库已变更，需重设基线（§5.6.2、§8.4）");
+            String currentBankVersion = data.bankVersion();
+            String baselineBankVersion = baseline.bankVersion();
+            if (currentBankVersion != null && currentBankVersion.equals(baselineBankVersion)) {
+                warnings.add("version 未变但 bank_hash 已变：请按 §5.6.1 升题库 version 并复核（§5.6.2）");
+            }
+        }
         warnings.addAll(EvalReportPerformanceRenderer.performanceWarnings(data));
         List<String> partial = new ArrayList<String>();
         List<String> missing = new ArrayList<String>();

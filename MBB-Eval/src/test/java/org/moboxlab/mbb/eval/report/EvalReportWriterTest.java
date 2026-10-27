@@ -452,6 +452,48 @@ public class EvalReportWriterTest {
         }
     }
 
+    @Test
+    public void bankHashChangedShouldAskToResetBaseline() {
+        seedRun(RUN, "2026-10-25 23:00:00", RUBRIC, reportPath(RUN));
+        seedRun(BASE_RUN, "2026-10-24 23:00:00", RUBRIC, reportPath(BASE_RUN));
+        seedFullCases(RUN);
+        seedBaseCases(BASE_RUN);
+        seedBaseline(BASE_RUN, 69.0D, RUBRIC);
+        setBaselineBankHash("ffff0000");
+
+        String text = EvalReportWriter.render(
+                EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null));
+
+        assertTrue("bank_hash 变化必须提示重设基线（§5.6.2、§8.4）",
+                text.contains("题库已变更，需重设基线（§5.6.2、§8.4）"));
+        assertTrue("version 未变但 hash 变化必须额外告警（§5.6.2）",
+                text.contains("version 未变但 bank_hash 已变"));
+    }
+
+    @Test
+    public void bankVersionBumpShouldNotWarnAboutUnchangedVersion() {
+        seedRun(RUN, "2026-10-25 23:00:00", RUBRIC, reportPath(RUN));
+        seedRun(BASE_RUN, "2026-10-24 23:00:00", RUBRIC, reportPath(BASE_RUN));
+        seedFullCases(RUN);
+        seedBaseCases(BASE_RUN);
+        seedBaseline(BASE_RUN, 69.0D, RUBRIC);
+        runSet(BASE_RUN, "bank_version", "0.9.0");
+        setBaselineBankHash("ffff0000");
+
+        String text = EvalReportWriter.render(
+                EvalReportData.assemble(store, RUN, TestReportWeights.map(), null, null));
+
+        assertTrue(text.contains("题库已变更，需重设基线（§5.6.2、§8.4）"));
+        assertFalse("version 已变时不应再提示 version 未变",
+                text.contains("version 未变但 bank_hash 已变"));
+    }
+
+    private void setBaselineBankHash(String hash) {
+        assertEquals("更新基线 bank_hash 失败", 1,
+                storage.update("UPDATE " + EvalSchemaService.TABLE_BASELINE
+                        + " SET bank_hash = ? WHERE baseline_id = ?", hash, "b-1"));
+    }
+
     // ===== 夹具 =====
 
     private EvalReportData seedSnapshot() {

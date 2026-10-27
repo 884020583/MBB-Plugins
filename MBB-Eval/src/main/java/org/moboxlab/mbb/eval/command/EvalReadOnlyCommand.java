@@ -59,21 +59,10 @@ public final class EvalReadOnlyCommand {
     /** 未采到的值统一文案。 */
     private static final String MISSING = EvalReportData.MISSING;
 
-    /** 五维顺序与中文名（§6.1），展示用，不参与计分。 */
-    private static final Map<String, String> DIMENSION_LABELS;
     /** case 结果四态（§4.2.2）。 */
     private static final List<String> CASE_STATUSES =
             Collections.unmodifiableList(Arrays.asList("ok", "vetoed", "error", "invalid"));
 
-    static {
-        Map<String, String> labels = new LinkedHashMap<String, String>();
-        labels.put(EvalReportData.DIM_PERSONA, "人设一致性");
-        labels.put(EvalReportData.DIM_BOUNDARY, "边界安全");
-        labels.put(EvalReportData.DIM_MEMORY, "记忆召回");
-        labels.put(EvalReportData.DIM_KNOWLEDGE, "知识正确性");
-        labels.put(EvalReportData.DIM_STYLE, "风格匹配");
-        DIMENSION_LABELS = Collections.unmodifiableMap(labels);
-    }
 
     private final EvalStore store;
     private final EvalConfig config;
@@ -503,7 +492,7 @@ public final class EvalReadOnlyCommand {
         JSONObject dimensions = parseObject(text(row, "dimension_scores_json"));
         StringBuilder dimLine = new StringBuilder("五维分：");
         boolean first = true;
-        for (Map.Entry<String, String> entry : DIMENSION_LABELS.entrySet()) {
+        for (Map.Entry<String, String> entry : EvalReportData.dimensionLabels().entrySet()) {
             if (!first) {
                 dimLine.append("、");
             }

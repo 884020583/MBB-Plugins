@@ -73,7 +73,7 @@ public class EvalPlugin extends Plugin {
     @Override
     public void onLoad() {
         saveDefaultConfig();
-        getLogger().sendInfo("[MBB-Eval] 插件已加载，骨架阶段：读取配置、数据表与命令");
+        getLogger().sendInfo("[MBB-Eval] 插件已加载：读取配置、数据表与命令");
     }
 
     @Override

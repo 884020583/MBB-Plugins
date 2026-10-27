@@ -31,8 +31,9 @@ import java.util.List;
  * 不写库、不建 run、不发起 AI 调用（§9.7、§16.8 G-3）。G-4 把 baseline set 与 abort
  * 委派给 {@link EvalWriteCommand}：写侧命令只写基线表、不改 run 状态；abort 只转发
  * {@link EvalRunService#abort()} 的结果（§9.3、§9.6、§16.8 G-4）。
- * 骨架期 /eval run 受理后只做占位执行（不读题库、不发起 AI 调用），用于验证
- * 受理—预检—终态落库与卸载中止路径（§16.2 A-3）。</p>
+ * /eval run 受理后由 EvalRunner 的 daemon 线程异步执行真实评测：读题库与 rubric、调
+ * eval-generate 与 judge、逐 case 落库、终态 CAS 并回发 ≤15 行摘要；命令线程只做受理、
+ * 预检与回执，不阻塞、不轮询（§9.4）。</p>
  *
  * <p>G-2 收敛受理回执：第二行直接取 {@link EvalPreflightPlan.Receipt#summary()}，重复 /eval run 只回当前
  * runId 与进度并指向 /eval status、/eval abort；命令线程全程只调用一次 {@link EvalRunService}，不轮询、
@@ -109,7 +110,7 @@ public final class EvalCommand extends BotCommand {
 
     @Override
     public String description() {
-        return "离线评测与回归基线（骨架阶段）";
+        return "离线评测与回归基线";
     }
 
     @Override
@@ -172,7 +173,7 @@ public final class EvalCommand extends BotCommand {
         if ("baseline set".equals(key)) {
             // baseline set 的尾部参数从第 4 段开始（eval baseline set <runId> <理由…>）。
             if (write == null) {
-                sender.sendMessage(PREFIX + "baseline set 将在后续切片接入，当前为骨架阶段；发送 /eval help 查看已有命令");
+                sender.sendMessage(PREFIX + "基线服务不可用，暂时无法 baseline set；发送 /eval help 查看已有命令");
                 return true;
             }
             dispatchWrite(sender, write.baselineSet(tail(args, 3)));
@@ -196,7 +197,7 @@ public final class EvalCommand extends BotCommand {
             doAbort(sender, args);
             return true;
         }
-        sender.sendMessage(PREFIX + key + " 将在后续切片接入，当前为骨架阶段；发送 /eval help 查看已有命令");
+        sender.sendMessage(PREFIX + key + " 当前不可用；发送 /eval help 查看已有命令");
         return true;
     }
 
@@ -326,8 +327,8 @@ public final class EvalCommand extends BotCommand {
         sender.sendMessage(PREFIX + "子命令与档位大小写敏感；档位省略时取 evalDefaultTier（当前 "
                 + (config == null ? "smoke" : config.defaultTier()) + "）");
         sender.sendMessage(PREFIX + "只读命令 status/report/list/baseline/baseline show 不写库、不建 run、不调 AI；"
-                + "run 当前仍为占位执行；"
-                + (write == null ? "baseline set 待后续切片接入"
+                + "run 受理后由后台线程异步执行，重复 run 只回当前 runId 与进度；"
+                + (write == null ? "基线服务不可用，baseline set 暂不可执行"
                         : "写侧命令 baseline set / abort 由 OWNER 执行：baseline set 只接受 COMPLETED 的 full run"));
     }
 
